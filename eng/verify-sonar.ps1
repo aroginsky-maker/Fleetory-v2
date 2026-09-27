@@ -34,9 +34,15 @@ Assert-DotnetAvailable
 $SonarHostUrl = Get-RequiredEnvironmentValue 'SONAR_HOST_URL'
 $SonarProjectKey = Get-RequiredEnvironmentValue 'SONAR_PROJECT_KEY'
 $SonarToken = Get-RequiredEnvironmentValue 'SONAR_TOKEN'
+$SonarOrganization = [Environment]::GetEnvironmentVariable('SONAR_ORGANIZATION')
 $SonarProjectName = [Environment]::GetEnvironmentVariable('SONAR_PROJECT_NAME')
 $TimeoutRaw = [Environment]::GetEnvironmentVariable('SONAR_QUALITYGATE_TIMEOUT')
 $SonarQualityGateTimeout = 300
+
+$isSonarCloud = $SonarHostUrl -match '(^https?://)?([^/]+\.)?sonarcloud\.io(?:/|$)'
+if ($isSonarCloud -and [string]::IsNullOrWhiteSpace($SonarOrganization)) {
+    throw "SONAR_ORGANIZATION is required when SONAR_HOST_URL points to SonarQube Cloud."
+}
 
 if (-not [string]::IsNullOrWhiteSpace($TimeoutRaw)) {
     $parsedTimeout = 0
@@ -67,6 +73,10 @@ try {
         "/d:sonar.qualitygate.timeout=$SonarQualityGateTimeout",
         '/d:sonar.exclusions=**/bin/**,**/obj/**,artifacts/**,.sonarqube/**'
     )
+
+    if (-not [string]::IsNullOrWhiteSpace($SonarOrganization)) {
+        $beginArguments += "/o:$SonarOrganization"
+    }
 
     if (-not [string]::IsNullOrWhiteSpace($SonarProjectName)) {
         $beginArguments += "/n:$SonarProjectName"

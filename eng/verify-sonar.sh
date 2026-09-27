@@ -24,6 +24,11 @@ require_env SONAR_HOST_URL
 require_env SONAR_PROJECT_KEY
 require_env SONAR_TOKEN
 
+if [[ "${SONAR_HOST_URL}" =~ sonarcloud\.io/?$ ]] && [[ -z "${SONAR_ORGANIZATION:-}" ]]; then
+  echo "SONAR_ORGANIZATION is required when SONAR_HOST_URL points to SonarQube Cloud." >&2
+  exit 1
+fi
+
 quality_gate_timeout="${SONAR_QUALITYGATE_TIMEOUT:-300}"
 if ! [[ "$quality_gate_timeout" =~ ^[1-9][0-9]*$ ]]; then
   echo "SONAR_QUALITYGATE_TIMEOUT must be a positive integer number of seconds." >&2
@@ -33,7 +38,6 @@ fi
 coverage_relative_path="artifacts/coverage/coverage.xml"
 coverage_path="$repo_root/$coverage_relative_path"
 
-# The token is never echoed by this script. Do not enable shell tracing here.
 dotnet tool restore
 
 rm -rf "$repo_root/artifacts/coverage" "$repo_root/.sonarqube"
@@ -51,6 +55,10 @@ begin_args=(
   "/d:sonar.qualitygate.timeout=${quality_gate_timeout}"
   "/d:sonar.exclusions=**/bin/**,**/obj/**,artifacts/**,.sonarqube/**"
 )
+
+if [[ -n "${SONAR_ORGANIZATION:-}" ]]; then
+  begin_args+=("/o:${SONAR_ORGANIZATION}")
+fi
 
 if [[ -n "${SONAR_PROJECT_NAME:-}" ]]; then
   begin_args+=("/n:${SONAR_PROJECT_NAME}")
