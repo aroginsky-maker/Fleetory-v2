@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <ItemGroup>
+    <ProjectReference Include="../Fleetory.ModuleAbstractions/Fleetory.ModuleAbstractions.csproj" />
+    <ProjectReference Include="../Fleetory.Platform/Fleetory.Platform.csproj" />
+    <ProjectReference Include="../Fleetory.Core/Fleetory.Core.csproj" />
+    <ProjectReference Include="../Fleetory.Assets/Fleetory.Assets.csproj" />
+    <ProjectReference Include="../Fleetory.ITSM/Fleetory.ITSM.csproj" />
+    <ProjectReference Include="../Fleetory.CMDB/Fleetory.CMDB.csproj" />
+    <ProjectReference Include="../Fleetory.Monitoring/Fleetory.Monitoring.csproj" />
+    <ProjectReference Include="../Fleetory.Integrations/Fleetory.Integrations.csproj" />
+  </ItemGroup>
+</Project>
