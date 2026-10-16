@@ -22,9 +22,14 @@
 | Disposable PostgreSQL and migrations | PASS |
 | Windows/Linux server packages and Windows smoke | PASS |
 | Local production line coverage | 92.23% |
-| Sonar for this audit increment | PENDING GitHub Actions run |
+| Sonar overall coverage | 90.4% |
+| Sonar new-code coverage | 94.6% |
+| Sonar overall duplication | 0.0% |
+| Sonar new-code duplication | 0.0% |
+| New issues / Security Hotspots | 0 / 0 |
+| Sonar Quality Gate | PASS |
 
-The earlier first Command Plane slice passed [GitHub Actions run 38961398181](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/38961398181): 100.0% new-code coverage, 0.0% new-code duplication, 90.6% overall coverage and 0.0% overall duplication, with 0 new issues and 0 Security Hotspots. These are evidence for that earlier commit; they do not claim Sonar verification of the new audit code.
+The current audit increment passed [GitHub Actions run 38962406265](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/38962406265) at commit `f087cce`. The earlier first Command Plane slice passed [run 38961398181](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/38961398181) with 100.0% new-code coverage. PHASE 7 as a whole remains IN PROGRESS.
 
 ## Required before PHASE 7 completion
 
