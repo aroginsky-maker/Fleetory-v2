@@ -31,6 +31,11 @@ public sealed class PlatformModule : FleetoryModuleBase
         services.AddSingleton<IClock, SystemClock>();
         services.AddScoped<IAuditWriter, PostgreSqlAuditWriter>();
         services.AddScoped<IAuthorizationService, PostgreSqlAuthorizationService>();
+        if (configuration.GetValue<bool>("Fleetory:AuditExport:Enabled"))
+        {
+            services.AddSingleton<PostgreSqlAuditExportPump>();
+            services.AddHostedService<AuditExportWorker>();
+        }
         services.AddSingleton(new PostgreSqlConnectionSettings(connectionString));
         services.AddDbContext<PlatformDbContext>(options =>
             PlatformDbContextOptions.Configure(options, connectionString));

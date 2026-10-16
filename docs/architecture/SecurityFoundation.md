@@ -26,7 +26,15 @@ Platform now registers `IAuditWriter` backed by PostgreSQL. A write inserts an a
 
 Audit input validates bounded actor, action, target and correlation identifiers. Context is limited in size and rejects sensitive key names such as passwords, tokens and credentials. Callers must still avoid putting secret values under innocuous keys. The audit tables are owned by Platform; modules use only `IAuditWriter` and do not read Platform tables directly.
 
-An external SIEM/WORM exporter, retry policy and retention controls are not implemented yet. The outbox preserves pending export state so that an unavailable external sink does not block the local transaction. This is durable local storage, not a claim of tamper-proof audit after a full database compromise. No privileged endpoint is exposed by this slice.
+The outbox preserves pending export state so that an unavailable external sink does not block the local transaction. This is durable local storage, not a claim of tamper-proof audit after a full database compromise. No privileged endpoint is exposed by this slice.
+
+## Implemented audit export transport
+
+Platform migration `202610160003_AddAuditExportLease` adds attempt count, due time and a bounded lease to each pending export. `PostgreSqlAuditExportPump` claims due entries using PostgreSQL row locks with `SKIP LOCKED`; multiple Server nodes cannot claim the same live lease. It publishes outside the database transaction through `IAuditExportSink` and deletes a queue entry only after the sink reports durable acceptance. Delivery failures clear the lease and schedule exponential retry, capped at one hour. A crashed worker leaves a recoverable lease. Entries are never silently discarded because of retry count. The event ID is stable across all attempts, so a sink must deduplicate by that ID. Delivery is **at least once**; order across nodes is not guaranteed.
+
+The optional background worker starts only with `Fleetory:AuditExport:Enabled=true`. Enabling it requires an `IAuditExportSink` registration; without one, Server startup fails instead of pretending that export works. The default remains disabled while no production SIEM/WORM sink and Secret Provider are configured. The worker batches at most three entries under a two-minute lease and gives each sink call a 30-second cancellation deadline. If a sink ignores cancellation, another node may retry after lease expiry; sink idempotency remains required. Retry logs contain event IDs and attempt counts, not sink exception messages. Integration tests cover successful delivery, failed delivery and retry, expired lease recovery, concurrent claims and the enabled background worker.
+
+A concrete external SIEM/WORM sink, its credential loading and retention controls remain open. The outbox and delivery contract are ready for that integration; they do not by themselves prove external immutable retention.
 
 ## Implemented local RBAC evaluation
 
@@ -39,7 +47,7 @@ This is an evaluator and persistence boundary, not a login or role-administratio
 - Per-device X.509 identity, mTLS transport, proof-of-possession enrollment, certificate rotation and revocation.
 - A protected signing service and trust distribution, plus production durable Agent-side replay storage and policy enforcement.
 - Human authentication with MFA/WebAuthn foundation, audited role/scope administration and enforcement at future privileged routes.
-- Asynchronous audit export with retry, copy-safe sink and recovery tests; wiring audited security call sites as those flows are implemented.
+- Concrete external SIEM/WORM audit sink, Secret Provider integration and retention controls; wiring audited security call sites as those flows are implemented.
 - Secret Provider abstraction and production secret loading; no plaintext production secrets.
 - Abuse, negative authorization, recovery and cross-platform security tests, then the full Sonar Quality Gate.
 

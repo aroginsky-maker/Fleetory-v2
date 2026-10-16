@@ -3,6 +3,7 @@ using Fleetory.Platform.Contracts;
 using Fleetory.SharedKernel;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace Fleetory.Platform.Tests;
 
@@ -41,6 +42,29 @@ public sealed class PlatformFoundationTests
         Assert.NotNull(provider.GetRequiredService<ISearchService>());
         Assert.NotNull(provider.GetRequiredService<IAuditWriter>());
         Assert.NotNull(provider.GetRequiredService<IAuthorizationService>());
+    }
+
+    [Fact]
+    public void Enabled_audit_export_requires_a_registered_sink()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:Fleetory"] =
+                    "Host=127.0.0.1;Port=1;Database=fleetory_phase7_unit_test;Username=fleetory;Timeout=1",
+                ["Fleetory:AuditExport:Enabled"] = "true"
+            })
+            .Build();
+        var platform = new Fleetory.Platform.PlatformModule();
+        services.AddSingleton<IReadOnlyCollection<IFleetoryModule>>(new IFleetoryModule[] { platform });
+        platform.RegisterServices(services, configuration);
+
+        Assert.Contains(services, registration => registration.ServiceType == typeof(IHostedService));
+        var exception = Assert.Throws<AggregateException>(() => services.BuildServiceProvider(
+            new ServiceProviderOptions { ValidateOnBuild = true }));
+        Assert.Contains(nameof(IAuditExportSink), exception.ToString(), StringComparison.Ordinal);
     }
 
     [Fact]

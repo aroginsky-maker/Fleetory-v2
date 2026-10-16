@@ -10,34 +10,35 @@
 4. `IAuditWriter` has a PostgreSQL implementation that inserts the event and queue entry in one transaction and propagates storage failure. Context size is bounded and sensitive key names are rejected.
 5. Architecture and security tests cover the new boundaries, invalid commands and real PostgreSQL audit writes.
 6. Platform migration `202610160002_AddPlatformAuthorization` and `IAuthorizationService` implement local, deny-by-default RBAC decisions over exact permissions and a Platform-owned scope hierarchy. There is no seeded admin grant or privileged route.
+7. Platform migration `202610160003_AddAuditExportLease` and a conditional background worker add concurrent-safe at-least-once outbox delivery through `IAuditExportSink`, with retry and lease recovery. A production external sink is still required.
 
 ## Local verification
 
 | Gate | Result |
 | --- | ---: |
 | Strict Release build | PASS, 0 warnings and 0 errors |
-| All tests | PASS, 72/72 |
+| All tests | PASS, 78/78 |
 | Architecture tests | PASS, 25/25 |
 | Core security tests | PASS, 18/18 |
-| PostgreSQL integration tests | PASS, 15/15 |
+| PostgreSQL integration tests | PASS, 20/20 |
 | Disposable PostgreSQL and migrations | PASS |
 | Windows/Linux server packages and Windows smoke | PASS |
-| Local production line coverage | 93.61% |
-| Sonar overall coverage | 90.5% |
-| Sonar new-code coverage | 93.2% |
-| Sonar overall duplication | 0.0% |
-| Sonar new-code duplication | 0.0% |
-| New issues / Security Hotspots | 0 / 0 |
-| Sonar Quality Gate | PASS |
+| Local production line coverage | 91.85% |
+| Sonar overall coverage | Pending current increment; previous 90.5% |
+| Sonar new-code coverage | Pending current increment; previous 93.2% |
+| Sonar overall duplication | Pending current increment; previous 0.0% |
+| Sonar new-code duplication | Pending current increment; previous 0.0% |
+| New issues / Security Hotspots | Pending current increment; previous 0 / 0 |
+| Sonar Quality Gate | Pending current increment; previous PASS |
 
-The RBAC increment passed [GitHub Actions run 38964040759](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/38964040759) at commit `14e7bc5`. Sonar reported 93.20388349514563% new-code coverage, shown as 93.2% above. PHASE 7 as a whole remains IN PROGRESS.
+The previous RBAC increment passed [GitHub Actions run 38964587565](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/38964587565) at commit `c6409b3`. The audit export increment awaits its own Sonar result. PHASE 7 as a whole remains IN PROGRESS.
 
 ## Required before PHASE 7 completion
 
 - Per-device certificate identity, mTLS, enrollment, rotation and revocation.
 - Protected command signing and key distribution, production Agent-local policy and durable replay store.
 - Human authentication with MFA/WebAuthn foundation, audited role/scope administration and enforcement at privileged routes.
-- Asynchronous audit export/recovery and coverage of all critical security call sites.
+- Concrete external SIEM/WORM audit sink, retention policy and coverage of all critical security call sites.
 - Secret Provider and production secret-loading policy.
 - Negative security, abuse and recovery tests plus current Sonar Quality Gate.
 

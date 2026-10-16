@@ -70,8 +70,8 @@ internal sealed class PostgreSqlAuditWriter(
         {
             enqueueExport.Transaction = transaction;
             enqueueExport.CommandText = """
-                INSERT INTO platform.audit_export_queue (audit_event_id, enqueued_at)
-                VALUES (@audit_event_id, @enqueued_at)
+                INSERT INTO platform.audit_export_queue (audit_event_id, enqueued_at, next_attempt_at)
+                VALUES (@audit_event_id, @enqueued_at, @enqueued_at)
                 """;
             enqueueExport.Parameters.AddWithValue("audit_event_id", NpgsqlDbType.Uuid, eventId);
             enqueueExport.Parameters.AddWithValue("enqueued_at", NpgsqlDbType.TimestampTz, recordedAt);

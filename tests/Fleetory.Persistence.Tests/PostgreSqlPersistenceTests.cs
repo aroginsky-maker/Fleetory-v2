@@ -93,6 +93,12 @@ public sealed class PostgreSqlPersistenceTests(PostgreSqlTestFixture fixture)
             1L,
             await ExecuteScalarInt64Async(
                 connection,
+                "SELECT COUNT(*) FROM platform.\"__EFMigrationsHistory\" " +
+                "WHERE \"MigrationId\" = '202610160003_AddAuditExportLease'"));
+        Assert.Equal(
+            1L,
+            await ExecuteScalarInt64Async(
+                connection,
                 "SELECT COUNT(*) FROM core.\"__EFMigrationsHistory\" " +
                 "WHERE \"MigrationId\" = '202609280002_InitialCorePersistence'"));
 
