@@ -91,6 +91,8 @@ sonar.cs.vscoveragexml.reportsPaths=artifacts/coverage/coverage.xml
 
 Test projects remain part of Sonar analysis as test code. Production projects are not excluded from coverage to inflate percentages.
 
+The `eng/**` verification and packaging scripts remain in Sonar analysis, including duplication and issue checks. They are excluded only from Sonar's coverage denominator because `dotnet-coverage` instruments .NET assemblies and cannot measure PowerShell or shell execution. Their behavior is checked by the phase verification scripts and package smoke tests. No production `src/**` code is excluded from coverage.
+
 `eng/verify-quality.ps1` also calculates a local overall production line-coverage value from Fleetory production modules in `coverage.xml`. This local figure is diagnostic; the authoritative new-code coverage result remains the Sonar server Quality Gate result.
 
 ## 6. Required runtime parameters

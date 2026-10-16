@@ -58,6 +58,7 @@ begin_args=(
   "/d:sonar.host.url=${SONAR_HOST_URL}"
   "/d:sonar.token=${SONAR_TOKEN}"
   "/d:sonar.cs.vscoveragexml.reportsPaths=${coverage_relative_path}"
+  "/d:sonar.coverage.exclusions=eng/**"
   "/d:sonar.qualitygate.wait=true"
   "/d:sonar.qualitygate.timeout=${quality_gate_timeout}"
   "/d:sonar.exclusions=**/bin/**,**/obj/**,artifacts/**,.sonarqube/**"

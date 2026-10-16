@@ -17,6 +17,12 @@ $WindowsOutput = Join-Path $ArtifactRoot 'win-x64'
 $LinuxOutput = Join-Path $ArtifactRoot 'linux-x64'
 $WindowsArchive = Join-Path $ArtifactRoot 'Fleetory.Server-win-x64.zip'
 $LinuxArchive = Join-Path $ArtifactRoot 'Fleetory.Server-linux-x64.tar.gz'
+$RuntimeRequiredFiles = @(
+    'Microsoft.EntityFrameworkCore.dll',
+    'Microsoft.EntityFrameworkCore.Relational.dll',
+    'Npgsql.dll',
+    'Npgsql.EntityFrameworkCore.PostgreSQL.dll'
+)
 
 $StrictBuildStatus = 'NOT RUN'
 $TestsStatus = 'NOT RUN'
@@ -84,61 +90,7 @@ function Assert-ExternalTestConnectionString([string] $ConnectionString) {
     }
 }
 
-function Assert-PackageContents([string] $PackageDirectory, [string] $Rid) {
-    $requiredFiles = @(
-        'Fleetory.Server.dll',
-        'Fleetory.Server.deps.json',
-        'Fleetory.Server.runtimeconfig.json',
-        'appsettings.json',
-        'appsettings.Production.json',
-        'Microsoft.EntityFrameworkCore.dll',
-        'Microsoft.EntityFrameworkCore.Relational.dll',
-        'Npgsql.dll',
-        'Npgsql.EntityFrameworkCore.PostgreSQL.dll'
-    )
-
-    foreach ($requiredFile in $requiredFiles) {
-        $path = Join-Path $PackageDirectory $requiredFile
-        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
-            throw "Package '$Rid' is missing required runtime file '$requiredFile'."
-        }
-    }
-
-    if (Test-Path -LiteralPath (Join-Path $PackageDirectory 'appsettings.Development.json')) {
-        throw "Package '$Rid' must not contain appsettings.Development.json."
-    }
-
-    $files = @(Get-ChildItem -LiteralPath $PackageDirectory -Recurse -File)
-    $forbidden = @($files | Where-Object {
-        $_.Extension -in @('.cs', '.csproj', '.sln', '.user', '.suo') -or
-        $_.Name -like '*.Tests.dll' -or
-        $_.Name -like '*.Tests.pdb' -or
-        $_.FullName -match '[\\/](?:obj|bin|TestResults|coverage|\.sonarqube)[\\/]'
-    })
-
-    if ($forbidden.Count -gt 0) {
-        throw "Package '$Rid' contains forbidden development/test artifacts: $($forbidden.FullName -join ', ')."
-    }
-
-    $secretKeyPattern = '"(?i:password|secret|token|api[_-]?key|connectionstrings?)"\s*:'
-    foreach ($jsonFile in $files | Where-Object { $_.Extension -eq '.json' }) {
-        $json = Get-Content -LiteralPath $jsonFile.FullName -Raw
-        if ($json -match $secretKeyPattern) {
-            throw "Package '$Rid' configuration '$($jsonFile.Name)' contains a secret-like configuration key."
-        }
-    }
-}
-
-function Get-FreeLoopbackPort {
-    $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
-    $listener.Start()
-    try {
-        return ([System.Net.IPEndPoint] $listener.LocalEndpoint).Port
-    }
-    finally {
-        $listener.Stop()
-    }
-}
+. (Join-Path $PSScriptRoot 'server-package-helpers.ps1')
 
 function Invoke-PublishedServerSmokeTest([string] $RuntimeDirectory) {
     $entry = Join-Path $RuntimeDirectory 'Fleetory.Server.dll'
@@ -328,8 +280,8 @@ try {
         $WindowsPublishStatus = 'PASS'
         $LinuxPublishStatus = 'PASS'
 
-        Assert-PackageContents $WindowsOutput 'win-x64'
-        Assert-PackageContents $LinuxOutput 'linux-x64'
+        Assert-PackageContents $WindowsOutput 'win-x64' $RuntimeRequiredFiles
+        Assert-PackageContents $LinuxOutput 'linux-x64' $RuntimeRequiredFiles
 
         if (-not (Test-Path -LiteralPath $WindowsArchive -PathType Leaf) -or
             (Get-Item -LiteralPath $WindowsArchive).Length -le 0) {
