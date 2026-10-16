@@ -9,4 +9,7 @@
     <ProjectReference Include="../Fleetory.Monitoring/Fleetory.Monitoring.csproj" />
     <ProjectReference Include="../Fleetory.Integrations/Fleetory.Integrations.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Content Update="appsettings.Development.json" CopyToPublishDirectory="Never" />
+  </ItemGroup>
 </Project>

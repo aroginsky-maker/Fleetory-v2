@@ -23,7 +23,7 @@ concurrency:
 jobs:
   quality:
     name: Strict build, tests, coverage and Sonar
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
     timeout-minutes: 30
 
     env:
@@ -56,8 +56,17 @@ jobs:
         run: |
           dotnet --info
           java -version
+          docker info --format '{{.ServerVersion}}'
 
       - name: Run Fleetory quality verification
         shell: pwsh
         run: |
-          .\eng\verify-quality.ps1
+          ./eng/verify-quality.ps1
+
+      - name: Report Sonar percentages
+        if: always()
+        shell: pwsh
+        env:
+          SONAR_PULL_REQUEST: ${{ github.event.pull_request.number }}
+        run: |
+          ./eng/report-sonar-metrics.ps1

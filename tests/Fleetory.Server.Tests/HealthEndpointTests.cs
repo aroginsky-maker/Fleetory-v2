@@ -10,8 +10,13 @@ namespace Fleetory.Server.Tests;
 
 public sealed class HealthEndpointTests
 {
+    private static readonly string[] ServerArguments =
+    [
+        "--ConnectionStrings:Fleetory=Host=127.0.0.1;Port=1;Database=fleetory_phase6_unit_test;Username=fleetory;Timeout=1;Command Timeout=1"
+    ];
+
     [Fact]
-    public async Task Server_starts_and_health_endpoints_are_healthy()
+    public async Task Liveness_stays_healthy_when_database_is_unavailable_and_readiness_is_unhealthy()
     {
         await WithRunningServerAsync(async client =>
         {
@@ -19,9 +24,9 @@ public sealed class HealthEndpointTests
             using var readyResponse = await client.GetAsync("/health/ready");
 
             Assert.True(liveResponse.IsSuccessStatusCode);
-            Assert.True(readyResponse.IsSuccessStatusCode);
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, readyResponse.StatusCode);
             Assert.Equal("Healthy", (await liveResponse.Content.ReadAsStringAsync()).Trim());
-            Assert.Equal("Healthy", (await readyResponse.Content.ReadAsStringAsync()).Trim());
+            Assert.Equal("Unhealthy", (await readyResponse.Content.ReadAsStringAsync()).Trim());
         });
     }
 
@@ -68,7 +73,7 @@ public sealed class HealthEndpointTests
     [Fact]
     public void Approved_modules_are_registered_once()
     {
-        using var app = FleetoryApplication.Build();
+        using var app = FleetoryApplication.Build(ServerArguments);
         var modules = app.Services.GetRequiredService<IReadOnlyCollection<IFleetoryModule>>();
 
         var moduleNames = modules.Select(module => module.Name).ToArray();
@@ -96,7 +101,7 @@ public sealed class HealthEndpointTests
 
     private static async Task WithRunningServerAsync(Func<HttpClient, Task> testBody)
     {
-        await using var app = FleetoryApplication.Build();
+        await using var app = FleetoryApplication.Build(ServerArguments);
         app.Urls.Clear();
         app.Urls.Add(CreateLoopbackListenUrl());
 

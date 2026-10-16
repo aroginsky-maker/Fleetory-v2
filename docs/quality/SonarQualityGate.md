@@ -1,7 +1,8 @@
 # Fleetory Sonar Quality Gate Policy
 
-**Scope:** cross-cutting quality hardening after PHASE 2 and before PHASE 3.  
-**Architecture status:** PHASE 2 remains COMPLETE. This quality work does not introduce PHASE 3 data ownership/contracts, PHASE 4 Platform functionality, PHASE 6 persistence, Agent code, UI, or distributed infrastructure.
+**Scope:** cross-cutting quality verification for every Fleetory phase.
+
+**Architecture status:** PHASE 6 is complete; the quality checks do not change module ownership or introduce PHASE 7 functionality.
 
 ## 1. What Sonar verifies
 
@@ -90,6 +91,8 @@ sonar.cs.vscoveragexml.reportsPaths=artifacts/coverage/coverage.xml
 ```
 
 Test projects remain part of Sonar analysis as test code. Production projects are not excluded from coverage to inflate percentages.
+
+The `eng/**` verification and packaging scripts remain in Sonar analysis, including duplication and issue checks. They are excluded only from Sonar's coverage denominator because `dotnet-coverage` instruments .NET assemblies and cannot measure PowerShell or shell execution. Their behavior is checked by the phase verification scripts and package smoke tests. No production `src/**` code is excluded from coverage.
 
 `eng/verify-quality.ps1` also calculates a local overall production line-coverage value from Fleetory production modules in `coverage.xml`. This local figure is diagnostic; the authoritative new-code coverage result remains the Sonar server Quality Gate result.
 
@@ -221,20 +224,25 @@ These changes are not reported as Sonar findings. They are ordinary maintainabil
 
 ## 13. CI-ready behavior
 
-Recommended CI sequence:
+Recommended current sequence for PHASE 6:
 
 ```text
-1. eng/verify-phase2.ps1 (or the equivalent three strict dotnet commands)
-2. eng/verify-sonar.ps1 with protected Sonar environment variables
+1. start Docker (default Testcontainers PostgreSQL path)
+2. eng/verify-phase6.ps1
+3. eng/verify-quality.ps1 with protected Sonar environment variables
 ```
 
-or use:
+When `Fleetory.Persistence.Tests` is present, `verify-quality.ps1` requires:
 
 ```text
-eng/verify-quality.ps1
+Docker available for Testcontainers (default)
+# or explicit override:
+FLEETORY_TEST_CONNECTION_STRING=<external test PostgreSQL>
 ```
 
-A full quality PASS is valid only when both strict verification and the real external Sonar Quality Gate are green.
+This prevents a Sonar/coverage run from silently treating skipped PostgreSQL integration tests as a complete PHASE 6 quality result. The connection string is not printed or stored by the script.
+
+A full quality PASS is valid only when strict verification, real PostgreSQL tests and the external Sonar Quality Gate are green.
 
 ## 14. Troubleshooting
 

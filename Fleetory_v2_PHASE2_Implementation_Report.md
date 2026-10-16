@@ -258,7 +258,7 @@ CorrelationId           PASS
 
 PHASE 2 is therefore **COMPLETE**.
 
-The cross-cutting Sonar Quality Gate hardening performed after PHASE 2 does not reopen or redefine PHASE 2. Any source changes made by that hardening must independently pass the strict Fleetory verification again before Sonar verification is accepted.
+The cross-cutting Sonar Quality Gate hardening performed after PHASE 2 did not reopen or redefine PHASE 2. That hardened baseline was subsequently verified externally with Sonar Quality Gate **PASSED**, Sonar coverage **92.1%**, duplication **0.0%**, Security Rating **A**, Security Issues **0**, and Open Issues overall **6**. The six open issues remain visible technical backlog.
 
 ## 12. Problems / limitations
 
@@ -272,4 +272,4 @@ The next normative architecture stage after PHASE 2 is:
 
 **PHASE 3 — Data Ownership & Contracts**
 
-Before PHASE 3, the repository may undergo explicitly approved cross-cutting quality hardening. PHASE 3 is not implemented by this report.
+The approved cross-cutting Sonar Quality Gate hardening was completed before PHASE 3. PHASE 3 remains a separate Data Ownership & Contracts stage and is documented in its own implementation report.

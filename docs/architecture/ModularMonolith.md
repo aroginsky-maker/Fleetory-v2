@@ -4,7 +4,9 @@
 **Status:** Normative implementation note for the current Fleetory v2 codebase.  
 **Higher authority:** Fleetory Development Baseline & Architecture Charter v1.0 and Fleetory v2 Development Start Plan & Execution Chat Protocol.
 
-This document explains the compile-time boundaries enforced by `Fleetory.Architecture.Tests`. It does not replace those tests and does not define PHASE 3 data ownership or business contracts.
+This document explains the compile-time boundaries enforced by `Fleetory.Architecture.Tests`. It does not replace those tests.
+
+**PHASE 3 note:** `docs/architecture/DataOwnership.md` and `docs/architecture/InterModuleContractsAndEvents.md` now define data ownership and the first minimal public contract surface. The modular-monolith dependency policy remains unchanged, and the cross-context `*.Contracts -> *.Contracts` allowlist remains empty.
 
 ## 1. Bounded contexts
 
@@ -101,20 +103,20 @@ Module loading remains explicit and compile-time. PHASE 2 does not use dynamic D
 
 A `Fleetory.<Context>.Contracts` project is the public boundary for that bounded context.
 
-During PHASE 2:
+The permanent boundary rule is:
 
-- it references only `Fleetory.SharedKernel`;
+- each Contracts project references `Fleetory.SharedKernel`;
 - it must not reference another bounded context's implementation;
-- it must not reference another bounded context's contracts;
-- it contains no prematurely designed PHASE 3 domain/data ownership model.
+- cross-context Contracts references require an explicit documented allowlist entry and Architecture Test coverage;
+- PHASE 3 currently keeps that allowlist empty.
 
-Concrete cross-module summary models, Context Bridge DTOs, event payloads, and approved contract dependencies are intentionally deferred to PHASE 3.
+PHASE 3 introduces only the minimal semantic IDs and public summary contracts documented in `InterModuleContractsAndEvents.md`. No Context Bridge transport/read store or speculative event payload classes are introduced.
 
 ## 6. SharedKernel rule
 
 `Fleetory.SharedKernel` must remain small and dependency-free.
 
-It may contain only genuinely cross-cutting primitives such as correlation/time/value/result/event primitives when actually required.
+It may contain only genuinely cross-cutting primitives such as correlation/time/value/result/event/provenance primitives when actually required.
 
 It must not contain domain entities. In particular the architecture tests reject declarations named:
 
@@ -179,7 +181,7 @@ This rule does not prohibit future explicitly platform-specific projects. It pro
 
 Do not create cross-context catch-all projects such as shared `Services`, `Models`, `Repositories`, or `Helpers` assemblies to bypass bounded-context ownership.
 
-A type or service that belongs to one bounded context remains there. If an actual cross-module interaction is required, PHASE 2 stops at the boundary; PHASE 3 defines ownership and the appropriate public contract/read model/event.
+A type or service that belongs to one bounded context remains there. If an actual cross-module interaction is required, ownership and the public contract/read-model/event direction must be explicit and documented before a project-reference exception is added.
 
 ## 11. Intentionally deferred work
 
