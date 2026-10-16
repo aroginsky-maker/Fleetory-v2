@@ -2,6 +2,8 @@
 
 This tree implements the PHASE 6 PostgreSQL persistence foundation on the user-confirmed closed PHASE 5 baseline.
 
+PHASE 6 was verified on 16 October 2026: 44/44 tests, disposable PostgreSQL migrations and readiness, Windows/Linux server packages, and Sonar Quality Gate passed. Sonar reported 85.9% new-code coverage, 0.0% new-code duplication, 88.1% overall coverage, and 0.0% overall duplication. See `Fleetory_v2_PHASE6_Implementation_Report.md` for the full evidence.
+
 ## Incoming baseline
 
 ```text
@@ -99,4 +101,4 @@ For full Sonar verification, keep the existing Sonar environment variables confi
 
 See `docs/architecture/PostgreSqlPersistence.md` for the normative persistence rules and migration workflow.
 
-The implementation execution environment used to prepare this tree has no .NET 10 SDK, Docker daemon or Fleetory Sonar connection. Therefore PHASE 6 is not marked COMPLETE until the disposable Testcontainers PostgreSQL path and the remaining real verification gates are run.
+The PHASE 6 verification used .NET 10, a disposable PostgreSQL container, and the connected GitHub Actions SonarCloud project. PHASE 7 has not started.

@@ -68,3 +68,23 @@ SECURITY RATING     A
 ```
 
 Any PHASE 4 post-change values require a fresh strict/Sonar run and must not be inferred from this baseline.
+
+## 5. PHASE 6 external verification — 2026-10-16
+
+[GitHub Actions run 38958778154](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/38958778154) analyzed PR #1 at commit `e6f2f85` with the existing Sonar Way Quality Gate. The current PHASE 6 values are separate from the historical PHASE 3 closure above.
+
+| Metric | PHASE 6 result |
+| --- | ---: |
+| Strict build | PASS, 0 warnings and 0 errors |
+| Tests | PASS, 44/44 |
+| Local production line coverage | 90.62% |
+| Sonar overall coverage | 88.1% |
+| Sonar coverage on new code | 85.9% (required >= 80%) |
+| Sonar overall duplication | 0.0% |
+| Sonar duplication on new code | 0.0% (required <= 3%) |
+| New issues | 0 |
+| Security Hotspots | 0 |
+| Sonar analysis | PASS |
+| Sonar Quality Gate | PASS |
+
+The `.NET` coverage collector cannot instrument PowerShell or shell scripts in `eng/`; those scripts remain in Sonar issue and duplication analysis but are excluded from the Sonar coverage denominator. Their behavior is checked by the phase verification and package smoke scripts. The EF mapping refactor kept the Platform and Core DbContexts separate; both EF models still match their checked-in migration snapshots. No Quality Gate threshold or rule was changed.

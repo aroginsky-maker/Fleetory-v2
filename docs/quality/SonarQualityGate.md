@@ -1,7 +1,8 @@
 # Fleetory Sonar Quality Gate Policy
 
-**Scope:** cross-cutting quality hardening after PHASE 2 and before PHASE 3.  
-**Architecture status:** PHASE 2 remains COMPLETE. This quality work does not introduce PHASE 3 data ownership/contracts, PHASE 4 Platform functionality, PHASE 6 persistence, Agent code, UI, or distributed infrastructure.
+**Scope:** cross-cutting quality verification for every Fleetory phase.
+
+**Architecture status:** PHASE 6 is complete; the quality checks do not change module ownership or introduce PHASE 7 functionality.
 
 ## 1. What Sonar verifies
 

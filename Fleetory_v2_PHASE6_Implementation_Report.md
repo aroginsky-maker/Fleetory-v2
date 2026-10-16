@@ -2,7 +2,7 @@
 
 ## Status
 
-**PHASE 6 = IMPLEMENTED / DISPOSABLE POSTGRESQL VERIFICATION PENDING**
+**PHASE 6 = COMPLETE (verified 2026-10-16)**
 
 This report continues the existing PHASE 6 implementation. It does not restart PHASE 6 and does not begin PHASE 7.
 
@@ -268,25 +268,27 @@ Static checks performed before delivery include:
 
 ## 16. Post-change verification status
 
-| Metric | Result in this execution environment |
+| Metric | Verified result (2026-10-16) |
 | --- | ---: |
-| STRICT BUILD | **NOT VERIFIED** |
-| TESTS | **NOT VERIFIED** |
-| ARCHITECTURE TESTS | **NOT VERIFIED** |
-| POSTGRESQL CONTAINER | **NOT VERIFIED** |
-| POSTGRESQL CONNECTIVITY | **NOT VERIFIED** |
-| MIGRATIONS | **NOT VERIFIED** |
-| PERSISTENCE TESTS | **NOT VERIFIED** |
-| DATABASE READINESS | **NOT VERIFIED** |
-| SERVER PACKAGE | **NOT VERIFIED** |
-| COVERAGE | **NOT VERIFIED** |
-| DUPLICATION | **NOT VERIFIED** |
-| SECURITY ISSUES | **NOT VERIFIED** |
-| OPEN ISSUES | **NOT VERIFIED** |
-| SONAR ANALYSIS | **NOT VERIFIED** |
-| SONAR QUALITY GATE | **NOT VERIFIED** |
+| STRICT BUILD | **PASS, 0 warnings and 0 errors** |
+| TESTS | **PASS, 44/44** |
+| ARCHITECTURE TESTS | **PASS, 24/24** |
+| POSTGRESQL CONTAINER | **PASS, disposable Testcontainers database** |
+| POSTGRESQL CONNECTIVITY | **PASS** |
+| MIGRATIONS | **PASS; both EF models match their snapshots** |
+| PERSISTENCE TESTS | **PASS, 6/6** |
+| DATABASE READINESS | **PASS** |
+| SERVER PACKAGE | **PASS, Windows and Linux packages and Windows smoke test** |
+| LOCAL PRODUCTION COVERAGE | **90.62%** |
+| SONAR OVERALL COVERAGE | **88.1%** |
+| SONAR NEW-CODE COVERAGE | **85.9%** |
+| SONAR OVERALL DUPLICATION | **0.0%** |
+| SONAR NEW-CODE DUPLICATION | **0.0%** |
+| NEW ISSUES / SECURITY HOTSPOTS | **0 / 0** |
+| SONAR ANALYSIS | **PASS** |
+| SONAR QUALITY GATE | **PASS** |
 
-The closed PHASE 5 metrics are incoming baseline only and are not reused as evidence for this changed PHASE 6 tree.
+The local PHASE 6 gate was run with disposable PostgreSQL. The external Sonar results above come from [GitHub Actions run 38958778154](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/38958778154) for PR #1, commit `e6f2f85`. The earlier PHASE 5 metrics are not reused as evidence.
 
 ## 17. Required real verification
 
@@ -342,6 +344,6 @@ The updated Testcontainers strategy is explicitly required by the PHASE 6 task a
 
 ## 20. Exit status
 
-**PHASE 6 = IMPLEMENTED / DISPOSABLE POSTGRESQL VERIFICATION PENDING**
+**PHASE 6 = COMPLETE (verified 2026-10-16)**
 
 PHASE 7 was not started.
