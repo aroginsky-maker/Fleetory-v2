@@ -1,6 +1,6 @@
 # Fleetory PHASE 7 Security Foundation
 
-**Status:** IN PROGRESS — Command Plane verification, local audit persistence and RBAC evaluation, 16 October 2026.
+**Status:** IN PROGRESS — Command Plane verification, local audit persistence/export transport and RBAC evaluation, 17 October 2026.
 
 The Fleetory Development Baseline places Agent identity, mTLS, certificate lifecycle, RBAC enforcement, durable audit, secret abstraction, signed commands and replay protection in PHASE 7, before Agent Protocol v2 and the first Agent deployment. A compromised application server must not automatically gain authority to command the whole fleet.
 

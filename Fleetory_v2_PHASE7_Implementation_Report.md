@@ -1,6 +1,6 @@
 # Fleetory v2 — PHASE 7 Security Foundation progress report
 
-**Status:** IN PROGRESS, 16 October 2026. PHASE 6 is complete; PHASE 8 has not started.
+**Status:** IN PROGRESS, 17 October 2026. PHASE 6 is complete; PHASE 8 has not started.
 
 ## Delivered in PR #2
 
@@ -22,16 +22,16 @@
 | Core security tests | PASS, 18/18 |
 | PostgreSQL integration tests | PASS, 20/20 |
 | Disposable PostgreSQL and migrations | PASS |
-| Windows/Linux server packages and Windows smoke | PASS |
+| Windows/Linux server packages and Windows smoke | Previously passed in PHASE 6; not rerun for this increment |
 | Local production line coverage | 91.85% |
-| Sonar overall coverage | Pending current increment; previous 90.5% |
-| Sonar new-code coverage | Pending current increment; previous 93.2% |
-| Sonar overall duplication | Pending current increment; previous 0.0% |
-| Sonar new-code duplication | Pending current increment; previous 0.0% |
-| New issues / Security Hotspots | Pending current increment; previous 0 / 0 |
-| Sonar Quality Gate | Pending current increment; previous PASS |
+| Sonar overall coverage | 89.8% |
+| Sonar new-code coverage | 91.0% |
+| Sonar overall duplication | 0.0% |
+| Sonar new-code duplication | 0.0% |
+| New issues / Security Hotspots | 0 / 0 |
+| Sonar Quality Gate | PASS |
 
-The previous RBAC increment passed [GitHub Actions run 38964587565](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/38964587565) at commit `c6409b3`. The audit export increment awaits its own Sonar result. PHASE 7 as a whole remains IN PROGRESS.
+The audit export increment passed [GitHub Actions run 38966118729](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/38966118729) at commit `94341bd`. Sonar reported 91.0299003322259% new-code coverage, shown as 91.0% above. PHASE 7 as a whole remains IN PROGRESS.
 
 ## Required before PHASE 7 completion
 
