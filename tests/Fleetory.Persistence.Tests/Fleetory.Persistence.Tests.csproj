@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Npgsql" />
+    <PackageReference Include="Testcontainers.PostgreSql" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Fleetory.Platform/Fleetory.Platform.csproj" />
+    <ProjectReference Include="../../src/Fleetory.Platform.Contracts/Fleetory.Platform.Contracts.csproj" />
+    <ProjectReference Include="../../src/Fleetory.Core/Fleetory.Core.csproj" />
+    <ProjectReference Include="../../src/Fleetory.Core.Contracts/Fleetory.Core.Contracts.csproj" />
+    <ProjectReference Include="../../src/Fleetory.Server/Fleetory.Server.csproj" />
+  </ItemGroup>
+</Project>

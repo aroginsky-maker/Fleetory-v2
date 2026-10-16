@@ -17,7 +17,7 @@ public sealed class FoundationPrimitiveTests
     [Fact]
     public void System_clock_returns_current_utc_time()
     {
-        IClock clock = new SystemClock();
+        var clock = new SystemClock();
         var before = DateTimeOffset.UtcNow.AddSeconds(-1);
 
         var actual = clock.UtcNow;

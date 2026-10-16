@@ -1,9 +1,18 @@
+﻿# Fleetory PowerShell scripts are stored as UTF-8 with BOM for Windows PowerShell 5.1 compatibility.
+# Console and child-process text output are forced to UTF-8; dotnet CLI output is forced to English.
+$Utf8Encoding = [System.Text.UTF8Encoding]::new($false)
+[Console]::InputEncoding = $Utf8Encoding
+[Console]::OutputEncoding = $Utf8Encoding
+$OutputEncoding = $Utf8Encoding
+$env:DOTNET_CLI_UI_LANGUAGE = 'en-US'
+
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $CoveragePath = Join-Path $RepoRoot 'artifacts/coverage/coverage.xml'
 $CoverageDirectory = Split-Path -Parent $CoveragePath
+$Phase6PersistenceTestProject = Join-Path $RepoRoot 'tests/Fleetory.Persistence.Tests/Fleetory.Persistence.Tests.csproj'
 
 $StrictBuildStatus = 'NOT RUN'
 $TestsStatus = 'NOT RUN'
@@ -67,6 +76,47 @@ if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
     $StrictBuildStatus = 'FAIL (.NET SDK missing)'
     Write-Summary
     exit 1
+}
+
+if (Test-Path -LiteralPath $Phase6PersistenceTestProject -PathType Leaf) {
+    $phase6ConnectionString = [Environment]::GetEnvironmentVariable('FLEETORY_TEST_CONNECTION_STRING')
+
+    if ([string]::IsNullOrWhiteSpace($phase6ConnectionString)) {
+        if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+            $TestsStatus = 'FAIL (Docker unavailable for PHASE 6 PostgreSQL tests)'
+            Write-Warning 'PHASE 6 PostgreSQL tests require Docker or an explicit FLEETORY_TEST_CONNECTION_STRING.'
+            Write-Summary
+            exit 1
+        }
+
+        & docker info --format '{{.ServerVersion}}' *> $null
+        if ($LASTEXITCODE -ne 0) {
+            $TestsStatus = 'FAIL (Docker unavailable for PHASE 6 PostgreSQL tests)'
+            Write-Warning 'PHASE 6 PostgreSQL tests require Docker or an explicit FLEETORY_TEST_CONNECTION_STRING.'
+            Write-Summary
+            exit 1
+        }
+    }
+    else {
+        $builder = [System.Data.Common.DbConnectionStringBuilder]::new()
+        try {
+            $builder.ConnectionString = $phase6ConnectionString
+        }
+        catch {
+            $TestsStatus = 'FAIL (invalid PHASE 6 external test DB configuration)'
+            Write-Warning 'FLEETORY_TEST_CONNECTION_STRING is not a valid connection string.'
+            Write-Summary
+            exit 1
+        }
+
+        if (-not $builder.ContainsKey('Database') -or
+            ([string] $builder['Database']).IndexOf('test', [StringComparison]::OrdinalIgnoreCase) -lt 0) {
+            $TestsStatus = 'FAIL (unsafe PHASE 6 external test DB configuration)'
+            Write-Warning "FLEETORY_TEST_CONNECTION_STRING must target a test database whose name contains 'test'."
+            Write-Summary
+            exit 1
+        }
+    }
 }
 
 Push-Location $RepoRoot

@@ -221,20 +221,25 @@ These changes are not reported as Sonar findings. They are ordinary maintainabil
 
 ## 13. CI-ready behavior
 
-Recommended CI sequence:
+Recommended current sequence for PHASE 6:
 
 ```text
-1. eng/verify-phase2.ps1 (or the equivalent three strict dotnet commands)
-2. eng/verify-sonar.ps1 with protected Sonar environment variables
+1. start Docker (default Testcontainers PostgreSQL path)
+2. eng/verify-phase6.ps1
+3. eng/verify-quality.ps1 with protected Sonar environment variables
 ```
 
-or use:
+When `Fleetory.Persistence.Tests` is present, `verify-quality.ps1` requires:
 
 ```text
-eng/verify-quality.ps1
+Docker available for Testcontainers (default)
+# or explicit override:
+FLEETORY_TEST_CONNECTION_STRING=<external test PostgreSQL>
 ```
 
-A full quality PASS is valid only when both strict verification and the real external Sonar Quality Gate are green.
+This prevents a Sonar/coverage run from silently treating skipped PostgreSQL integration tests as a complete PHASE 6 quality result. The connection string is not printed or stored by the script.
+
+A full quality PASS is valid only when strict verification, real PostgreSQL tests and the external Sonar Quality Gate are green.
 
 ## 14. Troubleshooting
 

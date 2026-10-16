@@ -24,9 +24,15 @@ require_env SONAR_HOST_URL
 require_env SONAR_PROJECT_KEY
 require_env SONAR_TOKEN
 
-if [[ "${SONAR_HOST_URL}" =~ sonarcloud\.io/?$ ]] && [[ -z "${SONAR_ORGANIZATION:-}" ]]; then
-  echo "SONAR_ORGANIZATION is required when SONAR_HOST_URL points to SonarQube Cloud." >&2
-  exit 1
+sonar_organization="${SONAR_ORGANIZATION:-}"
+sonar_host="${SONAR_HOST_URL#*://}"
+sonar_host="${sonar_host%%/*}"
+sonar_host="${sonar_host%%:*}"
+if [[ "$sonar_host" == 'sonarcloud.io' || "$sonar_host" == *.sonarcloud.io ]]; then
+  [[ -n "$sonar_organization" ]] || {
+    echo 'SONAR_ORGANIZATION is required when SONAR_HOST_URL points to SonarQube Cloud.' >&2
+    exit 1
+  }
 fi
 
 quality_gate_timeout="${SONAR_QUALITYGATE_TIMEOUT:-300}"
@@ -38,6 +44,7 @@ fi
 coverage_relative_path="artifacts/coverage/coverage.xml"
 coverage_path="$repo_root/$coverage_relative_path"
 
+# The token is never echoed by this script. Do not enable shell tracing here.
 dotnet tool restore
 
 rm -rf "$repo_root/artifacts/coverage" "$repo_root/.sonarqube"
@@ -56,8 +63,8 @@ begin_args=(
   "/d:sonar.exclusions=**/bin/**,**/obj/**,artifacts/**,.sonarqube/**"
 )
 
-if [[ -n "${SONAR_ORGANIZATION:-}" ]]; then
-  begin_args+=("/o:${SONAR_ORGANIZATION}")
+if [[ -n "$sonar_organization" ]]; then
+  begin_args+=("/o:${sonar_organization}")
 fi
 
 if [[ -n "${SONAR_PROJECT_NAME:-}" ]]; then

@@ -51,7 +51,10 @@ public static class FleetoryApplication
         foreach (var module in modules)
         {
             module.MapEndpoints(app);
-            app.Logger.LogInformation("Fleetory module registered: {ModuleName}", module.Name);
+            if (app.Logger.IsEnabled(LogLevel.Information))
+            {
+                app.Logger.LogInformation("Fleetory module registered: {ModuleName}", module.Name);
+            }
         }
 
         return app;

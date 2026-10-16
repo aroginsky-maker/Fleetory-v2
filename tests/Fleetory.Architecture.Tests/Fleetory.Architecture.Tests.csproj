@@ -11,4 +11,14 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Fleetory.SharedKernel/Fleetory.SharedKernel.csproj" />
+    <ProjectReference Include="../../src/Fleetory.Platform.Contracts/Fleetory.Platform.Contracts.csproj" />
+    <ProjectReference Include="../../src/Fleetory.Core.Contracts/Fleetory.Core.Contracts.csproj" />
+    <ProjectReference Include="../../src/Fleetory.Assets.Contracts/Fleetory.Assets.Contracts.csproj" />
+    <ProjectReference Include="../../src/Fleetory.ITSM.Contracts/Fleetory.ITSM.Contracts.csproj" />
+    <ProjectReference Include="../../src/Fleetory.CMDB.Contracts/Fleetory.CMDB.Contracts.csproj" />
+    <ProjectReference Include="../../src/Fleetory.Monitoring.Contracts/Fleetory.Monitoring.Contracts.csproj" />
+    <ProjectReference Include="../../src/Fleetory.Integrations.Contracts/Fleetory.Integrations.Contracts.csproj" />
+  </ItemGroup>
 </Project>

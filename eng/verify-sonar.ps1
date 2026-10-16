@@ -1,5 +1,11 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+
+# Keep local/CI output deterministic and avoid Windows console mojibake.
+[Console]::InputEncoding = [System.Text.UTF8Encoding]::new($false)
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$OutputEncoding = [Console]::OutputEncoding
+$env:DOTNET_CLI_UI_LANGUAGE = 'en-US'
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $CoverageRelativePath = 'artifacts/coverage/coverage.xml'
@@ -39,9 +45,23 @@ $SonarProjectName = [Environment]::GetEnvironmentVariable('SONAR_PROJECT_NAME')
 $TimeoutRaw = [Environment]::GetEnvironmentVariable('SONAR_QUALITYGATE_TIMEOUT')
 $SonarQualityGateTimeout = 300
 
-$isSonarCloud = $SonarHostUrl -match '(^https?://)?([^/]+\.)?sonarcloud\.io(?:/|$)'
-if ($isSonarCloud -and [string]::IsNullOrWhiteSpace($SonarOrganization)) {
-    throw "SONAR_ORGANIZATION is required when SONAR_HOST_URL points to SonarQube Cloud."
+try {
+    $SonarUri = [Uri] $SonarHostUrl
+}
+catch {
+    throw "SONAR_HOST_URL must be an absolute URL. Current value: '$SonarHostUrl'."
+}
+
+if (-not $SonarUri.IsAbsoluteUri) {
+    throw "SONAR_HOST_URL must be an absolute URL. Current value: '$SonarHostUrl'."
+}
+
+$SonarHost = $SonarUri.Host
+$IsSonarCloud = $SonarHost.Equals('sonarcloud.io', [StringComparison]::OrdinalIgnoreCase) -or
+    $SonarHost.EndsWith('.sonarcloud.io', [StringComparison]::OrdinalIgnoreCase)
+
+if ($IsSonarCloud -and [string]::IsNullOrWhiteSpace($SonarOrganization)) {
+    throw "SONAR_ORGANIZATION is required when SONAR_HOST_URL points to SonarQube Cloud (sonarcloud.io)."
 }
 
 if (-not [string]::IsNullOrWhiteSpace($TimeoutRaw)) {
