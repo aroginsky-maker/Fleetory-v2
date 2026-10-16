@@ -23,14 +23,14 @@
 | Disposable PostgreSQL and migrations | PASS |
 | Windows/Linux server packages and Windows smoke | PASS |
 | Local production line coverage | 93.61% |
-| Sonar overall coverage | Pending current increment; previous 90.4% |
-| Sonar new-code coverage | Pending current increment; previous 94.6% |
-| Sonar overall duplication | Pending current increment; previous 0.0% |
-| Sonar new-code duplication | Pending current increment; previous 0.0% |
-| New issues / Security Hotspots | Pending current increment; previous 0 / 0 |
-| Sonar Quality Gate | Pending current increment; previous PASS |
+| Sonar overall coverage | 90.5% |
+| Sonar new-code coverage | 93.2% |
+| Sonar overall duplication | 0.0% |
+| Sonar new-code duplication | 0.0% |
+| New issues / Security Hotspots | 0 / 0 |
+| Sonar Quality Gate | PASS |
 
-The prior command and audit increments passed [GitHub Actions run 38962908161](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/38962908161) at commit `dfa2549`. The RBAC increment awaits its own Sonar result. PHASE 7 as a whole remains IN PROGRESS.
+The RBAC increment passed [GitHub Actions run 38964040759](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/38964040759) at commit `14e7bc5`. Sonar reported 93.20388349514563% new-code coverage, shown as 93.2% above. PHASE 7 as a whole remains IN PROGRESS.
 
 ## Required before PHASE 7 completion
 
