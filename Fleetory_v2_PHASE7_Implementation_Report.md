@@ -25,14 +25,15 @@
 | Disposable PostgreSQL and migrations | PASS |
 | Windows/Linux server packages and Windows production smoke | PASS |
 | Local production line coverage | 91.45% |
-| Sonar overall coverage | Awaiting CI analysis for this increment (previous: 89.8%) |
-| Sonar new-code coverage | Awaiting CI analysis for this increment (previous: 91.0%) |
-| Sonar overall duplication | Awaiting CI analysis for this increment (previous: 0.0%) |
-| Sonar new-code duplication | Awaiting CI analysis for this increment (previous: 0.0%) |
-| New issues / Security Hotspots | Awaiting CI analysis for this increment (previous: 0 / 0) |
-| Sonar Quality Gate | Awaiting CI analysis for this increment |
+| CI production line coverage | 92.17% |
+| Sonar overall coverage | 90.6% |
+| Sonar new-code coverage | 91.78% |
+| Sonar overall duplication | 0.0% |
+| Sonar new-code duplication | 0.0% |
+| Open Sonar issues for PR | 0 |
+| Sonar Quality Gate | PASS |
 
-Local PHASE 6 verification passed with disposable PostgreSQL, migrations, Windows/Linux packages and a Windows production smoke test using the secret file. Sonar values for the current increment will be recorded after the GitHub Actions run. PHASE 7 as a whole remains IN PROGRESS.
+Local PHASE 6 verification passed with disposable PostgreSQL, migrations, Windows/Linux packages and a Windows production smoke test using the secret file. [GitHub Actions run 38968058071](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/38968058071) passed for commit `1c58a4d`; Sonar reported 91.78082191780823% new-code coverage, rounded to 91.78% above. The Sonar issues API reported zero open issues for PR #2. Security Hotspots were not separately available from the metrics report. PHASE 7 as a whole remains IN PROGRESS.
 
 ## Required before PHASE 7 completion
 
