@@ -48,6 +48,12 @@ public sealed class PostgreSqlPersistenceTests(PostgreSqlTestFixture fixture)
             "SELECT to_regclass('platform.person_projections') IS NOT NULL"));
         Assert.True(await DatabaseObjectExistsAsync(
             connection,
+            "SELECT to_regclass('platform.audit_events') IS NOT NULL"));
+        Assert.True(await DatabaseObjectExistsAsync(
+            connection,
+            "SELECT to_regclass('platform.audit_export_queue') IS NOT NULL"));
+        Assert.True(await DatabaseObjectExistsAsync(
+            connection,
             "SELECT to_regclass('core.devices') IS NOT NULL"));
         Assert.True(await DatabaseObjectExistsAsync(
             connection,
@@ -62,6 +68,12 @@ public sealed class PostgreSqlPersistenceTests(PostgreSqlTestFixture fixture)
                 connection,
                 "SELECT COUNT(*) FROM platform.\"__EFMigrationsHistory\" " +
                 "WHERE \"MigrationId\" = '202609280001_InitialPlatformPersistence'"));
+        Assert.Equal(
+            1L,
+            await ExecuteScalarInt64Async(
+                connection,
+                "SELECT COUNT(*) FROM platform.\"__EFMigrationsHistory\" " +
+                "WHERE \"MigrationId\" = '202610160001_AddPlatformAuditOutbox'"));
         Assert.Equal(
             1L,
             await ExecuteScalarInt64Async(

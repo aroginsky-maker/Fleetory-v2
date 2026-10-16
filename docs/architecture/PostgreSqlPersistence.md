@@ -29,7 +29,7 @@ Executable PHASE 6 schemas:
 
 | Schema | Owner | PHASE 6 physical model |
 | --- | --- | --- |
-| `platform` | Platform | `person_projections`, Platform migration history |
+| `platform` | Platform | `person_projections`, PHASE 7 `audit_events` and `audit_export_queue`, Platform migration history |
 | `core` | Core | `devices`, Core migration history |
 
 Reserved by Data Ownership but intentionally not materialized without a real persisted model:
@@ -83,6 +83,7 @@ Migrations are owned by their DbContext/module and have separate history tables:
 
 ```text
 Platform: 202609280001_InitialPlatformPersistence
+Platform: 202610160001_AddPlatformAuditOutbox (PHASE 7)
 Core:     202609280002_InitialCorePersistence
 
 platform."__EFMigrationsHistory"
@@ -90,6 +91,8 @@ core."__EFMigrationsHistory"
 ```
 
 Production startup does not call `EnsureCreated`, automatic `Migrate`, destructive reset, or legacy v1 `Schema.sql`.
+
+PHASE 7 audit storage is written through a parameterized Npgsql transaction rather than an EF entity model. The Platform migration owns its tables; the EF snapshot continues to describe the EF-owned Person projection. Audit events and their export queue entries commit together.
 
 Design-time migration operations use the non-repository environment value `FLEETORY_MIGRATION_CONNECTION_STRING`. This value is not a production secret store.
 

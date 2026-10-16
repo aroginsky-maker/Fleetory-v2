@@ -1,6 +1,6 @@
 # Fleetory PHASE 7 Security Foundation
 
-**Status:** IN PROGRESS — first Command Plane verification slice, 16 October 2026.
+**Status:** IN PROGRESS — Command Plane verification and local audit persistence, 16 October 2026.
 
 The Fleetory Development Baseline places Agent identity, mTLS, certificate lifecycle, RBAC enforcement, durable audit, secret abstraction, signed commands and replay protection in PHASE 7, before Agent Protocol v2 and the first Agent deployment. A compromised application server must not automatically gain authority to command the whole fleet.
 
@@ -20,12 +20,20 @@ This is a security contract, **not** the PHASE 8 Agent wire protocol. Private si
 
 The new Core security tests cover valid signatures, target mismatch, expiry/future/overlong windows, payload and nonce tampering, unknown and malformed keys, policy denial, repeated commands and nonce reuse, oversized/malformed envelopes, input-copy isolation and replay-store failure. Architecture tests keep the contracts in Core ownership.
 
+## Implemented local audit persistence
+
+Platform now registers `IAuditWriter` backed by PostgreSQL. A write inserts an append-only `platform.audit_events` row and a matching `platform.audit_export_queue` row in the same transaction. The method returns only after commit. A database or transaction failure propagates to the caller; critical call sites must not swallow it. Both tables and their indexes are created by Platform migration `202610160001_AddPlatformAuditOutbox`. No foreign key crosses a module schema.
+
+Audit input validates bounded actor, action, target and correlation identifiers. Context is limited in size and rejects sensitive key names such as passwords, tokens and credentials. Callers must still avoid putting secret values under innocuous keys. The audit tables are owned by Platform; modules use only `IAuditWriter` and do not read Platform tables directly.
+
+An external SIEM/WORM exporter, retry policy and retention controls are not implemented yet. The outbox preserves pending export state so that an unavailable external sink does not block the local transaction. This is durable local storage, not a claim of tamper-proof audit after a full database compromise. No privileged endpoint is exposed by this slice.
+
 ## Remaining PHASE 7 work
 
 - Per-device X.509 identity, mTLS transport, proof-of-possession enrollment, certificate rotation and revocation.
 - A protected signing service and trust distribution, plus production durable Agent-side replay storage and policy enforcement.
 - Human authentication with MFA/WebAuthn foundation, RBAC and scope enforcement.
-- Durable local security audit with asynchronous export and explicit failure behavior.
+- Asynchronous audit export with retry, copy-safe sink and recovery tests; wiring audited security call sites as those flows are implemented.
 - Secret Provider abstraction and production secret loading; no plaintext production secrets.
 - Abuse, negative authorization, recovery and cross-platform security tests, then the full Sonar Quality Gate.
 

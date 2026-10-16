@@ -1,4 +1,5 @@
 using Fleetory.ModuleAbstractions;
+using Fleetory.Platform.Audit;
 using Fleetory.Platform.Contracts;
 using Fleetory.Platform.Modules;
 using Fleetory.Platform.Persistence;
@@ -7,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Fleetory.SharedKernel;
 
 namespace Fleetory.Platform;
 
@@ -25,6 +27,8 @@ public sealed class PlatformModule : FleetoryModuleBase
 
         services.AddSingleton<IModuleRegistry, ModuleRegistry>();
         services.AddSingleton<ISearchService, SearchService>();
+        services.AddSingleton<IClock, SystemClock>();
+        services.AddScoped<IAuditWriter, PostgreSqlAuditWriter>();
         services.AddSingleton(new PostgreSqlConnectionSettings(connectionString));
         services.AddDbContext<PlatformDbContext>(options =>
             PlatformDbContextOptions.Configure(options, connectionString));
