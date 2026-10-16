@@ -274,6 +274,10 @@ public sealed partial class ArchitectureBoundaryTests
             "LicenseSnapshot",
             "SearchRequest",
             "SearchResult",
+            "SignedCommandEnvelope",
+            "ICommandVerificationKeys",
+            "ICommandReplayStore",
+            "ICommandExecutionPolicy",
             "GenericEntityId"
         };
 
@@ -333,6 +337,33 @@ public sealed partial class ArchitectureBoundaryTests
             {
                 var otherTypes = GetDeclaredTypeNames(ProjectPath(root, otherProject).Directory!);
                 Assert.DoesNotContain(requiredType, otherTypes);
+            }
+        }
+    }
+
+    [Fact]
+    public void Phase7_command_security_contracts_must_remain_owned_by_core_contracts()
+    {
+        var root = FindSolutionRoot();
+        var requiredTypes = new[]
+        {
+            "SignedCommandEnvelope",
+            "ICommandVerificationKeys",
+            "ICommandReplayStore",
+            "ICommandExecutionPolicy"
+        };
+        var coreTypes = GetDeclaredTypeNames(
+            ProjectPath(root, "Fleetory.Core.Contracts").Directory!);
+
+        foreach (var requiredType in requiredTypes)
+        {
+            Assert.Contains(requiredType, coreTypes);
+
+            foreach (var otherProject in ContractProjects.Where(project =>
+                         !project.Equals("Fleetory.Core.Contracts", StringComparison.OrdinalIgnoreCase)))
+            {
+                Assert.DoesNotContain(requiredType,
+                    GetDeclaredTypeNames(ProjectPath(root, otherProject).Directory!));
             }
         }
     }

@@ -1,6 +1,6 @@
-# Fleetory v2 — PHASE 6 PostgreSQL v2
+# Fleetory v2 — PHASE 7 Security Foundation in progress
 
-This tree implements the PHASE 6 PostgreSQL persistence foundation on the user-confirmed closed PHASE 5 baseline.
+PHASE 6 PostgreSQL persistence is complete. PHASE 7 has started with the signed-command verification foundation in Core; see `docs/architecture/SecurityFoundation.md` for its boundaries and remaining work.
 
 PHASE 6 was verified on 16 October 2026: 44/44 tests, disposable PostgreSQL migrations and readiness, Windows/Linux server packages, and Sonar Quality Gate passed. Sonar reported 85.9% new-code coverage, 0.0% new-code duplication, 88.1% overall coverage, and 0.0% overall duplication. See `Fleetory_v2_PHASE6_Implementation_Report.md` for the full evidence.
 
@@ -101,4 +101,4 @@ For full Sonar verification, keep the existing Sonar environment variables confi
 
 See `docs/architecture/PostgreSqlPersistence.md` for the normative persistence rules and migration workflow.
 
-The PHASE 6 verification used .NET 10, a disposable PostgreSQL container, and the connected GitHub Actions SonarCloud project. PHASE 7 has not started.
+The PHASE 6 verification used .NET 10, a disposable PostgreSQL container, and the connected GitHub Actions SonarCloud project. PHASE 7 is in progress and is not yet eligible for completion status.
