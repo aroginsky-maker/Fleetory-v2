@@ -26,15 +26,15 @@
 | Disposable PostgreSQL and migrations | PASS |
 | Windows/Linux server packages and Windows production smoke | PASS |
 | Local production line coverage | 92.63% |
-| CI production line coverage | Awaiting CI analysis for this increment |
-| Sonar overall coverage | Awaiting CI analysis for this increment (previous: 90.6%) |
-| Sonar new-code coverage | Awaiting CI analysis for this increment (previous: 91.78%) |
-| Sonar overall duplication | Awaiting CI analysis for this increment (previous: 0.0%) |
-| Sonar new-code duplication | Awaiting CI analysis for this increment (previous: 0.0%) |
-| Open Sonar issues for PR | Awaiting CI analysis for this increment (previous: 0) |
-| Sonar Quality Gate | Awaiting CI analysis for this increment |
+| CI production line coverage | 92.82% |
+| Sonar overall coverage | 90.8% |
+| Sonar new-code coverage | 92.13% |
+| Sonar overall duplication | 0.0% |
+| Sonar new-code duplication | 0.0% |
+| Open Sonar issues for PR | 0 |
+| Sonar Quality Gate | PASS |
 
-Local PHASE 6 verification passed with disposable PostgreSQL, migrations, Windows/Linux packages and a Windows production smoke test using the secret file. The certificate-binding increment still awaits GitHub Actions and Sonar results. The previous Secret Provider increment passed [GitHub Actions run 38968698518](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/38968698518). PHASE 7 as a whole remains IN PROGRESS.
+Local PHASE 6 verification passed with disposable PostgreSQL, migrations, Windows/Linux packages and a Windows production smoke test using the secret file. The certificate-binding increment passed [GitHub Actions run 38970262204](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/38970262204) at commit `f6fa5b6`; Sonar reported 92.12962962962963% new-code coverage, rounded to 92.13% above. The Sonar issues API reported zero open issues for PR #2. Security Hotspots were not separately available from the metrics report. PHASE 7 as a whole remains IN PROGRESS.
 
 ## Required before PHASE 7 completion
 
