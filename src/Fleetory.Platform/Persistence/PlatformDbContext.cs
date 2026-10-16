@@ -17,31 +17,14 @@ public sealed class PlatformDbContext(DbContextOptions<PlatformDbContext> option
 
         modelBuilder.Entity<PersonProjectionRecord>(entity =>
         {
-            entity.ToTable("person_projections", SchemaName);
-            entity.HasKey(record => record.PersonId);
-
             entity.Property(record => record.PersonId)
                 .HasConversion(
                     id => id.Value,
                     value => new PersonId(value))
-                .ValueGeneratedNever()
-                .HasColumnName("person_id")
-                .HasColumnType("uuid");
-
-            entity.Property(record => record.DisplayName)
-                .IsRequired()
-                .HasMaxLength(256)
-                .HasColumnName("display_name");
-
-            entity.Property(record => record.UpdatedAt)
-                .IsRequired()
-                .HasColumnName("updated_at")
-                .HasColumnType("timestamp with time zone");
+                .ValueGeneratedNever();
 
             entity.Property(record => record.Revision)
-                .IsConcurrencyToken()
-                .HasDefaultValue(1L)
-                .HasColumnName("revision");
+                .HasDefaultValue(1L);
         });
     }
 }

@@ -75,6 +75,8 @@ It is not an authentication or RBAC persistence model.
 
 It contains no Asset or CMDB fields.
 
+Table and column metadata stays on each module's internal persistence record. The owning DbContext retains schema selection, semantic-ID conversion, and the revision default. This avoids repeating the same column configuration in runtime model builders while keeping Platform and Core persistence separate. The checked-in migration snapshots remain unchanged; EF Core's pending-model-change check verifies that the mappings still match them.
+
 ## 6. Migrations
 
 Migrations are owned by their DbContext/module and have separate history tables:

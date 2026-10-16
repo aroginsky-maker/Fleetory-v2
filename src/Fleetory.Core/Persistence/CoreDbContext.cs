@@ -17,31 +17,14 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options) : DbC
 
         modelBuilder.Entity<DeviceRecord>(entity =>
         {
-            entity.ToTable("devices", SchemaName);
-            entity.HasKey(record => record.DeviceId);
-
             entity.Property(record => record.DeviceId)
                 .HasConversion(
                     id => id.Value,
                     value => new DeviceId(value))
-                .ValueGeneratedNever()
-                .HasColumnName("device_id")
-                .HasColumnType("uuid");
-
-            entity.Property(record => record.DisplayName)
-                .IsRequired()
-                .HasMaxLength(256)
-                .HasColumnName("display_name");
-
-            entity.Property(record => record.UpdatedAt)
-                .IsRequired()
-                .HasColumnName("updated_at")
-                .HasColumnType("timestamp with time zone");
+                .ValueGeneratedNever();
 
             entity.Property(record => record.Revision)
-                .IsConcurrencyToken()
-                .HasDefaultValue(1L)
-                .HasColumnName("revision");
+                .HasDefaultValue(1L);
         });
     }
 }
