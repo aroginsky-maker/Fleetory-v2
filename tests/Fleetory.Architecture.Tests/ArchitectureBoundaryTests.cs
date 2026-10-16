@@ -64,8 +64,7 @@ public sealed partial class ArchitectureBoundaryTests
         "PasswordHasher",
         "LdapConnection",
         "OpenIdConnect",
-        "X509Certificate2",
-        "ISecretProvider"
+        "X509Certificate2"
     ];
 
     private static readonly string[] OsNeutralServerSideProjects =
@@ -338,6 +337,22 @@ public sealed partial class ArchitectureBoundaryTests
                 var otherTypes = GetDeclaredTypeNames(ProjectPath(root, otherProject).Directory!);
                 Assert.DoesNotContain(requiredType, otherTypes);
             }
+        }
+    }
+
+    [Fact]
+    public void Phase7_secret_provider_contract_must_remain_owned_by_platform_contracts()
+    {
+        var root = FindSolutionRoot();
+        var platformTypes = GetDeclaredTypeNames(
+            ProjectPath(root, "Fleetory.Platform.Contracts").Directory!);
+        Assert.Contains("ISecretProvider", platformTypes);
+
+        foreach (var otherProject in ContractProjects.Where(project =>
+                     !project.Equals("Fleetory.Platform.Contracts", StringComparison.OrdinalIgnoreCase)))
+        {
+            Assert.DoesNotContain("ISecretProvider",
+                GetDeclaredTypeNames(ProjectPath(root, otherProject).Directory!));
         }
     }
 
@@ -719,6 +734,13 @@ public sealed partial class ArchitectureBoundaryTests
                 var source = File.ReadAllText(sourceFile.FullName);
                 foreach (var token in forbiddenSourceTokens)
                 {
+                    if (projectName == "Fleetory.Platform" &&
+                        sourceFile.Name == "FileSecretProvider.cs" &&
+                        token == "OperatingSystem.IsWindows()")
+                    {
+                        continue;
+                    }
+
                     Assert.DoesNotContain(token, source, StringComparison.Ordinal);
                 }
             }

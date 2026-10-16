@@ -23,9 +23,6 @@ public sealed class PlatformModule : FleetoryModuleBase
     {
         base.RegisterServices(services, configuration);
 
-        var connectionString = PostgreSqlPersistenceConfiguration
-            .GetRequiredConnectionString(configuration);
-
         services.AddSingleton<IModuleRegistry, ModuleRegistry>();
         services.AddSingleton<ISearchService, SearchService>();
         services.AddSingleton<IClock, SystemClock>();
@@ -36,9 +33,11 @@ public sealed class PlatformModule : FleetoryModuleBase
             services.AddSingleton<PostgreSqlAuditExportPump>();
             services.AddHostedService<AuditExportWorker>();
         }
-        services.AddSingleton(new PostgreSqlConnectionSettings(connectionString));
-        services.AddDbContext<PlatformDbContext>(options =>
-            PlatformDbContextOptions.Configure(options, connectionString));
+        services.AddSingleton(serviceProvider => new PostgreSqlConnectionSettings(
+            PostgreSqlPersistenceConfiguration.GetRequiredConnectionString(configuration, serviceProvider)));
+        services.AddDbContext<PlatformDbContext>((serviceProvider, options) =>
+            PlatformDbContextOptions.Configure(options,
+                PostgreSqlPersistenceConfiguration.GetRequiredConnectionString(configuration, serviceProvider)));
         services.AddHealthChecks()
             .AddCheck<PostgreSqlReadinessHealthCheck>(
                 "postgresql",

@@ -38,23 +38,25 @@ PHASE 6 introduces only the persistence foundation required to prove PostgreSQL 
 - safe PHASE 6 verification scripts;
 - PHASE 5 Windows/Linux package regression checks.
 
-No Security Foundation, authentication, Agent, v1 data migration or cross-context database access is introduced.
+PHASE 7 Security Foundation work is in progress. Authentication, Agent execution, v1 data migration and cross-context database access are not introduced.
 
 ## Runtime configuration
 
-The mandatory runtime configuration key is:
+In Production and other non-development environments, configure the absolute path to a mounted secret directory:
+
+```text
+FLEETORY_Fleetory__Secrets__Directory=/run/secrets/fleetory
+```
+
+The directory must contain `fleetory-postgresql`, a UTF-8 file holding the PostgreSQL connection string. On Linux the file must be readable only by its owner (`0400` or `0600`); on Windows, grant read access only to the Fleetory service identity through ACLs. Provision the file through an operating-system secret mount or external secret manager. The path is configuration; the secret value is never passed as a command-line argument or environment variable. Fleetory reads and caches it for the process lifetime; rotation requires a restart.
+
+For local Development and tests only, the previous configuration key remains available:
 
 ```text
 ConnectionStrings:Fleetory
 ```
 
-With Fleetory's configuration prefix it can be supplied as:
-
-```text
-FLEETORY_ConnectionStrings__Fleetory
-```
-
-Do not put production credentials in repository files.
+Non-development startup rejects direct connection strings and fails if the secret file is missing or invalid. Do not put production credentials in repository files.
 
 ## PostgreSQL integration-test environment
 

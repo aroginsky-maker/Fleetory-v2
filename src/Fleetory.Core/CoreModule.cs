@@ -1,5 +1,6 @@
 using Fleetory.Core.Persistence;
 using Fleetory.ModuleAbstractions;
+using Fleetory.Platform.Contracts.Secrets;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -15,14 +16,18 @@ public sealed class CoreModule : FleetoryModuleBase
     {
         base.RegisterServices(services, configuration);
 
-        var connectionString = configuration.GetConnectionString("Fleetory");
-        if (string.IsNullOrWhiteSpace(connectionString))
+        services.AddDbContext<CoreDbContext>((serviceProvider, options) =>
         {
-            throw new InvalidOperationException(
-                "ConnectionStrings:Fleetory is required for Core PostgreSQL persistence.");
-        }
+            var connectionString = serviceProvider.GetService<ISecretProvider>()?
+                .GetRequiredSecret(FleetorySecretNames.PostgreSqlConnectionString)
+                ?? configuration.GetConnectionString("Fleetory");
+            if (string.IsNullOrWhiteSpace(connectionString))
+            {
+                throw new InvalidOperationException(
+                    "PostgreSQL connection string is required for Core persistence.");
+            }
 
-        services.AddDbContext<CoreDbContext>(options =>
-            CoreDbContextOptions.Configure(options, connectionString));
+            CoreDbContextOptions.Configure(options, connectionString);
+        });
     }
 }

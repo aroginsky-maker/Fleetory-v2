@@ -32,7 +32,7 @@ The outbox preserves pending export state so that an unavailable external sink d
 
 Platform migration `202610160003_AddAuditExportLease` adds attempt count, due time and a bounded lease to each pending export. `PostgreSqlAuditExportPump` claims due entries using PostgreSQL row locks with `SKIP LOCKED`; multiple Server nodes cannot claim the same live lease. It publishes outside the database transaction through `IAuditExportSink` and deletes a queue entry only after the sink reports durable acceptance. Delivery failures clear the lease and schedule exponential retry, capped at one hour. A crashed worker leaves a recoverable lease. Entries are never silently discarded because of retry count. The event ID is stable across all attempts, so a sink must deduplicate by that ID. Delivery is **at least once**; order across nodes is not guaranteed.
 
-The optional background worker starts only with `Fleetory:AuditExport:Enabled=true`. Enabling it requires an `IAuditExportSink` registration; without one, Server startup fails instead of pretending that export works. The default remains disabled while no production SIEM/WORM sink and Secret Provider are configured. The worker batches at most three entries under a two-minute lease and gives each sink call a 30-second cancellation deadline. If a sink ignores cancellation, another node may retry after lease expiry; sink idempotency remains required. Retry logs contain event IDs and attempt counts, not sink exception messages. Integration tests cover successful delivery, failed delivery and retry, expired lease recovery, concurrent claims and the enabled background worker.
+The optional background worker starts only with `Fleetory:AuditExport:Enabled=true`. Enabling it requires an `IAuditExportSink` registration; without one, Server startup fails instead of pretending that export works. The default remains disabled while no production SIEM/WORM sink is configured. The worker batches at most three entries under a two-minute lease and gives each sink call a 30-second cancellation deadline. If a sink ignores cancellation, another node may retry after lease expiry; sink idempotency remains required. Retry logs contain event IDs and attempt counts, not sink exception messages. Integration tests cover successful delivery, failed delivery and retry, expired lease recovery, concurrent claims and the enabled background worker.
 
 A concrete external SIEM/WORM sink, its credential loading and retention controls remain open. The outbox and delivery contract are ready for that integration; they do not by themselves prove external immutable retention.
 
@@ -42,13 +42,18 @@ Platform migration `202610160002_AddPlatformAuthorization` owns scope hierarchy,
 
 This is an evaluator and persistence boundary, not a login or role-administration surface. The current Server exposes no privileged product endpoint; future endpoints must authenticate the actor, call this service before protected work and use the durable audit writer for critical decisions and changes. No default administrative grant is seeded. Direct database writes used by integration tests are not a production administration mechanism. Role/scope management, external-group mapping, MFA/WebAuthn and authorization of all future privileged routes remain open.
 
+## Implemented Secret Provider boundary
+
+`Fleetory.Platform.Contracts` owns `ISecretProvider`; Platform implements a bounded UTF-8 file adapter for an externally provisioned secret mount. In non-development environments, Server requires an absolute `Fleetory:Secrets:Directory` and reads `fleetory-postgresql` before startup. Both Platform and Core obtain their PostgreSQL connection string from the same provider. Direct `ConnectionStrings:Fleetory` is rejected in these environments and cannot be combined with a secret directory. The provider caches values for the process lifetime, so rotation requires a restart. It rejects missing, empty, oversized, invalid UTF-8 and unsafe names. On Unix it rejects secret files readable by group or others; Windows deployment must enforce an ACL granting only the service identity access.
+
+The secret manager or OS mount is responsible for provisioning, access control and rotation. This adapter does not yet implement a Vault API or production delivery of external audit-sink credentials. No secret contents are emitted in provider error messages.
+
 ## Remaining PHASE 7 work
 
 - Per-device X.509 identity, mTLS transport, proof-of-possession enrollment, certificate rotation and revocation.
 - A protected signing service and trust distribution, plus production durable Agent-side replay storage and policy enforcement.
 - Human authentication with MFA/WebAuthn foundation, audited role/scope administration and enforcement at future privileged routes.
-- Concrete external SIEM/WORM audit sink, Secret Provider integration and retention controls; wiring audited security call sites as those flows are implemented.
-- Secret Provider abstraction and production secret loading; no plaintext production secrets.
+- Concrete external SIEM/WORM audit sink, its credential integration and retention controls; wiring audited security call sites as those flows are implemented.
 - Abuse, negative authorization, recovery and cross-platform security tests, then the full Sonar Quality Gate.
 
 PHASE 7 remains open until these controls are integrated and independently verified. No Agent execution endpoint or privileged command route is exposed by this slice.

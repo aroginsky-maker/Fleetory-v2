@@ -6,6 +6,9 @@ using Fleetory.ITSM;
 using Fleetory.ModuleAbstractions;
 using Fleetory.Monitoring;
 using Fleetory.Platform;
+using Fleetory.Platform.Contracts.Secrets;
+using Fleetory.Platform.Persistence;
+using Fleetory.Platform.Secrets;
 using Fleetory.Server.Infrastructure;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 
@@ -18,6 +21,8 @@ public static class FleetoryApplication
         var builder = WebApplication.CreateBuilder(args ?? Array.Empty<string>());
 
         builder.Configuration.AddEnvironmentVariables(prefix: "FLEETORY_");
+
+        ConfigureSecrets(builder);
 
         builder.Logging.ClearProviders();
         builder.Logging.AddJsonConsole(options => options.IncludeScopes = true);
@@ -58,6 +63,35 @@ public static class FleetoryApplication
         }
 
         return app;
+    }
+
+    private static void ConfigureSecrets(WebApplicationBuilder builder)
+    {
+        var directory = builder.Configuration["Fleetory:Secrets:Directory"];
+        var directConnectionString = builder.Configuration.GetConnectionString("Fleetory");
+
+        if (!string.IsNullOrWhiteSpace(directory) && directConnectionString is not null)
+        {
+            throw new InvalidOperationException(
+                "Use either Fleetory:Secrets:Directory or ConnectionStrings:Fleetory, not both.");
+        }
+
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            if (!builder.Environment.IsDevelopment())
+            {
+                throw new InvalidOperationException(
+                    "Non-development environments require Fleetory:Secrets:Directory and reject direct connection strings.");
+            }
+
+            return;
+        }
+
+        var provider = new FileSecretProvider(directory);
+        var connectionString = provider.GetRequiredSecret(FleetorySecretNames.PostgreSqlConnectionString);
+        PostgreSqlConnectionStringValidator.Validate(connectionString);
+
+        builder.Services.AddSingleton<ISecretProvider>(provider);
     }
 
     private static IFleetoryModule[] CreateModules() =>

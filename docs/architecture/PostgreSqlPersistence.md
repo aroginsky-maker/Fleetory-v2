@@ -106,16 +106,18 @@ The minimal updateable records use a `revision bigint` concurrency token. Stale 
 
 ## 8. Runtime configuration
 
-The production/server configuration key remains:
+Production and other non-development Server deployments set the absolute directory path:
+
+```text
+FLEETORY_Fleetory__Secrets__Directory=/run/secrets/fleetory
+```
+
+The directory contains a UTF-8 `fleetory-postgresql` file supplied by a secret manager or OS secret mount. Linux permissions must exclude group and other access; Windows deployments must restrict ACLs to the service identity. Startup reads and caches the secret and validates Host and Database. Restart to pick up a rotated value. Direct connection strings are rejected in non-development environments.
+
+Development and isolated tests may still use:
 
 ```text
 ConnectionStrings:Fleetory
-```
-
-With Fleetory's configuration prefix it can be supplied as:
-
-```text
-FLEETORY_ConnectionStrings__Fleetory
 ```
 
 No production credential or connection string is committed to repository files.

@@ -190,6 +190,7 @@ public sealed class PostgreSqlPersistenceTests(PostgreSqlTestFixture fixture)
         var connectionString = RequireConnectionString();
         var arguments = new[]
         {
+            "--environment=Development",
             $"--ConnectionStrings:Fleetory={connectionString}"
         };
 
@@ -290,6 +291,7 @@ public sealed class PostgreSqlPersistenceTests(PostgreSqlTestFixture fixture)
     {
         var arguments = new[]
         {
+            "--environment=Development",
             $"--ConnectionStrings:Fleetory={connectionString}"
         };
 
