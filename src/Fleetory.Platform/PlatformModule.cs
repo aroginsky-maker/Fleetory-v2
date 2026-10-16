@@ -1,4 +1,5 @@
 using Fleetory.ModuleAbstractions;
+using Fleetory.Platform.Authorization;
 using Fleetory.Platform.Audit;
 using Fleetory.Platform.Contracts;
 using Fleetory.Platform.Modules;
@@ -29,6 +30,7 @@ public sealed class PlatformModule : FleetoryModuleBase
         services.AddSingleton<ISearchService, SearchService>();
         services.AddSingleton<IClock, SystemClock>();
         services.AddScoped<IAuditWriter, PostgreSqlAuditWriter>();
+        services.AddScoped<IAuthorizationService, PostgreSqlAuthorizationService>();
         services.AddSingleton(new PostgreSqlConnectionSettings(connectionString));
         services.AddDbContext<PlatformDbContext>(options =>
             PlatformDbContextOptions.Configure(options, connectionString));

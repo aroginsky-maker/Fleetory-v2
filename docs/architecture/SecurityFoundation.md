@@ -1,6 +1,6 @@
 # Fleetory PHASE 7 Security Foundation
 
-**Status:** IN PROGRESS — Command Plane verification and local audit persistence, 16 October 2026.
+**Status:** IN PROGRESS — Command Plane verification, local audit persistence and RBAC evaluation, 16 October 2026.
 
 The Fleetory Development Baseline places Agent identity, mTLS, certificate lifecycle, RBAC enforcement, durable audit, secret abstraction, signed commands and replay protection in PHASE 7, before Agent Protocol v2 and the first Agent deployment. A compromised application server must not automatically gain authority to command the whole fleet.
 
@@ -28,11 +28,17 @@ Audit input validates bounded actor, action, target and correlation identifiers.
 
 An external SIEM/WORM exporter, retry policy and retention controls are not implemented yet. The outbox preserves pending export state so that an unavailable external sink does not block the local transaction. This is durable local storage, not a claim of tamper-proof audit after a full database compromise. No privileged endpoint is exposed by this slice.
 
+## Implemented local RBAC evaluation
+
+Platform migration `202610160002_AddPlatformAuthorization` owns scope hierarchy, roles, exact permissions and actor-role assignments in the `platform` schema. `IAuthorizationService` now has a PostgreSQL evaluator. A grant may be global or tied to a Platform scope; scoped grants apply to that scope and its descendants, while unrelated scopes and unknown scope IDs are denied. Requests without a scope require a global assignment. Actor kind and subject ID must match exactly, permissions are case-sensitive and never use wildcards. Anonymous actors and malformed requests are denied. Each decision reads the current local database state, so removing an assignment affects the next decision without waiting for an external identity provider or stale cache. Storage failure propagates rather than producing an allow decision.
+
+This is an evaluator and persistence boundary, not a login or role-administration surface. The current Server exposes no privileged product endpoint; future endpoints must authenticate the actor, call this service before protected work and use the durable audit writer for critical decisions and changes. No default administrative grant is seeded. Direct database writes used by integration tests are not a production administration mechanism. Role/scope management, external-group mapping, MFA/WebAuthn and authorization of all future privileged routes remain open.
+
 ## Remaining PHASE 7 work
 
 - Per-device X.509 identity, mTLS transport, proof-of-possession enrollment, certificate rotation and revocation.
 - A protected signing service and trust distribution, plus production durable Agent-side replay storage and policy enforcement.
-- Human authentication with MFA/WebAuthn foundation, RBAC and scope enforcement.
+- Human authentication with MFA/WebAuthn foundation, audited role/scope administration and enforcement at future privileged routes.
 - Asynchronous audit export with retry, copy-safe sink and recovery tests; wiring audited security call sites as those flows are implemented.
 - Secret Provider abstraction and production secret loading; no plaintext production secrets.
 - Abuse, negative authorization, recovery and cross-platform security tests, then the full Sonar Quality Gate.

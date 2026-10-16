@@ -40,6 +40,7 @@ public sealed class PlatformFoundationTests
         Assert.NotNull(provider.GetRequiredService<IModuleRegistry>());
         Assert.NotNull(provider.GetRequiredService<ISearchService>());
         Assert.NotNull(provider.GetRequiredService<IAuditWriter>());
+        Assert.NotNull(provider.GetRequiredService<IAuthorizationService>());
     }
 
     [Fact]
