@@ -1,6 +1,6 @@
 # Fleetory v2 — PHASE 7 Security Foundation in progress
 
-PHASE 6 PostgreSQL persistence is complete. PHASE 7 has started with the signed-command verification foundation in Core; see `docs/architecture/SecurityFoundation.md` for its boundaries and remaining work.
+PHASE 6 PostgreSQL persistence is complete. PHASE 7 is building command verification, certificate binding, audit, RBAC and secret foundations; see `docs/architecture/SecurityFoundation.md` for their boundaries and remaining work.
 
 PHASE 6 was verified on 16 October 2026: 44/44 tests, disposable PostgreSQL migrations and readiness, Windows/Linux server packages, and Sonar Quality Gate passed. Sonar reported 85.9% new-code coverage, 0.0% new-code duplication, 88.1% overall coverage, and 0.0% overall duplication. See `Fleetory_v2_PHASE6_Implementation_Report.md` for the full evidence.
 

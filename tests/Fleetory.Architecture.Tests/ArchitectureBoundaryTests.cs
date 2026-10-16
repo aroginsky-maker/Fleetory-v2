@@ -277,6 +277,9 @@ public sealed partial class ArchitectureBoundaryTests
             "ICommandVerificationKeys",
             "ICommandReplayStore",
             "ICommandExecutionPolicy",
+            "AgentCertificateBinding",
+            "IAgentCertificateBindingStore",
+            "IAgentCertificateBindingVerifier",
             "GenericEntityId"
         };
 
@@ -357,7 +360,7 @@ public sealed partial class ArchitectureBoundaryTests
     }
 
     [Fact]
-    public void Phase7_command_security_contracts_must_remain_owned_by_core_contracts()
+    public void Phase7_core_security_contracts_must_remain_owned_by_core_contracts()
     {
         var root = FindSolutionRoot();
         var requiredTypes = new[]
@@ -365,7 +368,10 @@ public sealed partial class ArchitectureBoundaryTests
             "SignedCommandEnvelope",
             "ICommandVerificationKeys",
             "ICommandReplayStore",
-            "ICommandExecutionPolicy"
+            "ICommandExecutionPolicy",
+            "AgentCertificateBinding",
+            "IAgentCertificateBindingStore",
+            "IAgentCertificateBindingVerifier"
         };
         var coreTypes = GetDeclaredTypeNames(
             ProjectPath(root, "Fleetory.Core.Contracts").Directory!);

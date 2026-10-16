@@ -48,9 +48,17 @@ This is an evaluator and persistence boundary, not a login or role-administratio
 
 The secret manager or OS mount is responsible for provisioning, access control and rotation. This adapter does not yet implement a Vault API or production delivery of external audit-sink credentials. No secret contents are emitted in provider error messages.
 
+## Implemented Agent certificate binding foundation
+
+`Fleetory.Core.Contracts` owns the certificate-binding lookup and verifier contracts. Core migration `20261016212919_AddAgentCertificateBindings` adds `core.agent_certificates`. A unique SHA-256 digest of the certificate DER binds one certificate to one `DeviceId`; multiple certificates may be valid for the same device during rotation. The row stores validity bounds and an optional revocation timestamp. It references only Core-owned `devices`. Core registers a PostgreSQL lookup and verifier; storage failure propagates, so identity cannot silently become accepted.
+
+The verifier checks the certificate validity interval, end-entity Basic Constraints, Digital Signature Key Usage, Client Authentication EKU, exact registered digest, target `DeviceId`, binding validity and revocation. It performs this check at **connection establishment**; Agent heartbeats must use the already authenticated session instead of querying PostgreSQL each time. A revoked binding is denied on the next connection. Two active bindings permit rotation overlap without changing the billable device identity. Integration tests cover overlap and revocation against real PostgreSQL; unit tests cover unknown, wrong-device, invalid-purpose and expired certificates.
+
+This verifier is a binding check, not a TLS handshake or certificate-chain validator. Its caller must take the presented certificate only from an authenticated client-certificate TLS handshake against a trusted Fleetory CA. Merely supplying a copied public certificate object proves no possession of its private key. There is no Agent gateway or enrollment endpoint yet. Enrollment approval, proof of possession, certificate issuance, CA trust distribution, TLS gateway configuration, revocation propagation to existing sessions and audited administration remain required before Agent traffic can use this foundation.
+
 ## Remaining PHASE 7 work
 
-- Per-device X.509 identity, mTLS transport, proof-of-possession enrollment, certificate rotation and revocation.
+- mTLS transport and Fleetory CA trust, proof-of-possession enrollment and issuance, audited rotation/revocation administration, and termination of already connected sessions after revocation.
 - A protected signing service and trust distribution, plus production durable Agent-side replay storage and policy enforcement.
 - Human authentication with MFA/WebAuthn foundation, audited role/scope administration and enforcement at future privileged routes.
 - Concrete external SIEM/WORM audit sink, its credential integration and retention controls; wiring audited security call sites as those flows are implemented.
