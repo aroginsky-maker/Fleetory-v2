@@ -62,3 +62,11 @@ jobs:
         shell: pwsh
         run: |
           ./eng/verify-quality.ps1
+
+      - name: Report Sonar percentages
+        if: always()
+        shell: pwsh
+        env:
+          SONAR_PULL_REQUEST: ${{ github.event.pull_request.number }}
+        run: |
+          ./eng/report-sonar-metrics.ps1
