@@ -690,6 +690,19 @@ public sealed partial class ArchitectureBoundaryTests
     }
 
     [Fact]
+    public void Agent_security_must_not_depend_on_server_implementations()
+    {
+        var root = FindSolutionRoot();
+        var references = GetProjectReferences(ProjectPath(root, "Fleetory.Agent.Security"));
+        AssertProjectReferencesEqual("Fleetory.Agent.Security",
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "Fleetory.Core.Contracts",
+                "Fleetory.SharedKernel"
+            }, references);
+    }
+
+    [Fact]
     public void Server_side_runtime_must_remain_os_neutral()
     {
         var root = FindSolutionRoot();

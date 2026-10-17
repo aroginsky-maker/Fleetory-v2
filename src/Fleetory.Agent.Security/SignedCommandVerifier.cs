@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 using Fleetory.Core.Contracts;
 using Fleetory.SharedKernel;
 
-namespace Fleetory.Core.Security;
+namespace Fleetory.Agent.Security;
 
 public enum CommandVerificationStatus
 {
@@ -26,7 +26,7 @@ public sealed record CommandVerificationResult(
     CommandVerificationStatus Status,
     VerifiedCommand? Command = null);
 
-/// <summary>Fail-closed verification primitive for the future Agent command executor.</summary>
+/// <summary>Fail-closed verification before an Agent dispatches a command to a local handler.</summary>
 public sealed class SignedCommandVerifier(
     ICommandVerificationKeys keys,
     ICommandReplayStore replayStore,

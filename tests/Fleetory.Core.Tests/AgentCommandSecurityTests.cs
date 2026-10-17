@@ -1,0 +1,109 @@
+using Fleetory.Agent.Security;
+using Fleetory.Core.Contracts;
+using System.Security.Cryptography;
+
+namespace Fleetory.Core.Tests;
+
+public sealed class AgentCommandSecurityTests
+{
+    private static readonly DeviceId Device = new(Guid.Parse("c60c38d9-adfd-4c48-9cb2-f34c783f895b"));
+
+    [Fact]
+    public async Task Replay_entries_survive_store_recreation_and_reject_either_reused_identifier()
+    {
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            var path = Path.Combine(directory, "replay.db");
+            var commandId = Guid.NewGuid();
+            var expiry = DateTimeOffset.UtcNow.AddMinutes(1);
+            var first = new SqliteCommandReplayStore(path);
+            Assert.True(await first.TryConsumeAsync(Device, commandId, "nonce-first-123456", expiry));
+
+            var restarted = new SqliteCommandReplayStore(path);
+            Assert.False(await restarted.TryConsumeAsync(Device, commandId, "nonce-second-12345", expiry));
+            Assert.False(await restarted.TryConsumeAsync(Device, Guid.NewGuid(), "nonce-first-123456", expiry));
+            Assert.True(await restarted.TryConsumeAsync(
+                new DeviceId(Guid.NewGuid()), commandId, "nonce-first-123456", expiry));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Concurrent_consumers_accept_one_command_only()
+    {
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            var store = new SqliteCommandReplayStore(Path.Combine(directory, "replay.db"));
+            var commandId = Guid.NewGuid();
+            var attempts = Enumerable.Range(0, 12).Select(_ => Task.Run(async () =>
+                await store.TryConsumeAsync(Device, commandId, "same-nonce-12345678", DateTimeOffset.UtcNow.AddMinutes(1))));
+
+            var results = await Task.WhenAll(attempts);
+            Assert.Single(results, accepted => accepted);
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Missing_storage_directory_fails_closed()
+    {
+        var path = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"), "replay.db");
+        Assert.Throws<ArgumentException>(() => new SqliteCommandReplayStore(path));
+    }
+
+    [Fact]
+    public async Task Local_policy_denies_other_targets_payloads_and_unsupported_commands()
+    {
+        var policy = new AgentCommandExecutionPolicy(Device);
+
+        Assert.True(await policy.IsAllowedAsync(Device, "Inventory.Refresh", ReadOnlyMemory<byte>.Empty));
+        Assert.False(await policy.IsAllowedAsync(Device, "Inventory.Refresh", "{}"u8.ToArray()));
+        Assert.False(await policy.IsAllowedAsync(new DeviceId(Guid.NewGuid()), "Inventory.Refresh", ReadOnlyMemory<byte>.Empty));
+        Assert.False(await policy.IsAllowedAsync(Device, "Shell.Execute", ReadOnlyMemory<byte>.Empty));
+    }
+
+    [Fact]
+    public async Task Trust_directory_scopes_keys_to_device_and_reflects_revocation()
+    {
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            using var signer = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+            var key = signer.ExportSubjectPublicKeyInfo();
+            var path = Path.Combine(directory, $"{Device.Value:N}-key-1.spki");
+            await File.WriteAllBytesAsync(path, key);
+            var trust = new DirectoryCommandVerificationKeys(Device, directory);
+
+            Assert.Equal(key, (await trust.FindPublicKeyAsync(Device, "key-1"))?.ToArray());
+            Assert.Null(await trust.FindPublicKeyAsync(new DeviceId(Guid.NewGuid()), "key-1"));
+            Assert.Null(await trust.FindPublicKeyAsync(Device, "../key-1"));
+
+            File.Delete(path);
+            Assert.Null(await trust.FindPublicKeyAsync(Device, "key-1"));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    private static string CreateTemporaryDirectory()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), "fleetory-agent-replay-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(directory,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+        return directory;
+    }
+}

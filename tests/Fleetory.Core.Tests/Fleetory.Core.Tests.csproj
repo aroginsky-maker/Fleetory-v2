@@ -12,6 +12,7 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="../../src/Fleetory.Agent.Security/Fleetory.Agent.Security.csproj" />
     <ProjectReference Include="../../src/Fleetory.Core/Fleetory.Core.csproj" />
     <ProjectReference Include="../../src/Fleetory.Core.Contracts/Fleetory.Core.Contracts.csproj" />
     <ProjectReference Include="../../src/Fleetory.SharedKernel/Fleetory.SharedKernel.csproj" />

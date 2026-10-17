@@ -1,7 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
+using Fleetory.Agent.Security;
 using Fleetory.Core.Contracts;
-using Fleetory.Core.Security;
 using Fleetory.SharedKernel;
 
 namespace Fleetory.Core.Tests;
