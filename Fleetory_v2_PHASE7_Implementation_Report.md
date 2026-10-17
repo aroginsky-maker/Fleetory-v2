@@ -23,13 +23,13 @@
 | Local WebAuthn/OIDC with real Admin mTLS | 401 without token; 403 with WebAuthn token at RBAC |
 | Windows server TLS chain | 1 certificate sent; root-only validation fails |
 | Linux container server TLS chain | 2 certificates sent; root-only OpenSSL verification code 0 |
-| CI coverage at `b13c602` | 91.27% |
-| Sonar PR coverage at `b13c602` | 88.9% |
-| Sonar new-code coverage at `b13c602` | 89.04% |
-| Sonar duplication at `b13c602` | 0.0% |
-| Sonar Quality Gate at `b13c602` | PASS |
+| CI coverage at `27f26b6` | 91.27% |
+| Sonar PR coverage at `27f26b6` | 88.9% |
+| Sonar new-code coverage at `27f26b6` | 89.04% |
+| Sonar duplication at `27f26b6` | 0.0% |
+| Sonar Quality Gate at `27f26b6` | PASS |
 
-The latest completed CI and Sonar numbers come from [run 39056238443](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39056238443). The previous [run 39055723453](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39055723453) failed on the browser verifier's `spawn('dotnet')` PATH lookup; the fixed absolute .NET path restored the Quality Gate. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
+The latest completed CI and Sonar numbers come from [run 39056571413](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39056571413). The previous [run 39055723453](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39055723453) failed on the browser verifier's `spawn('dotnet')` PATH lookup; the fixed absolute .NET path restored the Quality Gate. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
 
 ## Required before completion
 
