@@ -52,7 +52,8 @@ public static class FleetoryApplication
             {
                 if (context.Connection.LocalPort == gateway.AgentPort)
                 {
-                    if (context.Request.Path != "/agent/identity")
+                    if (context.Request.Path != "/agent/identity" &&
+                        context.Request.Path != "/agent/enroll")
                     {
                         context.Response.StatusCode = StatusCodes.Status404NotFound;
                         return;
@@ -67,14 +68,17 @@ public static class FleetoryApplication
                         return;
                     }
 
-                    var verifier = context.RequestServices
-                        .GetRequiredService<IAgentCertificateBindingVerifier>();
-                    var status = await verifier.VerifyAsync(
-                        deviceId, certificate, context.RequestAborted);
-                    if (status != AgentCertificateStatus.Accepted)
+                    if (context.Request.Path == "/agent/identity")
                     {
-                        context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                        return;
+                        var verifier = context.RequestServices
+                            .GetRequiredService<IAgentCertificateBindingVerifier>();
+                        var status = await verifier.VerifyAsync(
+                            deviceId, certificate, context.RequestAborted);
+                        if (status != AgentCertificateStatus.Accepted)
+                        {
+                            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                            return;
+                        }
                     }
                 }
                 else if (context.Connection.LocalPort == gateway.AdminPort)

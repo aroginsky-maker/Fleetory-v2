@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Cryptography;
@@ -8,6 +9,7 @@ using Fleetory.Core.Persistence;
 using Fleetory.Core.Security;
 using Fleetory.Platform.Contracts;
 using Fleetory.Server;
+using Fleetory.SharedKernel;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
@@ -17,6 +19,208 @@ namespace Fleetory.Persistence.Tests;
 [Collection(PostgreSqlTestCollection.Name)]
 public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
 {
+    [Fact]
+    public async Task Enrollment_requires_durable_audit_before_grant_or_binding_changes()
+    {
+        var deviceId = new DeviceId(Guid.NewGuid());
+        var adminId = Guid.NewGuid();
+        var actor = new ActorReference($"person:{adminId:N}", ActorKind.Person);
+        using var pki = new TestPki(deviceId);
+        await GrantAdminPermissionAsync(adminId, AgentEnrollmentService.Permission);
+
+        await using var scope = fixture.Services.CreateAsyncScope();
+        var services = scope.ServiceProvider;
+        var database = services.GetRequiredService<CoreDbContext>();
+        var unavailableAudit = new AgentEnrollmentService(
+            services.GetRequiredService<IAuthorizationService>(),
+            new FailingAuditWriter(),
+            services.GetRequiredService<IAgentCertificateBindingVerifier>(),
+            database,
+            services.GetRequiredService<IClock>());
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await unavailableAudit.CreateGrantAsync(
+                actor, deviceId, "audit test device", CorrelationId.New()));
+        Assert.False(await database.Devices.AnyAsync(row => row.DeviceId == deviceId));
+        Assert.False(await database.AgentEnrollmentGrants.AnyAsync(row => row.DeviceId == deviceId));
+
+        var service = services.GetRequiredService<AgentEnrollmentService>();
+        var token = await service.CreateGrantAsync(
+            actor, deviceId, "audit test device", CorrelationId.New());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(async () =>
+            await service.EnrollAsync(new DeviceId(Guid.NewGuid()), pki.Client,
+                token, CorrelationId.New()));
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await unavailableAudit.EnrollAsync(deviceId, pki.Client,
+                token, CorrelationId.New()));
+        Assert.False(await database.AgentCertificates.AnyAsync(row => row.DeviceId == deviceId));
+        Assert.True(await database.AgentEnrollmentGrants.AnyAsync(
+            row => row.DeviceId == deviceId && row.ConsumedAt == null));
+
+        await service.EnrollAsync(deviceId, pki.Client, token, CorrelationId.New());
+        Assert.True(await database.AgentCertificates.AnyAsync(row => row.DeviceId == deviceId));
+    }
+
+    [Fact]
+    public async Task Concurrent_redemption_of_one_grant_binds_only_one_certificate()
+    {
+        var deviceId = new DeviceId(Guid.NewGuid());
+        var adminId = Guid.NewGuid();
+        using var pki = new TestPki(deviceId);
+        await GrantAdminPermissionAsync(adminId, AgentEnrollmentService.Permission);
+        string token;
+        await using (var scope = fixture.Services.CreateAsyncScope())
+        {
+            token = await scope.ServiceProvider.GetRequiredService<AgentEnrollmentService>()
+                .CreateGrantAsync(new ActorReference($"person:{adminId:N}", ActorKind.Person),
+                    deviceId, "concurrent device", CorrelationId.New());
+        }
+
+        async Task<bool> TryEnrollAsync(X509Certificate2 certificate)
+        {
+            await using var scope = fixture.Services.CreateAsyncScope();
+            try
+            {
+                await scope.ServiceProvider.GetRequiredService<AgentEnrollmentService>()
+                    .EnrollAsync(deviceId, certificate, token, CorrelationId.New());
+                return true;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return false;
+            }
+        }
+
+        var results = await Task.WhenAll(
+            TryEnrollAsync(pki.Client), TryEnrollAsync(pki.UnregisteredClient));
+        Assert.Equal(1, results.Count(success => success));
+        await using var verificationScope = fixture.Services.CreateAsyncScope();
+        var database = verificationScope.ServiceProvider.GetRequiredService<CoreDbContext>();
+        Assert.Equal(1, await database.AgentCertificates.CountAsync(row => row.DeviceId == deviceId));
+    }
+
+    [Fact]
+    public async Task One_time_admin_grant_enrolls_only_the_agent_presenting_its_certificate()
+    {
+        var deviceId = new DeviceId(Guid.NewGuid());
+        var adminId = Guid.NewGuid();
+        using var agentPki = new TestPki(deviceId);
+        using var adminPki = new TestPki(new Uri($"urn:fleetory:admin:{adminId:D}"));
+        using var secrets = new TestSecretDirectory();
+        secrets.Write("fleetory-postgresql", fixture.ConnectionString);
+        secrets.Write("agent-gateway-root-ca", agentPki.Root.ExportCertificatePem());
+        secrets.Write("agent-gateway-server-cert", agentPki.Server.ExportCertificatePem());
+        secrets.Write("agent-gateway-server-key", agentPki.ServerKey.ExportPkcs8PrivateKeyPem());
+        secrets.Write("admin-gateway-root-ca", adminPki.Root.ExportCertificatePem());
+        secrets.Write("admin-gateway-server-cert", adminPki.Server.ExportCertificatePem());
+        secrets.Write("admin-gateway-server-key", adminPki.ServerKey.ExportPkcs8PrivateKeyPem());
+
+        var ports = Enumerable.Range(0, 3).Select(_ => GetFreePort()).ToArray();
+        while (ports.Distinct().Count() != ports.Length)
+        {
+            ports = Enumerable.Range(0, 3).Select(_ => GetFreePort()).ToArray();
+        }
+
+        await using var app = FleetoryApplication.Build([
+            "--environment=Development",
+            $"--Fleetory:Secrets:Directory={secrets.Path}",
+            "--Fleetory:AgentGateway:Enabled=true",
+            "--Fleetory:AdminGateway:Enabled=true",
+            $"--Fleetory:Web:Port={ports[0]}",
+            $"--Fleetory:AgentGateway:Port={ports[1]}",
+            $"--Fleetory:AdminGateway:Port={ports[2]}"
+        ]);
+        await app.StartAsync();
+        try
+        {
+            using var agent = agentPki.CreateClient(agentPki.Client);
+            using var admin = adminPki.CreateClient(adminPki.Client);
+            using var web = new HttpClient();
+            var agentBase = $"https://127.0.0.1:{ports[1]}";
+            var grantUrl = $"https://127.0.0.1:{ports[2]}/admin/devices/{deviceId.Value:D}/enrollment-grants";
+
+            using var before = await agent.GetAsync($"{agentBase}/agent/identity");
+            Assert.Equal(HttpStatusCode.Forbidden, before.StatusCode);
+            using var noGrant = await agent.PostAsJsonAsync(
+                $"{agentBase}/agent/enroll", new { token = new string('A', 64) });
+            Assert.Equal(HttpStatusCode.Forbidden, noGrant.StatusCode);
+            using var denied = await admin.PostAsJsonAsync(grantUrl, new { displayName = "enrolled device" });
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+
+            await GrantAdminPermissionAsync(adminId, AgentEnrollmentService.Permission);
+            using var invalidBody = await admin.PostAsync(grantUrl,
+                new StringContent("not json"));
+            Assert.Equal(HttpStatusCode.BadRequest, invalidBody.StatusCode);
+            using var oversized = await admin.PostAsJsonAsync(grantUrl,
+                new { displayName = new string('x', 2048) });
+            Assert.Equal(HttpStatusCode.BadRequest, oversized.StatusCode);
+            using var grant = await admin.PostAsJsonAsync(grantUrl, new { displayName = "enrolled device" });
+            Assert.Equal(HttpStatusCode.OK, grant.StatusCode);
+            Assert.Equal("no-store", grant.Headers.CacheControl?.ToString());
+            var response = await grant.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+            var token = response.GetProperty("token").GetString();
+            Assert.NotNull(token);
+            Assert.Equal(64, token.Length);
+
+            using var webAttempt = await web.PostAsJsonAsync(
+                $"http://127.0.0.1:{ports[0]}/agent/enroll", new { token });
+            Assert.Equal(HttpStatusCode.NotFound, webAttempt.StatusCode);
+            using var malformedIdentity = agentPki.CreateClient(agentPki.MalformedIdentityClient);
+            using var malformed = await malformedIdentity.PostAsJsonAsync(
+                $"{agentBase}/agent/enroll", new { token });
+            Assert.Equal(HttpStatusCode.Forbidden, malformed.StatusCode);
+            using var enrolled = await agent.PostAsJsonAsync($"{agentBase}/agent/enroll", new { token });
+            Assert.Equal(HttpStatusCode.NoContent, enrolled.StatusCode);
+            using var identity = await agent.GetAsync($"{agentBase}/agent/identity");
+            Assert.Equal(HttpStatusCode.NoContent, identity.StatusCode);
+            using var replay = await agent.PostAsJsonAsync($"{agentBase}/agent/enroll", new { token });
+            Assert.Equal(HttpStatusCode.Forbidden, replay.StatusCode);
+
+            using var candidate = agentPki.CreateClient(agentPki.UnregisteredClient);
+            using var expiringGrant = await admin.PostAsJsonAsync(
+                grantUrl, new { displayName = "ignored for existing device" });
+            Assert.Equal(HttpStatusCode.OK, expiringGrant.StatusCode);
+            var expiringResponse = await expiringGrant.Content
+                .ReadFromJsonAsync<System.Text.Json.JsonElement>();
+            var expiringToken = expiringResponse.GetProperty("token").GetString();
+            Assert.NotNull(expiringToken);
+            var expiringHash = Convert.ToHexString(SHA256.HashData(
+                System.Text.Encoding.ASCII.GetBytes(expiringToken)));
+            await using (var expiryScope = fixture.Services.CreateAsyncScope())
+            {
+                var expiryDatabase = expiryScope.ServiceProvider.GetRequiredService<CoreDbContext>();
+                await expiryDatabase.AgentEnrollmentGrants
+                    .Where(row => row.TokenSha256 == expiringHash)
+                    .ExecuteUpdateAsync(setters => setters
+                        .SetProperty(row => row.ExpiresAt, DateTimeOffset.UtcNow.AddMinutes(-1)));
+            }
+
+            using var expired = await candidate.PostAsJsonAsync(
+                $"{agentBase}/agent/enroll", new { token = expiringToken });
+            Assert.Equal(HttpStatusCode.Forbidden, expired.StatusCode);
+            using var rotationGrant = await admin.PostAsJsonAsync(
+                grantUrl, new { displayName = "ignored for existing device" });
+            Assert.Equal(HttpStatusCode.OK, rotationGrant.StatusCode);
+            var rotationResponse = await rotationGrant.Content
+                .ReadFromJsonAsync<System.Text.Json.JsonElement>();
+            var rotationToken = rotationResponse.GetProperty("token").GetString();
+            using var rotated = await candidate.PostAsJsonAsync(
+                $"{agentBase}/agent/enroll", new { token = rotationToken });
+            Assert.Equal(HttpStatusCode.NoContent, rotated.StatusCode);
+            using var rotatedIdentity = await candidate.GetAsync($"{agentBase}/agent/identity");
+            Assert.Equal(HttpStatusCode.NoContent, rotatedIdentity.StatusCode);
+
+            await using var scope = fixture.Services.CreateAsyncScope();
+            var database = scope.ServiceProvider.GetRequiredService<CoreDbContext>();
+            Assert.Equal(2, await database.AgentCertificates.CountAsync(row => row.DeviceId == deviceId));
+            Assert.Equal(2, await database.AgentEnrollmentGrants.CountAsync(
+                row => row.DeviceId == deviceId && row.ConsumedAt != null));
+        }
+        finally
+        {
+            await app.StopAsync();
+        }
+    }
+
     [Fact]
     public void Admin_gateway_rejects_reuse_of_the_agent_root_ca()
     {
@@ -238,7 +442,10 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
         return port;
     }
 
-    private async Task GrantAdminRevocationAsync(Guid adminId)
+    private Task GrantAdminRevocationAsync(Guid adminId) =>
+        GrantAdminPermissionAsync(adminId, AgentCertificateRevocationService.Permission);
+
+    private async Task GrantAdminPermissionAsync(Guid adminId, string permission)
     {
         var roleId = Guid.NewGuid();
         await using var connection = new NpgsqlConnection(fixture.ConnectionString);
@@ -254,7 +461,7 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             """, connection);
         command.Parameters.AddWithValue("role_id", roleId);
         command.Parameters.AddWithValue("name", $"Admin Gateway {roleId:N}");
-        command.Parameters.AddWithValue("permission", AgentCertificateRevocationService.Permission);
+        command.Parameters.AddWithValue("permission", permission);
         command.Parameters.AddWithValue("assignment_id", Guid.NewGuid());
         command.Parameters.AddWithValue("actor_subject_id", $"person:{adminId:N}");
         command.Parameters.AddWithValue("actor_kind", (int)ActorKind.Person);
@@ -301,6 +508,12 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
 
             Directory.Delete(Path);
         }
+    }
+
+    private sealed class FailingAuditWriter : IAuditWriter
+    {
+        public ValueTask WriteAsync(AuditRecord record, CancellationToken cancellationToken = default) =>
+            ValueTask.FromException(new InvalidOperationException("Audit unavailable."));
     }
 
     private sealed class TestPki : IDisposable

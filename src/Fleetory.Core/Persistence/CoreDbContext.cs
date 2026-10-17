@@ -9,6 +9,7 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options) : DbC
 
     internal DbSet<DeviceRecord> Devices => Set<DeviceRecord>();
     internal DbSet<AgentCertificateRecord> AgentCertificates => Set<AgentCertificateRecord>();
+    internal DbSet<AgentEnrollmentGrantRecord> AgentEnrollmentGrants => Set<AgentEnrollmentGrantRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -40,6 +41,22 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options) : DbC
                 .WithMany()
                 .HasForeignKey(record => record.DeviceId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<AgentEnrollmentGrantRecord>(entity =>
+        {
+            entity.Property(record => record.DeviceId)
+                .HasConversion(
+                    id => id.Value,
+                    value => new DeviceId(value))
+                .ValueGeneratedNever();
+
+            entity.HasOne<DeviceRecord>()
+                .WithMany()
+                .HasForeignKey(record => record.DeviceId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(record => record.ExpiresAt);
         });
     }
 }

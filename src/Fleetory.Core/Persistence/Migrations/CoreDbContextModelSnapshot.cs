@@ -53,6 +53,34 @@ namespace Fleetory.Core.Persistence.Migrations
                     b.ToTable("agent_certificates", "core");
                 });
 
+            modelBuilder.Entity("Fleetory.Core.Persistence.AgentEnrollmentGrantRecord", b =>
+                {
+                    b.Property<string>("TokenSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("token_sha256");
+
+                    b.Property<DateTimeOffset?>("ConsumedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("consumed_at");
+
+                    b.Property<Guid>("DeviceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("device_id");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.HasKey("TokenSha256");
+
+                    b.HasIndex("DeviceId");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.ToTable("agent_enrollment_grants", "core");
+                });
+
             modelBuilder.Entity("Fleetory.Core.Persistence.DeviceRecord", b =>
                 {
                     b.Property<Guid>("DeviceId")
@@ -82,6 +110,15 @@ namespace Fleetory.Core.Persistence.Migrations
                 });
 
             modelBuilder.Entity("Fleetory.Core.Persistence.AgentCertificateRecord", b =>
+                {
+                    b.HasOne("Fleetory.Core.Persistence.DeviceRecord", null)
+                        .WithMany()
+                        .HasForeignKey("DeviceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Fleetory.Core.Persistence.AgentEnrollmentGrantRecord", b =>
                 {
                     b.HasOne("Fleetory.Core.Persistence.DeviceRecord", null)
                         .WithMany()

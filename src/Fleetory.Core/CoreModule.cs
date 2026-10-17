@@ -27,6 +27,7 @@ public sealed class CoreModule : FleetoryModuleBase
         services.AddScoped<IAgentCertificateBindingStore, PostgreSqlAgentCertificateBindingStore>();
         services.AddScoped<IAgentCertificateBindingVerifier, AgentCertificateBindingVerifier>();
         services.AddScoped<AgentCertificateRevocationService>();
+        services.AddScoped<AgentEnrollmentService>();
 
         services.AddDbContext<CoreDbContext>((serviceProvider, options) =>
         {
@@ -49,6 +50,7 @@ public sealed class CoreModule : FleetoryModuleBase
             .GetValue<bool>("Fleetory:AgentGateway:Enabled"))
         {
             endpoints.MapGet("/agent/identity", static () => Results.NoContent());
+            endpoints.MapPost("/agent/enroll", AgentEnrollmentEndpoints.EnrollAsync);
         }
 
         if (endpoints.ServiceProvider.GetRequiredService<IConfiguration>()
@@ -57,6 +59,9 @@ public sealed class CoreModule : FleetoryModuleBase
             endpoints.MapPost(
                 "/admin/devices/{deviceId:guid}/certificates/{fingerprint}/revoke",
                 AdminCertificateEndpoints.RevokeAsync);
+            endpoints.MapPost(
+                "/admin/devices/{deviceId:guid}/enrollment-grants",
+                AgentEnrollmentEndpoints.CreateGrantAsync);
         }
     }
 }
