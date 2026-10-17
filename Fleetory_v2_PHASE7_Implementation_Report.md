@@ -29,13 +29,13 @@
 | Local WebAuthn/OIDC with real Admin mTLS | 401 without token; 403 with WebAuthn token at RBAC |
 | Windows server TLS chain in CI with provisioned OS CA stores | 2 certificates sent; root-only OpenSSL verification code 0 |
 | Linux container server TLS chain | 2 certificates sent; root-only OpenSSL verification code 0 |
-| CI coverage at `e79ce79` | 90.03% |
-| Sonar PR coverage at `e79ce79` | 88.8% |
-| Sonar new-code coverage at `e79ce79` | 88.93% |
-| Sonar duplication at `e79ce79` | 0.0% |
-| Sonar Quality Gate at `e79ce79` | PASS |
+| CI coverage at `e9b95f1` | 90.03% |
+| Sonar PR coverage at `e9b95f1` | 88.8% |
+| Sonar new-code coverage at `e9b95f1` | 88.93% |
+| Sonar duplication at `e9b95f1` | 0.0% |
+| Sonar Quality Gate at `e9b95f1` | PASS |
 
-The latest completed CI and Sonar numbers come from [run 39074785259](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39074785259). They predate the recovery procedure in this working tree. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
+The latest completed CI and Sonar numbers come from [run 39075300878](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39075300878). The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
 
 ## Required before completion
 
