@@ -21,6 +21,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  windows-tls-chain:
+    name: Windows root-only TLS chain
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build Server
+        shell: pwsh
+        run: dotnet build src/Fleetory.Server/Fleetory.Server.csproj -c Release
+
+      - name: Verify root-only Windows TLS chain
+        shell: pwsh
+        run: ./eng/verify-windows-tls-chain.ps1
+
   quality:
     name: Strict build, tests, coverage and Sonar
     runs-on: ubuntu-latest
