@@ -58,6 +58,7 @@ services:
     ports:
       - 127.0.0.1:5433:5432
       - 127.0.0.1:3324:3322
+      - 127.0.0.1:8090:8080
     volumes:
       - immudb-data:/var/lib/immudb
     restart: unless-stopped

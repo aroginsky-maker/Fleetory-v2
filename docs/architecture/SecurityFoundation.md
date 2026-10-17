@@ -38,7 +38,7 @@ Platform migration `202610160003_AddAuditExportLease` adds attempt count, due ti
 
 The optional background worker starts only with `Fleetory:AuditExport:Enabled=true`. Enabling it requires an `IAuditExportSink` registration; without one, Server startup fails instead of pretending that export works. The default remains disabled while no production SIEM/WORM sink is configured. The worker batches at most three entries under a two-minute lease and gives each sink call a 30-second cancellation deadline. If a sink ignores cancellation, another node may retry after lease expiry; sink idempotency remains required. Retry logs contain event IDs and attempt counts, not sink exception messages. Integration tests cover successful delivery, failed delivery and retry, expired lease recovery, concurrent claims and the enabled background worker.
 
-A concrete external SIEM/WORM sink, its credential loading and retention controls remain open. The outbox and delivery contract are ready for that integration; they do not by themselves prove external immutable retention.
+The `Immudb` sink can be selected with `Fleetory:AuditExport:Enabled=true`, `Fleetory:AuditExport:Sink=Immudb`, `Fleetory:AuditExport:Address=<HTTPS origin>` and `Fleetory:AuditExport:Username=<writer name>`. It loads `audit-immudb-password` through `ISecretProvider`. Plain HTTP is accepted only for a loopback origin in Development. It uses immudb's conditional write (`KeyMustNotExist`) with a stable EventId key, then reads back the value and requires revision 1. Matching retries are acknowledged without adding another revision; conflicting content fails and remains in the outbox. The local immudb instance and a simulated retry/conflict test verify this behavior. This transport does not yet prove production retention, cryptographic verification of server state, protected backups or separation of audit administrator duties.
 
 ## Implemented local RBAC evaluation
 
@@ -99,7 +99,7 @@ Fleetory Server does not issue or sign certificates and has no Agent CA private 
 - External Agent CA issuance and grant delivery, CA lifecycle, full rotation administration, Admin certificate lifecycle, identity-collision policy, reconciliation of ambiguous audit outcomes, and revocation propagation to future long-lived Agent streams.
 - A protected signing service and secure trust-file distribution, plus Agent runtime wiring of the verifier, replay store and policy before any command execution. High-risk and bulk command types require an approval protocol before they can be enabled.
 - Positive browser WebAuthn ceremony and signed-token integration test against the local Keycloak realm, audited role/scope administration and enforcement at future privileged routes.
-- Concrete external SIEM/WORM audit sink, its credential integration and retention controls; wiring audited security call sites as those flows are implemented.
+- Production immudb hardening: dedicated audit credentials, TLS, retention/backup and independently anchored verification; wiring audited security call sites as those flows are implemented.
 - Abuse, negative authorization, recovery and cross-platform security tests, then the full Sonar Quality Gate.
 
 PHASE 7 remains open until these controls are integrated and independently verified. No Agent execution endpoint or privileged command route is exposed by this slice.

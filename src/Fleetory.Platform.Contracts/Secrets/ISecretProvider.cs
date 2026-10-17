@@ -14,4 +14,5 @@ public static class FleetorySecretNames
     public const string AdminGatewayRootCa = "admin-gateway-root-ca";
     public const string AdminGatewayServerCertificate = "admin-gateway-server-cert";
     public const string AdminGatewayServerPrivateKey = "admin-gateway-server-key";
+    public const string AuditImmudbPassword = "audit-immudb-password";
 }

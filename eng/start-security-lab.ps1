@@ -90,5 +90,11 @@ Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8200/v1/secret/data/fleeto
     -Headers @{ 'X-Vault-Token' = $settings['FLEETORY_LAB_OPENBAO_TOKEN'] } `
     -ContentType 'application/json' -Body $body -TimeoutSec 10 | Out-Null
 
-Write-Host 'Fleetory security lab started on loopback ports 9002, 9003, 8088, 8200, 5433, 3324 and 5440.'
+$auditBody = @{ data = @{ value = $settings['FLEETORY_LAB_IMMUDB_PASSWORD'] } } |
+    ConvertTo-Json -Compress -Depth 4
+Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8200/v1/secret/data/fleetory/audit-immudb-password' `
+    -Headers @{ 'X-Vault-Token' = $settings['FLEETORY_LAB_OPENBAO_TOKEN'] } `
+    -ContentType 'application/json' -Body $auditBody -TimeoutSec 10 | Out-Null
+
+Write-Host 'Fleetory security lab started on loopback ports 9002, 9003, 8088, 8200, 5433, 3324, 8090 and 5440.'
 Write-Host "Lab credentials are stored in $envPath"

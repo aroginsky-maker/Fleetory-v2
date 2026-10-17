@@ -18,14 +18,7 @@ public sealed class OpenBaoSecretProvider : ISecretProvider, IDisposable
     public OpenBaoSecretProvider(Uri address, string token, bool allowInsecureLoopback = false,
         HttpMessageHandler? handler = null)
     {
-        ArgumentNullException.ThrowIfNull(address);
-        if (!address.IsAbsoluteUri || address.AbsolutePath != "/" ||
-            address.Query.Length != 0 || address.Fragment.Length != 0 ||
-            address.Scheme != Uri.UriSchemeHttps &&
-            !(allowInsecureLoopback && address.Scheme == Uri.UriSchemeHttp && address.IsLoopback))
-        {
-            throw new ArgumentException("OpenBao address must be an HTTPS origin.", nameof(address));
-        }
+        HttpOriginPolicy.Validate(address, allowInsecureLoopback, "OpenBao");
 
         ArgumentException.ThrowIfNullOrWhiteSpace(token);
         if (token.Length > 512 || token.Any(character =>

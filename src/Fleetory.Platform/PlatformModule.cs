@@ -9,6 +9,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Hosting;
+using Fleetory.Platform.Contracts.Secrets;
 using Fleetory.SharedKernel;
 
 namespace Fleetory.Platform;
@@ -30,6 +33,25 @@ public sealed class PlatformModule : FleetoryModuleBase
         services.AddScoped<IAuthorizationService, PostgreSqlAuthorizationService>();
         if (configuration.GetValue<bool>("Fleetory:AuditExport:Enabled"))
         {
+            if (configuration["Fleetory:AuditExport:Sink"] == "Immudb")
+            {
+                services.TryAddSingleton<IAuditExportSink>(serviceProvider =>
+                {
+                    var address = configuration["Fleetory:AuditExport:Address"];
+                    var username = configuration["Fleetory:AuditExport:Username"];
+                    if (!Uri.TryCreate(address, UriKind.Absolute, out var uri) ||
+                        string.IsNullOrWhiteSpace(username))
+                    {
+                        throw new InvalidOperationException("Immudb audit export requires Address and Username.");
+                    }
+
+                    var password = serviceProvider.GetRequiredService<ISecretProvider>()
+                        .GetRequiredSecret(FleetorySecretNames.AuditImmudbPassword);
+                    var environment = serviceProvider.GetRequiredService<IHostEnvironment>();
+                    return new ImmudbAuditExportSink(uri, username, password,
+                        allowInsecureLoopback: environment.IsDevelopment());
+                });
+            }
             services.AddSingleton<PostgreSqlAuditExportPump>();
             services.AddHostedService<AuditExportWorker>();
         }
