@@ -57,6 +57,7 @@ services:
       IMMUDB_ADMIN_PASSWORD: ${FLEETORY_LAB_IMMUDB_PASSWORD:?required}
     ports:
       - 127.0.0.1:5433:5432
+      - 127.0.0.1:3324:3322
     volumes:
       - immudb-data:/var/lib/immudb
     restart: unless-stopped

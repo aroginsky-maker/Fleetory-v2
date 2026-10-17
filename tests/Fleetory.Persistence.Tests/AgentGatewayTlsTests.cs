@@ -654,6 +654,18 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
 
         public HttpClient CreateClient(X509Certificate2? certificate = null)
         {
+            if (Intermediate is not null && certificate is not null)
+            {
+                var socketsHandler = new SocketsHttpHandler();
+                socketsHandler.SslOptions.ClientCertificateContext =
+                    SslStreamCertificateContext.Create(certificate,
+                        new X509Certificate2Collection { Intermediate }, offline: true);
+                socketsHandler.SslOptions.RemoteCertificateValidationCallback =
+                    (_, server, peerChain, errors) =>
+                        ValidateServer(server as X509Certificate2, peerChain, errors);
+                return new HttpClient(socketsHandler);
+            }
+
             var handler = new HttpClientHandler
             {
                 ClientCertificateOptions = ClientCertificateOption.Manual
@@ -664,27 +676,31 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             }
 
             handler.ServerCertificateCustomValidationCallback = (_, server, peerChain, errors) =>
-            {
-                if (server is null || (errors & SslPolicyErrors.RemoteCertificateNameMismatch) != 0)
-                {
-                    return false;
-                }
-
-                using var chain = new X509Chain();
-                chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
-                chain.ChainPolicy.CustomTrustStore.Add(Root);
-                chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
-                if (peerChain is not null)
-                {
-                    foreach (var element in peerChain.ChainElements.Cast<X509ChainElement>().Skip(1))
-                    {
-                        chain.ChainPolicy.ExtraStore.Add(element.Certificate);
-                    }
-                }
-
-                return chain.Build(server);
-            };
+                ValidateServer(server, peerChain, errors);
             return new HttpClient(handler);
+        }
+
+        private bool ValidateServer(X509Certificate2? server, X509Chain? peerChain,
+            SslPolicyErrors errors)
+        {
+            if (server is null || (errors & SslPolicyErrors.RemoteCertificateNameMismatch) != 0)
+            {
+                return false;
+            }
+
+            using var chain = new X509Chain();
+            chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
+            chain.ChainPolicy.CustomTrustStore.Add(Root);
+            chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+            if (peerChain is not null)
+            {
+                foreach (var element in peerChain.ChainElements.Cast<X509ChainElement>().Skip(1))
+                {
+                    chain.ChainPolicy.ExtraStore.Add(element.Certificate);
+                }
+            }
+
+            return chain.Build(server);
         }
 
         public void Dispose()
