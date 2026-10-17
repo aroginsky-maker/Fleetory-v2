@@ -100,6 +100,58 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
     }
 
     [Fact]
+    public async Task Admin_gateway_with_oidc_rejects_certificate_without_mfa_token()
+    {
+        var adminId = Guid.NewGuid();
+        using var adminPki = new TestPki(new Uri($"urn:fleetory:admin:{adminId:D}"));
+        using var secrets = new TestSecretDirectory();
+        secrets.Write("fleetory-postgresql", fixture.ConnectionString);
+        secrets.Write("admin-gateway-root-ca", adminPki.Root.ExportCertificatePem());
+        secrets.Write("admin-gateway-server-cert", adminPki.Server.ExportCertificatePem());
+        secrets.Write("admin-gateway-server-key", adminPki.ServerKey.ExportPkcs8PrivateKeyPem());
+
+        var webPort = GetFreePort();
+        var adminPort = GetFreePort();
+        while (webPort == adminPort) { adminPort = GetFreePort(); }
+
+        await using var app = FleetoryApplication.Build([
+            "--environment=Development",
+            $"--Fleetory:Secrets:Directory={secrets.Path}",
+            "--Fleetory:AdminGateway:Enabled=true",
+            "--Fleetory:AdminGateway:Oidc:Enabled=true",
+            "--Fleetory:AdminGateway:Oidc:Authority=http://127.0.0.1:1/realms/fleetory",
+            "--Fleetory:AdminGateway:Oidc:Audience=fleetory-admin-api",
+            "--Fleetory:AdminGateway:Oidc:ClientId=fleetory-admin-lab",
+            $"--Fleetory:Web:Port={webPort}",
+            $"--Fleetory:AdminGateway:Port={adminPort}"
+        ]);
+        await app.StartAsync();
+        try
+        {
+            using var admin = adminPki.CreateClient(adminPki.Client);
+            using var denied = await admin.PostAsJsonAsync(
+                $"https://127.0.0.1:{adminPort}/admin/devices/{Guid.NewGuid():D}/enrollment-grants",
+                new { displayName = "denied" });
+            Assert.Equal(HttpStatusCode.Unauthorized, denied.StatusCode);
+            var correlationId = Assert.Single(denied.Headers.GetValues("X-Correlation-ID"));
+            await using var connection = new NpgsqlConnection(fixture.ConnectionString);
+            await connection.OpenAsync();
+            await using var audit = new NpgsqlCommand("""
+                SELECT count(*) FROM platform.audit_events
+                WHERE action = 'admin.oidc.denied'
+                  AND actor_subject_id = @actor AND correlation_id = @correlation
+                """, connection);
+            audit.Parameters.AddWithValue("actor", $"person:{adminId:N}");
+            audit.Parameters.AddWithValue("correlation", correlationId);
+            Assert.Equal(1L, await audit.ExecuteScalarAsync());
+        }
+        finally
+        {
+            await app.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task Enrollment_requires_durable_audit_before_grant_or_binding_changes()
     {
         var deviceId = new DeviceId(Guid.NewGuid());

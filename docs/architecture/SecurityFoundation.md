@@ -1,6 +1,6 @@
 # Fleetory PHASE 7 Security Foundation
 
-**Status:** IN PROGRESS — Command Plane verification, local audit persistence/export transport, RBAC evaluation and Agent mTLS enrollment, 17 October 2026.
+**Status:** IN PROGRESS — Command Plane verification, local audit persistence/export transport, RBAC evaluation, Agent mTLS enrollment and Admin OIDC gate, 17 October 2026.
 
 The local self-hosted integration stack and its current limits are documented in [SecurityLab.md](SecurityLab.md). Fleetory can now read its PostgreSQL connection through an OpenBao KV v2 provider. The Agent and Admin gateway loaders accept a pinned root with a bounded intermediate chain and present the server chain during TLS. Tests cover OpenBao failure modes and a real mTLS request through an intermediate CA.
 
@@ -50,7 +50,7 @@ This is an evaluator and persistence boundary, not a login or role-administratio
 
 `Fleetory.Platform.Contracts` owns `ISecretProvider`; Platform implements a bounded UTF-8 file adapter for an externally provisioned secret mount. In non-development environments, Server requires an absolute `Fleetory:Secrets:Directory` and reads `fleetory-postgresql` before startup. Both Platform and Core obtain their PostgreSQL connection string from the same provider. Direct `ConnectionStrings:Fleetory` is rejected in these environments and cannot be combined with a secret directory. The provider caches values for the process lifetime, so rotation requires a restart. It rejects missing, empty, oversized, invalid UTF-8 and unsafe names. On Unix it rejects secret files readable by group or others; Windows deployment must enforce an ACL granting only the service identity access.
 
-The secret manager or OS mount is responsible for provisioning, access control and rotation. This adapter does not yet implement a Vault API or production delivery of external audit-sink credentials. No secret contents are emitted in provider error messages.
+The secret manager or OS mount is responsible for provisioning, access control and rotation. Fleetory also has an OpenBao KV v2 adapter selected with `Fleetory:Secrets:Provider=OpenBao`. It reads the same named secrets through an authenticated API, requires HTTPS outside Development, and accepts plain HTTP only on loopback in Development. Both adapters cache secrets for the process lifetime, so rotation requires a restart. Production delivery of external audit-sink credentials is still open. No secret contents are emitted in provider error messages.
 
 ## Implemented Agent certificate binding foundation
 
@@ -80,7 +80,7 @@ The service writes a second audit event after the Core update, with `revoked` or
 
 Core owns `POST /admin/devices/{deviceId}/certificates/{fingerprint}/revoke`. It is reachable only on the Admin mTLS port; web and Agent ports return 404. A successful call returns 204 after the authorized request, atomic Core update and completion audit event have been persisted. Denied authorization returns 403 and is audited. Invalid identity or a missing/foreign client certificate is refused. The Admin listener does not expose health or module routes. The end-to-end test covers the three-port boundary, separate CAs, denied grants and identities, audit completion and Agent rejection after revocation.
 
-This is certificate-based administrative authentication for certificate lifecycle operations, not general human login, MFA/WebAuthn or a role management UI. Deployment must restrict access to the Admin port to a management network and provision Admin certificates and grants under a separate approval process. Admin certificate lifecycle and issuance, distributed rate limits and recovery of ambiguous audit outcomes remain open.
+The Admin listener can additionally require an OIDC access token via `Fleetory:AdminGateway:Oidc:Enabled=true`. The JWT bearer handler validates issuer, audience, signature and lifetime against the configured authority. Fleetory then requires `azp` to equal the configured client ID, `amr` to contain `webauthn`, and the token `sub` UUID to equal the UUID in the client certificate's Admin SAN. A certificate without a token receives 401 before RBAC or Core work; the denial is persisted through `IAuditWriter` with the certificate actor and correlation ID, without storing token contents. When the Admin listener is enabled outside Development, OIDC is mandatory at startup. Development may still run certificate-only tests. The provider's authentication flow must ensure the `amr` claim reflects a completed WebAuthn execution; the local Keycloak provisioner configures that reference. This establishes a dual proof for the existing administrative routes, not a general login UI or a role-management surface. Deployment must restrict access to the Admin port to a management network and provision Admin certificates and grants under a separate approval process. Admin certificate lifecycle and issuance, distributed rate limits and recovery of ambiguous audit outcomes remain open.
 
 The Admin enrollment and revocation routes now share a fixed one-minute request limit per Server instance. The default is 30 requests per minute; `Fleetory:AdminGateway:RateLimitPerMinute` accepts 1–300 for deployment sizing. Excess requests return HTTP 429 before repeating authorization and database work. This limit is per process, so an ingress must enforce a fleet-wide limit across Server replicas. A real mTLS integration test verifies the 429 response.
 
@@ -98,7 +98,7 @@ Fleetory Server does not issue or sign certificates and has no Agent CA private 
 
 - External Agent CA issuance and grant delivery, CA lifecycle, full rotation administration, Admin certificate lifecycle, identity-collision policy, reconciliation of ambiguous audit outcomes, and revocation propagation to future long-lived Agent streams.
 - A protected signing service and secure trust-file distribution, plus Agent runtime wiring of the verifier, replay store and policy before any command execution. High-risk and bulk command types require an approval protocol before they can be enabled.
-- Human authentication with MFA/WebAuthn foundation, audited role/scope administration and enforcement at future privileged routes.
+- Positive browser WebAuthn ceremony and signed-token integration test against the local Keycloak realm, audited role/scope administration and enforcement at future privileged routes.
 - Concrete external SIEM/WORM audit sink, its credential integration and retention controls; wiring audited security call sites as those flows are implemented.
 - Abuse, negative authorization, recovery and cross-platform security tests, then the full Sonar Quality Gate.
 

@@ -37,8 +37,25 @@ function Issue-LabCertificate {
     if ($LASTEXITCODE -ne 0) { throw "Key copy failed for $Service." }
 }
 
-$deviceId = [Guid]::NewGuid().ToString('D')
-$adminId = [Guid]::NewGuid().ToString('D')
+function Get-OrCreate-LabIdentity {
+    param([string] $Name)
+
+    $path = Join-Path $certDirectory $Name
+    if (Test-Path -LiteralPath $path -PathType Leaf) {
+        $value = [IO.File]::ReadAllText($path).Trim()
+        $parsed = [Guid]::Empty
+        if ([Guid]::TryParseExact($value, 'D', [ref] $parsed) -and
+            $parsed -ne [Guid]::Empty) {
+            return $parsed.ToString('D')
+        }
+        throw "The existing $Name is not a valid identity."
+    }
+
+    return [Guid]::NewGuid().ToString('D')
+}
+
+$deviceId = Get-OrCreate-LabIdentity 'agent-device-id'
+$adminId = Get-OrCreate-LabIdentity 'admin-person-id'
 Issue-LabCertificate 'agent-ca' 'fleetory-agent-lab' '127.0.0.1' `
     @('127.0.0.1', 'localhost') 'agent-server'
 Issue-LabCertificate 'agent-ca' 'fleetory-agent-lab' 'Fleetory Agent Lab' `

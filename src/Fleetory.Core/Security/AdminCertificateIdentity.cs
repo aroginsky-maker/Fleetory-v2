@@ -3,7 +3,7 @@ using Fleetory.Platform.Contracts;
 
 namespace Fleetory.Core.Security;
 
-internal static class AdminCertificateIdentity
+public static class AdminCertificateIdentity
 {
     private const string AdminUriPrefix = "urn:fleetory:admin:";
 

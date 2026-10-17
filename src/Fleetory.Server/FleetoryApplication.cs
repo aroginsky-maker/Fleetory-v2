@@ -3,14 +3,17 @@ using Fleetory.CMDB;
 using Fleetory.Core;
 using Fleetory.Core.Contracts;
 using Fleetory.Core.Security;
+using Microsoft.AspNetCore.Authentication;
 using Fleetory.Integrations;
 using Fleetory.ITSM;
 using Fleetory.ModuleAbstractions;
 using Fleetory.Monitoring;
 using Fleetory.Platform;
 using Fleetory.Platform.Contracts.Secrets;
+using Fleetory.Platform.Contracts;
 using Fleetory.Platform.Persistence;
 using Fleetory.Platform.Secrets;
+using Fleetory.SharedKernel;
 using Fleetory.Server.Infrastructure;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using System.Threading.RateLimiting;
@@ -28,6 +31,7 @@ public static class FleetoryApplication
 
         var secrets = ConfigureSecrets(builder);
         var gateway = GatewayStartup.Configure(builder, secrets);
+        var adminOidcEnabled = AdminOidcAuthentication.Configure(builder);
 
         builder.Logging.ClearProviders();
         builder.Logging.AddJsonConsole(options => options.IncludeScopes = true);
@@ -104,12 +108,39 @@ public static class FleetoryApplication
                 }
                 else if (context.Connection.LocalPort == gateway.AdminPort)
                 {
-                    if (!context.Request.Path.StartsWithSegments("/admin") ||
-                        await context.Connection.GetClientCertificateAsync(
-                            context.RequestAborted) is null)
+                    var adminCertificate = await context.Connection.GetClientCertificateAsync(
+                        context.RequestAborted);
+                    if (!context.Request.Path.StartsWithSegments("/admin") || adminCertificate is null)
                     {
                         context.Response.StatusCode = StatusCodes.Status404NotFound;
                         return;
+                    }
+
+                    if (adminOidcEnabled)
+                    {
+                        if (!AdminCertificateIdentity.TryReadActor(adminCertificate, out var actor) ||
+                            actor is null)
+                        {
+                            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                            return;
+                        }
+
+                        var authentication = await context.AuthenticateAsync(AdminOidcAuthentication.Scheme);
+                        var clientId = context.RequestServices.GetRequiredService<IConfiguration>()
+                            ["Fleetory:AdminGateway:Oidc:ClientId"]!;
+                        if (!authentication.Succeeded ||
+                            !AdminOidcAuthentication.MatchesMfaActor(
+                                authentication.Principal!, actor.SubjectId, clientId))
+                        {
+                            await context.RequestServices.GetRequiredService<IAuditWriter>()
+                                .WriteAsync(new AuditRecord(
+                                    actor, "admin.oidc.denied", null,
+                                    new CorrelationId(context.TraceIdentifier),
+                                    context.RequestServices.GetRequiredService<IClock>().UtcNow),
+                                    context.RequestAborted);
+                            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                            return;
+                        }
                     }
                 }
                 else if (context.Request.Path.StartsWithSegments("/agent") ||
