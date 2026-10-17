@@ -8,6 +8,7 @@
 - Local PostgreSQL RBAC with exact permissions and scoped grants; Admin OIDC gate validates signed tokens, WebAuthn AMR, client ID and certificate subject matching. Keycloak lab realm enforces WebAuthn and S256 PKCE.
 - PostgreSQL audit event and outbox transaction, lease-based background export and retry. Optional immudb sink uses conditional EventId writes, readback and revision checks. The lab supplies its password through OpenBao.
 - File and OpenBao secret providers; Agent-local ECDSA command verification, deny-by-default policy, durable SQLite replay store and per-device public-key trust files. No Agent command execution endpoint is exposed.
+- Lab-only OpenBao Transit signing key with a separate sign-only token and DeviceId-bound public trust file. The Server token is read-only for its KV secrets.
 
 ## Verification snapshot
 
@@ -18,13 +19,13 @@
 | Local coverage after adding lab verifier | 90.99% |
 | Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
 | Local full audit pipeline | PostgreSQL outbox → Fleetory worker → immudb readback passed |
-| CI coverage at `6653b9f` | 90.37% |
-| Sonar PR coverage at `6653b9f` | 88.4% |
-| Sonar new-code coverage at `6653b9f` | 88.36% |
-| Sonar duplication at `6653b9f` | 0.0% |
-| Sonar Quality Gate at `6653b9f` | PASS |
+| CI coverage at `d9cd242` | 91.27% |
+| Sonar PR coverage at `d9cd242` | 88.9% |
+| Sonar new-code coverage at `d9cd242` | 89.04% |
+| Sonar duplication at `d9cd242` | 0.0% |
+| Sonar Quality Gate at `d9cd242` | PASS |
 
-The CI and Sonar numbers come from [run 39032654425](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39032654425). The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
+The latest CI and Sonar numbers come from [run 39033024327](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39033024327). The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
 
 ## Required before completion
 

@@ -50,21 +50,23 @@ foreach ($entry in $entries) {
     if ($separator -gt 0) { $settings[$entry.Substring(0, $separator)] = $entry.Substring($separator + 1) }
 }
 $tokenFile = Join-Path $labDirectory 'openbao-token'
-[System.IO.File]::WriteAllText($tokenFile, $settings['FLEETORY_LAB_OPENBAO_TOKEN'],
-    [System.Text.UTF8Encoding]::new($false))
+$previousToken = $null
+if (Test-Path -LiteralPath $tokenFile) {
+    $previousToken = [IO.File]::ReadAllText($tokenFile)
+    if ($previousToken -eq $settings['FLEETORY_LAB_OPENBAO_TOKEN']) {
+        Remove-Item -LiteralPath $tokenFile
+    }
+}
 if ($env:OS -eq 'Windows_NT') {
     $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
     & icacls $labDirectory /inheritance:r /grant:r "${identity}:(OI)(CI)F" | Out-Null
     if ($LASTEXITCODE -ne 0) { throw 'Could not restrict lab directory ACL.' }
-    foreach ($path in @($envPath, $tokenFile)) {
-        & icacls $path /inheritance:r /grant:r "${identity}:F" | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw 'Could not restrict lab credential ACL.' }
-    }
+    & icacls $envPath /inheritance:r /grant:r "${identity}:F" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not restrict lab credential ACL.' }
 }
 else {
     & chmod 700 $labDirectory
     & chmod 600 $envPath
-    & chmod 600 $tokenFile
 }
 
 & docker compose --env-file $envPath -f $composePath config --quiet
@@ -95,6 +97,45 @@ $auditBody = @{ data = @{ value = $settings['FLEETORY_LAB_IMMUDB_PASSWORD'] } } 
 Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8200/v1/secret/data/fleetory/audit-immudb-password' `
     -Headers @{ 'X-Vault-Token' = $settings['FLEETORY_LAB_OPENBAO_TOKEN'] } `
     -ContentType 'application/json' -Body $auditBody -TimeoutSec 10 | Out-Null
+
+$rootHeaders = @{ 'X-Vault-Token' = $settings['FLEETORY_LAB_OPENBAO_TOKEN'] }
+$serverPolicy = @'
+path "secret/data/fleetory/*" {
+  capabilities = ["read"]
+}
+'@
+$policyBody = @{ policy = $serverPolicy } | ConvertTo-Json -Compress
+Invoke-RestMethod -Method Put -Uri 'http://127.0.0.1:8200/v1/sys/policies/acl/fleetory-server' `
+    -Headers $rootHeaders -ContentType 'application/json' -Body $policyBody -TimeoutSec 10 | Out-Null
+$tokenBody = @{
+    policies = @('fleetory-server')
+    no_default_policy = $true
+    renewable = $false
+    ttl = '24h'
+    explicit_max_ttl = '24h'
+    orphan = $true
+} | ConvertTo-Json -Compress
+$issued = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8200/v1/auth/token/create' `
+    -Headers $rootHeaders -ContentType 'application/json' -Body $tokenBody -TimeoutSec 10
+if ([string]::IsNullOrWhiteSpace($issued.auth.client_token)) {
+    throw 'OpenBao did not issue the Fleetory Server token.'
+}
+if ($previousToken -and $previousToken -ne $settings['FLEETORY_LAB_OPENBAO_TOKEN']) {
+    try {
+        $revokeBody = @{ token = $previousToken } | ConvertTo-Json -Compress
+        Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8200/v1/auth/token/revoke' `
+            -Headers $rootHeaders -ContentType 'application/json' -Body $revokeBody -TimeoutSec 10 |
+            Out-Null
+    }
+    catch { Write-Warning 'Previous Server token could not be revoked; it expires within 24 hours.' }
+}
+[IO.File]::WriteAllText($tokenFile, $issued.auth.client_token,
+    [Text.UTF8Encoding]::new($false))
+if ($env:OS -eq 'Windows_NT') {
+    & icacls $tokenFile /inheritance:r /grant:r "${identity}:F" | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw 'Could not restrict Server token ACL.' }
+}
+else { & chmod 600 $tokenFile }
 
 Write-Host 'Fleetory security lab started on loopback ports 9002, 9003, 8088, 8200, 5433, 3324, 8090 and 5440.'
 Write-Host "Lab credentials are stored in $envPath"

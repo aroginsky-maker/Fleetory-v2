@@ -24,6 +24,8 @@ This is a security contract, **not** the PHASE 8 Agent wire protocol. Private si
 
 The command security tests cover valid signatures, target mismatch, expiry/future/overlong windows, payload and nonce tampering, unknown and malformed keys, policy denial, repeated commands and nonce reuse, oversized/malformed envelopes, input-copy isolation, replay-store failure, durable restart and concurrent consumption, and trust-file removal. Architecture tests keep the contracts in Core ownership.
 
+The local lab now provisions a non-exportable OpenBao Transit P-256 signing key, a separate one-hour sign-only token and the matching Agent trust file. A live signature from that token matched the command contract; the Agent verifier accepted an `Inventory.Refresh` once and rejected replay. Fleetory Server receives only an OpenBao KV read token and cannot call Transit sign. This proves the format and lab credential split, but the lab's single desktop user and OpenBao development mode do not establish production signer isolation, authorization or recovery.
+
 ## Implemented local audit persistence
 
 Platform now registers `IAuditWriter` backed by PostgreSQL. A write inserts an append-only `platform.audit_events` row and a matching `platform.audit_export_queue` row in the same transaction. The method returns only after commit. A database or transaction failure propagates to the caller; critical call sites must not swallow it. Both tables and their indexes are created by Platform migration `202610160001_AddPlatformAuditOutbox`. No foreign key crosses a module schema.
