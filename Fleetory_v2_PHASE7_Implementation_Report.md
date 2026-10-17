@@ -30,15 +30,16 @@
 | Disposable PostgreSQL and migrations | PASS |
 | Windows/Linux server packages and Windows production smoke | PASS |
 | Local production line coverage | 92.10% |
-| CI production line coverage | Pending this increment |
-| Sonar overall coverage | Pending this increment |
-| Sonar new-code coverage | Pending this increment |
-| Sonar overall duplication | Pending this increment |
-| Sonar new-code duplication | Pending this increment |
-| Open Sonar issues for PR | Pending this increment |
-| Sonar Quality Gate | Pending this increment |
+| CI production line coverage | 92.27% |
+| Sonar overall coverage | 89.9% |
+| Sonar new-code coverage | 90.48% |
+| Sonar overall duplication | 0.8% |
+| Sonar new-code duplication | 0.98% |
+| New Sonar issues for PR | 0 |
+| New Security Hotspots for PR | 0 |
+| Sonar Quality Gate | PASS |
 
-Local PHASE 6 regression verification passed with disposable PostgreSQL, migrations, Windows/Linux packages and Windows runtime smoke. The current Admin Gateway increment awaits CI/Sonar analysis. The prior revocation increment passed [GitHub Actions run 39002583588](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39002583588) at commit `92b7904`: Sonar reported 90.60283687943263% new-code coverage, 90.0% overall coverage, 0.0% duplication and zero open PR issues. Security Hotspots were not separately available from the metrics report. PHASE 7 as a whole remains IN PROGRESS.
+Local PHASE 6 regression verification passed with disposable PostgreSQL, migrations, Windows/Linux packages and Windows runtime smoke. The Admin Gateway increment passed [GitHub Actions run 39004025384](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39004025384) at commit `3f1558c`: Sonar reported 90.48361934477379% new-code coverage and 0.9847365829640571% new-code duplication, rounded above. The Sonar GitHub check reported zero new issues, zero accepted issues and zero Security Hotspots. The first CI attempt exposed rule `S8949`; a later passing attempt still reported three maintainability findings, which were corrected in the current run. PHASE 7 as a whole remains IN PROGRESS.
 
 ## Required before PHASE 7 completion
 
