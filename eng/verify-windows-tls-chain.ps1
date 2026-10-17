@@ -125,17 +125,29 @@ subjectAltName = URI:urn:fleetory:admin:00000000-0000-4000-8000-000000000001
         $clientPem + $intermediatePem, $utf8)
     [System.IO.File]::WriteAllText((Join-Path $work 'fleetory-postgresql'),
         'Host=127.0.0.1;Port=1;Database=fleetory_test_tls_chain;Username=fleetory;Timeout=1', $utf8)
+    Write-Host 'Temporary CA and gateway certificates generated.'
 
     $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
         (Join-Path $work 'root.crt'))
     $thumbprint = $certificate.Thumbprint
-    $certificate.Dispose()
-    if (Test-Path -LiteralPath "Cert:\CurrentUser\Root\$thumbprint") {
-        throw 'Ephemeral root unexpectedly exists before this CI probe.'
+    $rootStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
+        [System.Security.Cryptography.X509Certificates.StoreName]::Root,
+        [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
+    try {
+        $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+        if ($rootStore.Certificates.Find(
+            [System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
+            $thumbprint, $false).Count -ne 0) {
+            throw 'Ephemeral root unexpectedly exists before this CI probe.'
+        }
+        $rootStore.Add($certificate)
+        $installedRoot = $thumbprint
     }
-    Import-Certificate -FilePath (Join-Path $work 'root.crt') `
-        -CertStoreLocation 'Cert:\CurrentUser\Root' | Out-Null
-    $installedRoot = $thumbprint
+    finally {
+        $rootStore.Dispose()
+        $certificate.Dispose()
+    }
+    Write-Host 'Ephemeral root installed in runner CurrentUser trust.'
 
     $webPort = Get-FreePort
     $adminPort = Get-FreePort
@@ -168,6 +180,7 @@ subjectAltName = URI:urn:fleetory:admin:00000000-0000-4000-8000-000000000001
         throw ('Fleetory Server did not start: ' +
             [System.IO.File]::ReadAllText((Join-Path $work 'server.stderr.log')))
     }
+    Write-Host 'Fleetory Admin TLS listener is ready.'
 
     $wire = Invoke-OpenSsl -Arguments @('s_client', '-connect', "127.0.0.1:$adminPort",
         '-cert', (Join-Path $work 'client-chain.crt'),
@@ -185,6 +198,17 @@ finally {
         $serverProcess.WaitForExit()
     }
     if ($installedRoot) {
-        Remove-Item -LiteralPath "Cert:\CurrentUser\Root\$installedRoot" -Force
+        $rootStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
+            [System.Security.Cryptography.X509Certificates.StoreName]::Root,
+            [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
+        try {
+            $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+            foreach ($entry in $rootStore.Certificates.Find(
+                [System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
+                $installedRoot, $false)) {
+                $rootStore.Remove($entry)
+            }
+        }
+        finally { $rootStore.Dispose() }
     }
 }
