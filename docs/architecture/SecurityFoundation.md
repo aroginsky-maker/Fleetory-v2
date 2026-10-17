@@ -2,6 +2,8 @@
 
 **Status:** IN PROGRESS — Command Plane verification, local audit persistence/export transport, RBAC evaluation and Agent mTLS enrollment, 17 October 2026.
 
+The local self-hosted integration stack and its current limits are documented in [SecurityLab.md](SecurityLab.md). Fleetory can now read its PostgreSQL connection through an OpenBao KV v2 provider. The Agent and Admin gateway loaders accept a pinned root with a bounded intermediate chain and present the server chain during TLS. Tests cover OpenBao failure modes and a real mTLS request through an intermediate CA.
+
 The Fleetory Development Baseline places Agent identity, mTLS, certificate lifecycle, RBAC enforcement, durable audit, secret abstraction, signed commands and replay protection in PHASE 7, before Agent Protocol v2 and the first Agent deployment. A compromised application server must not automatically gain authority to command the whole fleet.
 
 ## Implemented first slice

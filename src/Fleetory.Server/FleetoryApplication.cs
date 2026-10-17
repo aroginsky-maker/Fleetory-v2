@@ -145,10 +145,41 @@ public static class FleetoryApplication
         return app;
     }
 
-    private static FileSecretProvider? ConfigureSecrets(WebApplicationBuilder builder)
+    private static ISecretProvider? ConfigureSecrets(WebApplicationBuilder builder)
     {
+        var providerName = builder.Configuration["Fleetory:Secrets:Provider"] ?? "File";
         var directory = builder.Configuration["Fleetory:Secrets:Directory"];
         var directConnectionString = builder.Configuration.GetConnectionString("Fleetory");
+
+        if (providerName == "OpenBao")
+        {
+            if (directory is not null || directConnectionString is not null)
+            {
+                throw new InvalidOperationException(
+                    "OpenBao secrets cannot be combined with a file secret directory or direct connection string.");
+            }
+
+            var tokenDirectory = builder.Configuration["Fleetory:Secrets:TokenDirectory"];
+            var addressValue = builder.Configuration["Fleetory:Secrets:Address"];
+            if (string.IsNullOrWhiteSpace(tokenDirectory) ||
+                !Uri.TryCreate(addressValue, UriKind.Absolute, out var address))
+            {
+                throw new InvalidOperationException("OpenBao requires TokenDirectory and Address.");
+            }
+
+            var token = new FileSecretProvider(tokenDirectory).GetRequiredSecret("openbao-token");
+            var openBao = new OpenBaoSecretProvider(address, token,
+                allowInsecureLoopback: builder.Environment.IsDevelopment());
+            var openBaoConnectionString = openBao.GetRequiredSecret(FleetorySecretNames.PostgreSqlConnectionString);
+            PostgreSqlConnectionStringValidator.Validate(openBaoConnectionString);
+            builder.Services.AddSingleton<ISecretProvider>(openBao);
+            return openBao;
+        }
+
+        if (providerName != "File")
+        {
+            throw new InvalidOperationException("Unknown Fleetory:Secrets:Provider.");
+        }
 
         if (!string.IsNullOrWhiteSpace(directory) && directConnectionString is not null)
         {

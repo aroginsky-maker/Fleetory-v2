@@ -1,0 +1,13 @@
+# PHASE 7 local security lab
+
+The lab is an isolated, loopback-only integration environment. It is not a production deployment. It runs two independent step-ca instances (Agent and Admin), Keycloak, OpenBao in development mode, immudb and PostgreSQL. Keycloak currently serves as an OIDC/MFA integration target; Fleetory does not yet authenticate human users through it. immudb is an integration target; Fleetory does not yet export audit events to it.
+
+From the repository root, run `./eng/start-security-lab.ps1`. The script creates random lab credentials in `../work/security-lab/lab.env`, starts the containers and writes the PostgreSQL connection string to OpenBao KV v2 at `secret/data/fleetory/fleetory-postgresql`. It also creates `../work/security-lab/openbao-token` for the Fleetory process. These files are outside Git and the script restricts their filesystem permissions to the current user. OpenBao development storage is ephemeral; rerun the script after its container restarts to reprovision the database secret.
+
+Build the Server, then run `./eng/verify-security-lab.ps1`. It starts Fleetory temporarily with `Fleetory:Secrets:Provider=OpenBao`, reads the token from the private file, checks `/health/ready` and stops the process. The script writes diagnostic logs to `../work/security-lab`. All published service ports bind to `127.0.0.1`.
+
+The OpenBao provider requires an HTTPS origin outside Development. Development accepts plain HTTP only for a loopback origin. It reads bounded KV v2 `value` fields, caches them for the process lifetime, and fails startup if the database secret is missing or invalid. Server and Agent gateway TLS material may be stored under the existing `FleetorySecretNames` paths in OpenBao. The server certificate value can contain the leaf followed by up to three intermediate CA certificates. The pinned root is a separate secret. The Agent and Admin roots must remain distinct.
+
+The lab currently checks service readiness, OpenBao-backed Fleetory startup, and certificate-chain behavior in automated tests. It does not establish production CA policies, MFA enforcement, immutable audit retention, credential rotation, or secured command signing. These remain PHASE 7 work before the PR can merge.
+
+Upstream references: [step-ca Docker](https://smallstep.com/docs/tutorials/docker-tls-certificate-authority/), [Keycloak containers](https://www.keycloak.org/server/containers), [OpenBao](https://openbao.org/docs/install/), [immudb](https://github.com/codenotary/immudb).

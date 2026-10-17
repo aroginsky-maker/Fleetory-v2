@@ -11,14 +11,18 @@ internal sealed class MutualTlsMaterial : IDisposable
     private const string ServerAuthenticationOid = "1.3.6.1.5.5.7.3.1";
 
     private readonly X509Certificate2 rootCa;
+    private readonly X509Certificate2Collection serverChain;
 
-    private MutualTlsMaterial(X509Certificate2 rootCa, X509Certificate2 serverCertificate)
+    private MutualTlsMaterial(X509Certificate2 rootCa, X509Certificate2 serverCertificate,
+        X509Certificate2Collection serverChain)
     {
         this.rootCa = rootCa;
         ServerCertificate = serverCertificate;
+        this.serverChain = serverChain;
     }
 
     public X509Certificate2 ServerCertificate { get; }
+    public X509Certificate2Collection ServerCertificateChain => serverChain;
     public X509Certificate2 RootCa => rootCa;
 
     public static MutualTlsMaterial Load(
@@ -30,13 +34,36 @@ internal sealed class MutualTlsMaterial : IDisposable
         ArgumentNullException.ThrowIfNull(secrets);
         X509Certificate2? root = null;
         X509Certificate2? server = null;
+        var intermediates = new X509Certificate2Collection();
+        var pemCertificates = new X509Certificate2Collection();
         try
         {
             root = X509Certificate2.CreateFromPem(
                 secrets.GetRequiredSecret(rootCaSecret));
             var serverPem = secrets.GetRequiredSecret(serverCertificateSecret);
             var keyPem = secrets.GetRequiredSecret(serverPrivateKeySecret);
+            pemCertificates.ImportFromPem(serverPem);
+            if (pemCertificates.Count is < 1 or > 4)
+            {
+                throw new InvalidOperationException("Gateway TLS material is invalid.");
+            }
+
             server = X509Certificate2.CreateFromPem(serverPem, keyPem);
+            if (!pemCertificates[0].RawData.AsSpan().SequenceEqual(server.RawData))
+            {
+                throw new InvalidOperationException("Gateway TLS material is invalid.");
+            }
+
+            for (var index = 1; index < pemCertificates.Count; index++)
+            {
+                if (!IsCertificateAuthority(pemCertificates[index]))
+                {
+                    throw new InvalidOperationException("Gateway TLS material is invalid.");
+                }
+
+                intermediates.Add(pemCertificates[index]);
+            }
+
             var pkcs12 = server.Export(X509ContentType.Pkcs12);
             try
             {
@@ -51,38 +78,44 @@ internal sealed class MutualTlsMaterial : IDisposable
             }
 
             if (!IsCertificateAuthority(root) || !IsEndEntity(server) || !server.HasPrivateKey ||
-                !BuildChain(server, root, ServerAuthenticationOid))
+                !BuildChain(server, root, ServerAuthenticationOid, intermediates))
             {
                 throw new InvalidOperationException("Gateway TLS material is invalid.");
             }
 
-            return new MutualTlsMaterial(root, server);
+            pemCertificates[0].Dispose();
+            return new MutualTlsMaterial(root, server, intermediates);
         }
         catch (Exception exception) when (exception is CryptographicException or ArgumentException)
         {
             root?.Dispose();
             server?.Dispose();
+            DisposeAll(pemCertificates);
             throw new InvalidOperationException("Gateway TLS material is invalid.");
         }
         catch
         {
             root?.Dispose();
             server?.Dispose();
+            DisposeAll(pemCertificates);
             throw;
         }
     }
 
     public bool ValidateClientCertificate(
         X509Certificate2? certificate,
-        X509Chain? _,
+        X509Chain? peerChain,
         SslPolicyErrors __) =>
         certificate is not null && IsEndEntity(certificate) &&
-        BuildChain(certificate, rootCa, ClientAuthenticationOid);
+        BuildChain(certificate, rootCa, ClientAuthenticationOid,
+            peerChain?.ChainElements.Cast<X509ChainElement>()
+                .Skip(1).Select(element => element.Certificate));
 
     public void Dispose()
     {
         ServerCertificate.Dispose();
         rootCa.Dispose();
+        DisposeAll(serverChain);
     }
 
     private static bool IsCertificateAuthority(X509Certificate2 certificate)
@@ -101,7 +134,8 @@ internal sealed class MutualTlsMaterial : IDisposable
             (usage.KeyUsages & X509KeyUsageFlags.DigitalSignature) != 0;
     }
 
-    private static bool BuildChain(X509Certificate2 certificate, X509Certificate2 root, string purposeOid)
+    private static bool BuildChain(X509Certificate2 certificate, X509Certificate2 root,
+        string purposeOid, IEnumerable<X509Certificate2>? intermediates = null)
     {
         using var chain = new X509Chain();
         chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
@@ -109,9 +143,21 @@ internal sealed class MutualTlsMaterial : IDisposable
         chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
         chain.ChainPolicy.VerificationFlags = X509VerificationFlags.NoFlag;
         chain.ChainPolicy.ApplicationPolicy.Add(new Oid(purposeOid));
+        if (intermediates is not null)
+        {
+            foreach (var intermediate in intermediates)
+            {
+                chain.ChainPolicy.ExtraStore.Add(intermediate);
+            }
+        }
 
         return chain.Build(certificate) &&
-            chain.ChainElements.Count == 2 &&
+            chain.ChainElements.Count is >= 2 and <= 5 &&
             chain.ChainElements[^1].Certificate.RawData.AsSpan().SequenceEqual(root.RawData);
+    }
+
+    private static void DisposeAll(X509Certificate2Collection certificates)
+    {
+        foreach (var certificate in certificates) { certificate.Dispose(); }
     }
 }

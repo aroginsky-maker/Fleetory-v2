@@ -23,13 +23,7 @@ public sealed class FileSecretProvider : ISecretProvider
 
     public string GetRequiredSecret(string name)
     {
-        if (string.IsNullOrEmpty(name) ||
-            name.Length > 128 ||
-            name is "." or ".." ||
-            name.Any(character => !IsAllowedNameCharacter(character)))
-        {
-            throw new ArgumentException("Secret name is invalid.", nameof(name));
-        }
+        SecretName.Validate(name);
 
         return cache.GetOrAdd(name, key => new Lazy<string>(
             () => ReadSecret(key), LazyThreadSafetyMode.ExecutionAndPublication)).Value;
@@ -85,6 +79,4 @@ public sealed class FileSecretProvider : ISecretProvider
         }
     }
 
-    private static bool IsAllowedNameCharacter(char character) =>
-        character is >= 'a' and <= 'z' or >= '0' and <= '9' or '-' or '_' or '.';
 }

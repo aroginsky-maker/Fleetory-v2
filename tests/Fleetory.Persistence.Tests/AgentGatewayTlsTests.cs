@@ -20,6 +20,40 @@ namespace Fleetory.Persistence.Tests;
 public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
 {
     [Fact]
+    public async Task Gateway_accepts_pinned_root_with_intermediate_server_chain()
+    {
+        using var pki = new TestPki(new DeviceId(Guid.NewGuid()), useIntermediate: true);
+        using var secrets = new TestSecretDirectory();
+        secrets.Write("fleetory-postgresql", fixture.ConnectionString);
+        secrets.Write("agent-gateway-root-ca", pki.Root.ExportCertificatePem());
+        secrets.Write("agent-gateway-server-cert", pki.ServerChainPem);
+        secrets.Write("agent-gateway-server-key", pki.ServerKey.ExportPkcs8PrivateKeyPem());
+
+        var webPort = GetFreePort();
+        var agentPort = GetFreePort();
+        while (webPort == agentPort) { agentPort = GetFreePort(); }
+
+        await using var app = FleetoryApplication.Build([
+            "--environment=Development",
+            $"--Fleetory:Secrets:Directory={secrets.Path}",
+            "--Fleetory:AgentGateway:Enabled=true",
+            $"--Fleetory:Web:Port={webPort}",
+            $"--Fleetory:AgentGateway:Port={agentPort}"
+        ]);
+        await app.StartAsync();
+        try
+        {
+            using var client = pki.CreateClient(pki.Client);
+            using var response = await client.GetAsync($"https://127.0.0.1:{agentPort}/agent/identity");
+            Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        }
+        finally
+        {
+            await app.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task Admin_gateway_limits_requests_before_repeated_authorization_work()
     {
         using var adminPki = new TestPki(new Uri($"urn:fleetory:admin:{Guid.NewGuid():D}"));
@@ -564,16 +598,17 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
     private sealed class TestPki : IDisposable
     {
         private readonly ECDsa rootKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        private readonly ECDsa? intermediateKey;
         private readonly ECDsa clientKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         private readonly ECDsa unregisteredKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         private readonly ECDsa malformedIdentityKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
 
-        public TestPki(DeviceId deviceId)
-            : this(new Uri($"urn:fleetory:device:{deviceId.Value:D}"))
+        public TestPki(DeviceId deviceId, bool useIntermediate = false)
+            : this(new Uri($"urn:fleetory:device:{deviceId.Value:D}"), null, useIntermediate)
         {
         }
 
-        public TestPki(Uri clientUri, Uri? unregisteredUri = null)
+        public TestPki(Uri clientUri, Uri? unregisteredUri = null, bool useIntermediate = false)
         {
             var now = DateTimeOffset.UtcNow;
             var rootRequest = new CertificateRequest("CN=Fleetory Test CA", rootKey, HashAlgorithmName.SHA256);
@@ -581,6 +616,19 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             rootRequest.CertificateExtensions.Add(new X509KeyUsageExtension(
                 X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true));
             Root = rootRequest.CreateSelfSigned(now.AddDays(-1), now.AddDays(7));
+
+            if (useIntermediate)
+            {
+                intermediateKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+                var request = new CertificateRequest("CN=Fleetory Test Intermediate",
+                    intermediateKey, HashAlgorithmName.SHA256);
+                request.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
+                request.CertificateExtensions.Add(new X509KeyUsageExtension(
+                    X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true));
+                using var publicIntermediate = request.Create(Root, now.AddHours(-1),
+                    now.AddDays(3), Guid.NewGuid().ToByteArray());
+                Intermediate = publicIntermediate.CopyWithPrivateKey(intermediateKey);
+            }
 
             ServerKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
             Server = Issue("CN=localhost", ServerKey, "1.3.6.1.5.5.7.3.1", now,
@@ -596,6 +644,8 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
         }
 
         public X509Certificate2 Root { get; }
+        public X509Certificate2? Intermediate { get; }
+        public string ServerChainPem => Server.ExportCertificatePem() + "\n" + Intermediate?.ExportCertificatePem();
         public X509Certificate2 Server { get; }
         public X509Certificate2 Client { get; }
         public X509Certificate2 UnregisteredClient { get; }
@@ -636,6 +686,8 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             Client.Dispose();
             Server.Dispose();
             ServerKey.Dispose();
+            Intermediate?.Dispose();
+            intermediateKey?.Dispose();
             Root.Dispose();
             unregisteredKey.Dispose();
             malformedIdentityKey.Dispose();
@@ -661,9 +713,11 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             request.CertificateExtensions.Add(san.Build());
 
             using var publicCertificate = request.Create(
-                Root, now.AddHours(-1), now.AddDays(1), Guid.NewGuid().ToByteArray());
+                Intermediate ?? Root, now.AddHours(-1), now.AddDays(1), Guid.NewGuid().ToByteArray());
             using var withPrivateKey = publicCertificate.CopyWithPrivateKey(key);
-            var pkcs12 = withPrivateKey.Export(X509ContentType.Pkcs12);
+            var bundle = new X509Certificate2Collection { withPrivateKey };
+            if (Intermediate is not null) { bundle.Add(Intermediate); }
+            var pkcs12 = bundle.Export(X509ContentType.Pkcs12)!;
             try
             {
                 return X509CertificateLoader.LoadPkcs12(

@@ -1,0 +1,86 @@
+name: fleetory-security-lab
+
+services:
+  agent-ca:
+    image: smallstep/step-ca:0.30.2
+    environment:
+      DOCKER_STEPCA_INIT_NAME: Fleetory Agent Lab CA
+      DOCKER_STEPCA_INIT_DNS_NAMES: localhost,agent-ca
+      DOCKER_STEPCA_INIT_PROVISIONER_NAME: fleetory-agent-lab
+      DOCKER_STEPCA_INIT_PASSWORD: ${FLEETORY_LAB_AGENT_CA_PASSWORD:?required}
+    ports:
+      - 127.0.0.1:9002:9000
+    volumes:
+      - agent-ca-data:/home/step
+    restart: unless-stopped
+
+  admin-ca:
+    image: smallstep/step-ca:0.30.2
+    environment:
+      DOCKER_STEPCA_INIT_NAME: Fleetory Admin Lab CA
+      DOCKER_STEPCA_INIT_DNS_NAMES: localhost,admin-ca
+      DOCKER_STEPCA_INIT_PROVISIONER_NAME: fleetory-admin-lab
+      DOCKER_STEPCA_INIT_PASSWORD: ${FLEETORY_LAB_ADMIN_CA_PASSWORD:?required}
+    ports:
+      - 127.0.0.1:9003:9000
+    volumes:
+      - admin-ca-data:/home/step
+    restart: unless-stopped
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.0
+    command: start-dev
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: lab-admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${FLEETORY_LAB_KEYCLOAK_ADMIN_PASSWORD:?required}
+    ports:
+      - 127.0.0.1:8088:8080
+    volumes:
+      - keycloak-data:/opt/keycloak/data
+    restart: unless-stopped
+
+  openbao:
+    image: ghcr.io/openbao/openbao:2.7.1
+    command: server -dev -dev-root-token-id=${FLEETORY_LAB_OPENBAO_TOKEN:?required}
+    environment:
+      BAO_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+    ports:
+      - 127.0.0.1:8200:8200
+    cap_add:
+      - IPC_LOCK
+    restart: unless-stopped
+
+  immudb:
+    image: codenotary/immudb:1.11.2
+    environment:
+      IMMUDB_PGSQL_SERVER: "true"
+      IMMUDB_ADMIN_PASSWORD: ${FLEETORY_LAB_IMMUDB_PASSWORD_BASE64:?required}
+    ports:
+      - 127.0.0.1:5433:5432
+    volumes:
+      - immudb-data:/var/lib/immudb
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:18.6
+    environment:
+      POSTGRES_USER: fleetory
+      POSTGRES_PASSWORD: ${FLEETORY_LAB_POSTGRES_PASSWORD:?required}
+      POSTGRES_DB: fleetory_lab
+    ports:
+      - 127.0.0.1:5440:5432
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -U fleetory -d fleetory_lab"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+volumes:
+  agent-ca-data:
+  admin-ca-data:
+  keycloak-data:
+  immudb-data:
+  postgres-data:

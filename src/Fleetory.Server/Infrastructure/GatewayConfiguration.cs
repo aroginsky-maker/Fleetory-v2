@@ -91,6 +91,7 @@ internal static class GatewayStartup
                 options.ListenAnyIP(agentPort.Value, listen => listen.UseHttps(https =>
                 {
                     https.ServerCertificate = agentTls.ServerCertificate;
+                    https.ServerCertificateChain = agentTls.ServerCertificateChain;
                     https.ClientCertificateMode = ClientCertificateMode.RequireCertificate;
                     https.ClientCertificateValidation = agentTls.ValidateClientCertificate;
                 }));
@@ -101,6 +102,7 @@ internal static class GatewayStartup
                 options.Listen(adminBindAddress, adminPort.Value, listen => listen.UseHttps(https =>
                 {
                     https.ServerCertificate = adminTls.ServerCertificate;
+                    https.ServerCertificateChain = adminTls.ServerCertificateChain;
                     https.ClientCertificateMode = ClientCertificateMode.RequireCertificate;
                     https.ClientCertificateValidation = adminTls.ValidateClientCertificate;
                 }));
