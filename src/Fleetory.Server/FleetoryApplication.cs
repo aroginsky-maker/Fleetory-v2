@@ -1,6 +1,7 @@
 using Fleetory.Assets;
 using Fleetory.CMDB;
 using Fleetory.Core;
+using Fleetory.Core.Contracts;
 using Fleetory.Integrations;
 using Fleetory.ITSM;
 using Fleetory.ModuleAbstractions;
@@ -22,7 +23,8 @@ public static class FleetoryApplication
 
         builder.Configuration.AddEnvironmentVariables(prefix: "FLEETORY_");
 
-        ConfigureSecrets(builder);
+        var secrets = ConfigureSecrets(builder);
+        var agentGateway = AgentGatewayStartup.Configure(builder, secrets);
 
         builder.Logging.ClearProviders();
         builder.Logging.AddJsonConsole(options => options.IncludeScopes = true);
@@ -42,6 +44,46 @@ public static class FleetoryApplication
         var app = builder.Build();
 
         app.UseMiddleware<CorrelationIdMiddleware>();
+
+        if (agentGateway is not null)
+        {
+            app.Use(async (context, next) =>
+            {
+                if (context.Connection.LocalPort == agentGateway.AgentPort)
+                {
+                    if (context.Request.Path != "/agent/identity")
+                    {
+                        context.Response.StatusCode = StatusCodes.Status404NotFound;
+                        return;
+                    }
+
+                    var certificate = await context.Connection.GetClientCertificateAsync();
+                    if (certificate is null ||
+                        !AgentGatewayIdentity.TryReadDeviceId(certificate, out var deviceId))
+                    {
+                        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                        return;
+                    }
+
+                    var verifier = context.RequestServices
+                        .GetRequiredService<IAgentCertificateBindingVerifier>();
+                    var status = await verifier.VerifyAsync(
+                        deviceId, certificate, context.RequestAborted);
+                    if (status != AgentCertificateStatus.Accepted)
+                    {
+                        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                        return;
+                    }
+                }
+                else if (context.Request.Path.StartsWithSegments("/agent"))
+                {
+                    context.Response.StatusCode = StatusCodes.Status404NotFound;
+                    return;
+                }
+
+                await next(context);
+            });
+        }
 
         app.MapHealthChecks("/health/live", new HealthCheckOptions
         {
@@ -65,7 +107,7 @@ public static class FleetoryApplication
         return app;
     }
 
-    private static void ConfigureSecrets(WebApplicationBuilder builder)
+    private static ISecretProvider? ConfigureSecrets(WebApplicationBuilder builder)
     {
         var directory = builder.Configuration["Fleetory:Secrets:Directory"];
         var directConnectionString = builder.Configuration.GetConnectionString("Fleetory");
@@ -84,7 +126,7 @@ public static class FleetoryApplication
                     "Non-development environments require Fleetory:Secrets:Directory and reject direct connection strings.");
             }
 
-            return;
+            return null;
         }
 
         var provider = new FileSecretProvider(directory);
@@ -92,6 +134,7 @@ public static class FleetoryApplication
         PostgreSqlConnectionStringValidator.Validate(connectionString);
 
         builder.Services.AddSingleton<ISecretProvider>(provider);
+        return provider;
     }
 
     private static IFleetoryModule[] CreateModules() =>

@@ -12,33 +12,35 @@
 6. Platform migration `202610160002_AddPlatformAuthorization` and `IAuthorizationService` implement local, deny-by-default RBAC decisions over exact permissions and a Platform-owned scope hierarchy. There is no seeded admin grant or privileged route.
 7. Platform migration `202610160003_AddAuditExportLease` and a conditional background worker add concurrent-safe at-least-once outbox delivery through `IAuditExportSink`, with retry and lease recovery. A production external sink is still required.
 8. `ISecretProvider` is owned by Platform contracts. A file adapter reads an externally mounted PostgreSQL secret with size, encoding, name and Unix permission checks. Non-development Server startup rejects direct connection strings and fails closed when the file is missing or invalid. Both Core and Platform use the same cached secret.
-9. Core certificate-binding contracts and migration `20261016212919_AddAgentCertificateBindings` bind an X.509 certificate SHA-256 digest to one `DeviceId`. The verifier rejects unknown, revoked, wrong-device, expired and invalid-purpose certificates. Two bindings permit rotation overlap. The TLS handshake, CA, issuance and enrollment flow remain open.
+9. Core certificate-binding contracts and migration `20261016212919_AddAgentCertificateBindings` bind an X.509 certificate SHA-256 digest to one `DeviceId`. The verifier rejects unknown, revoked, wrong-device, expired and invalid-purpose certificates. Two bindings permit rotation overlap.
+10. An opt-in Kestrel Agent listener requires mutual TLS, a pinned Fleetory root CA, a SAN `DeviceId` and an active Core certificate binding on every request. Its `/agent/identity` probe is isolated from the web and health listener. Real TLS/PostgreSQL integration tests cover acceptance, revocation, unknown bindings and absent client certificates. Certificate issuance and enrollment remain open.
 
 ## Local verification
 
 | Gate | Result |
 | --- | ---: |
 | Strict Release build | PASS, 0 warnings and 0 errors |
-| All tests | PASS, 95/95 |
+| All tests | PASS, 97/97 |
 | Architecture tests | PASS, 26/26 |
 | Core tests | PASS, 26/26 |
-| PostgreSQL integration tests | PASS, 21/21 |
+| Server tests | PASS, 14/14 |
+| PostgreSQL integration tests | PASS, 22/22 |
 | Disposable PostgreSQL and migrations | PASS |
 | Windows/Linux server packages and Windows production smoke | PASS |
-| Local production line coverage | 92.63% |
-| CI production line coverage | 92.82% |
-| Sonar overall coverage | 90.8% |
-| Sonar new-code coverage | 92.13% |
-| Sonar overall duplication | 0.0% |
-| Sonar new-code duplication | 0.0% |
-| Open Sonar issues for PR | 0 |
-| Sonar Quality Gate | PASS |
+| Local production line coverage | 92.12% |
+| CI production line coverage | Pending this increment |
+| Sonar overall coverage | Pending this increment |
+| Sonar new-code coverage | Pending this increment |
+| Sonar overall duplication | Pending this increment |
+| Sonar new-code duplication | Pending this increment |
+| Open Sonar issues for PR | Pending this increment |
+| Sonar Quality Gate | Pending this increment |
 
-Local PHASE 6 verification passed with disposable PostgreSQL, migrations, Windows/Linux packages and a Windows production smoke test using the secret file. The certificate-binding increment passed [GitHub Actions run 38970262204](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/38970262204) at commit `f6fa5b6`; Sonar reported 92.12962962962963% new-code coverage, rounded to 92.13% above. The Sonar issues API reported zero open issues for PR #2. Security Hotspots were not separately available from the metrics report. PHASE 7 as a whole remains IN PROGRESS.
+Local PHASE 6 verification passed with disposable PostgreSQL, migrations, Windows/Linux packages and a Windows production smoke test using the secret file. The current mTLS increment passed local tests and coverage; its CI/Sonar analysis is pending. The preceding certificate-binding increment passed [GitHub Actions run 38970814465](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/38970814465), with 92.13% new-code coverage, 90.8% overall coverage, 0.0% new and overall duplication, zero open PR issues and a passing Quality Gate. Security Hotspots were not separately available from that metrics report. PHASE 7 as a whole remains IN PROGRESS.
 
 ## Required before PHASE 7 completion
 
-- mTLS gateway and Fleetory CA trust, proof-of-possession enrollment and issuance, audited rotation/revocation management, and termination of existing sessions after revocation.
+- Proof-of-possession enrollment and issuance, CA lifecycle, audited rotation/revocation management, and revocation propagation to future long-lived streams.
 - Protected command signing and key distribution, production Agent-local policy and durable replay store.
 - Human authentication with MFA/WebAuthn foundation, audited role/scope administration and enforcement at privileged routes.
 - Concrete external SIEM/WORM audit sink, retention policy and coverage of all critical security call sites.

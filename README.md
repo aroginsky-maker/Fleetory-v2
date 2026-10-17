@@ -1,6 +1,6 @@
 # Fleetory v2 — PHASE 7 Security Foundation in progress
 
-PHASE 6 PostgreSQL persistence is complete. PHASE 7 is building command verification, certificate binding, audit, RBAC and secret foundations; see `docs/architecture/SecurityFoundation.md` for their boundaries and remaining work.
+PHASE 6 PostgreSQL persistence is complete. PHASE 7 is building command verification, an initial Agent mTLS listener, certificate binding, audit, RBAC and secret foundations; see `docs/architecture/SecurityFoundation.md` for their boundaries and remaining work.
 
 PHASE 6 was verified on 16 October 2026: 44/44 tests, disposable PostgreSQL migrations and readiness, Windows/Linux server packages, and Sonar Quality Gate passed. Sonar reported 85.9% new-code coverage, 0.0% new-code duplication, 88.1% overall coverage, and 0.0% overall duplication. See `Fleetory_v2_PHASE6_Implementation_Report.md` for the full evidence.
 
@@ -57,6 +57,8 @@ ConnectionStrings:Fleetory
 ```
 
 Non-development startup rejects direct connection strings and fails if the secret file is missing or invalid. Do not put production credentials in repository files.
+
+The initial Agent identity listener is disabled by default. To enable it, set `Fleetory:AgentGateway:Enabled=true`, `Fleetory:Web:Port` and a different `Fleetory:AgentGateway:Port`, and add three PEM files to the same secret directory: `agent-gateway-root-ca`, `agent-gateway-server-cert` and `agent-gateway-server-key`. The server certificate must chain directly to the root CA and the private key must match it. The root CA private key belongs in a separate CA service. The Agent port requires a client certificate issued by that CA and an active Core binding; `GET /agent/identity` is currently the only Agent route. The web port is plain HTTP at Kestrel, so deploy it behind a protected HTTPS ingress or within a trusted network. The Agent port expects end-to-end mTLS at Kestrel.
 
 ## PostgreSQL integration-test environment
 

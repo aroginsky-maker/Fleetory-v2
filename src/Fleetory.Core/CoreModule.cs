@@ -7,6 +7,9 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Fleetory.SharedKernel;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 
 namespace Fleetory.Core;
 
@@ -37,5 +40,14 @@ public sealed class CoreModule : FleetoryModuleBase
 
             CoreDbContextOptions.Configure(options, connectionString);
         });
+    }
+
+    public override void MapEndpoints(IEndpointRouteBuilder endpoints)
+    {
+        if (endpoints.ServiceProvider.GetRequiredService<IConfiguration>()
+            .GetValue<bool>("Fleetory:AgentGateway:Enabled"))
+        {
+            endpoints.MapGet("/agent/identity", static () => Results.NoContent());
+        }
     }
 }

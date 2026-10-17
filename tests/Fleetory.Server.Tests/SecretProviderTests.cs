@@ -27,6 +27,30 @@ public sealed class SecretProviderTests
     }
 
     [Fact]
+    public void Agent_gateway_requires_secret_mount_and_distinct_valid_ports()
+    {
+        var missingSecrets = Assert.Throws<InvalidOperationException>(() =>
+            FleetoryApplication.Build([
+                "--environment=Development",
+                $"--ConnectionStrings:Fleetory={TestConnectionString}",
+                "--Fleetory:AgentGateway:Enabled=true"
+            ]));
+        Assert.Contains("Secrets:Directory", missingSecrets.Message, StringComparison.Ordinal);
+
+        using var directory = new TestSecretDirectory();
+        directory.Write(FleetorySecretNames.PostgreSqlConnectionString, TestConnectionString);
+        var samePort = Assert.Throws<InvalidOperationException>(() =>
+            FleetoryApplication.Build([
+                "--environment=Development",
+                $"--Fleetory:Secrets:Directory={directory.Path}",
+                "--Fleetory:AgentGateway:Enabled=true",
+                "--Fleetory:Web:Port=4433",
+                "--Fleetory:AgentGateway:Port=4433"
+            ]));
+        Assert.Contains("ports must differ", samePort.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Production_uses_the_file_secret_provider()
     {
         using var directory = new TestSecretDirectory();
