@@ -663,7 +663,7 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
                 handler.ClientCertificates.Add(certificate);
             }
 
-            handler.ServerCertificateCustomValidationCallback = (_, server, _, errors) =>
+            handler.ServerCertificateCustomValidationCallback = (_, server, peerChain, errors) =>
             {
                 if (server is null || (errors & SslPolicyErrors.RemoteCertificateNameMismatch) != 0)
                 {
@@ -674,6 +674,14 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
                 chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
                 chain.ChainPolicy.CustomTrustStore.Add(Root);
                 chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
+                if (peerChain is not null)
+                {
+                    foreach (var element in peerChain.ChainElements.Cast<X509ChainElement>().Skip(1))
+                    {
+                        chain.ChainPolicy.ExtraStore.Add(element.Certificate);
+                    }
+                }
+
                 return chain.Build(server);
             };
             return new HttpClient(handler);

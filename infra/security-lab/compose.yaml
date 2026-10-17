@@ -54,7 +54,7 @@ services:
     image: codenotary/immudb:1.11.2
     environment:
       IMMUDB_PGSQL_SERVER: "true"
-      IMMUDB_ADMIN_PASSWORD: ${FLEETORY_LAB_IMMUDB_PASSWORD_BASE64:?required}
+      IMMUDB_ADMIN_PASSWORD: ${FLEETORY_LAB_IMMUDB_PASSWORD:?required}
     ports:
       - 127.0.0.1:5433:5432
     volumes:

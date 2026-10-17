@@ -16,20 +16,28 @@ function New-LabSecret {
 
 New-Item -ItemType Directory -Path $labDirectory -Force | Out-Null
 if (-not (Test-Path -LiteralPath $envPath)) {
-    $immudbPassword = New-LabSecret
     $entries = @(
         "FLEETORY_LAB_AGENT_CA_PASSWORD=$(New-LabSecret)",
         "FLEETORY_LAB_ADMIN_CA_PASSWORD=$(New-LabSecret)",
         "FLEETORY_LAB_KEYCLOAK_ADMIN_PASSWORD=$(New-LabSecret)",
         "FLEETORY_LAB_OPENBAO_TOKEN=$(New-LabSecret)",
-        "FLEETORY_LAB_IMMUDB_PASSWORD_BASE64=$([Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($immudbPassword)))",
-        "FLEETORY_LAB_IMMUDB_PASSWORD=$immudbPassword",
+        "FLEETORY_LAB_IMMUDB_PASSWORD=$(New-LabSecret)",
         "FLEETORY_LAB_POSTGRES_PASSWORD=$(New-LabSecret)"
     )
     [System.IO.File]::WriteAllLines($envPath, $entries, [System.Text.UTF8Encoding]::new($false))
 }
 
 $entries = [System.IO.File]::ReadAllLines($envPath)
+$legacyPassword = $entries | Where-Object { $_.StartsWith('FLEETORY_LAB_IMMUDB_PASSWORD_BASE64=') } |
+    Select-Object -First 1
+if ($legacyPassword) {
+    $actualPassword = $legacyPassword.Split('=', 2)[1]
+    $entries = @($entries | Where-Object {
+        -not $_.StartsWith('FLEETORY_LAB_IMMUDB_PASSWORD_BASE64=') -and
+        -not $_.StartsWith('FLEETORY_LAB_IMMUDB_PASSWORD=')
+    }) + "FLEETORY_LAB_IMMUDB_PASSWORD=$actualPassword"
+    [System.IO.File]::WriteAllLines($envPath, $entries, [System.Text.UTF8Encoding]::new($false))
+}
 if (-not ($entries | Where-Object { $_.StartsWith('FLEETORY_LAB_POSTGRES_PASSWORD=') })) {
     [System.IO.File]::AppendAllText($envPath,
         "FLEETORY_LAB_POSTGRES_PASSWORD=$(New-LabSecret)`n", [System.Text.UTF8Encoding]::new($false))
