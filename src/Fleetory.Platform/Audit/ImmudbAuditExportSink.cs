@@ -148,7 +148,7 @@ public sealed class ImmudbAuditExportSink : IAuditExportSink, IDisposable
         int count;
         while ((count = await stream.ReadAsync(chunk, cancellationToken)) != 0)
         {
-            buffer.Write(chunk, 0, count);
+            await buffer.WriteAsync(chunk.AsMemory(0, count), cancellationToken);
             if (buffer.Length > MaximumResponseBytes)
             {
                 throw new InvalidOperationException("Immudb audit response is too large.");

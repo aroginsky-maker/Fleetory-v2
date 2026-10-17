@@ -101,7 +101,7 @@ Fleetory Server does not issue or sign certificates and has no Agent CA private 
 - External Agent CA issuance and grant delivery, CA lifecycle, full rotation administration, Admin certificate lifecycle, identity-collision policy, reconciliation of ambiguous audit outcomes, and revocation propagation to future long-lived Agent streams.
 - A protected signing service and secure trust-file distribution, plus Agent runtime wiring of the verifier, replay store and policy before any command execution. High-risk and bulk command types require an approval protocol before they can be enabled.
 - Audited role/scope administration and enforcement at future privileged routes. The local Keycloak browser WebAuthn ceremony and signed-token request passed in the lab.
-- Fix wire-level server certificate chain delivery on Windows or explicitly restrict deployment to a verified platform. Linux root-only chain verification passed in the local container; automated verification of the supported deployment path remains open.
+- Fix wire-level server certificate chain delivery on Windows. Linux root-only chain verification passed in the local container; automated cross-platform verification remains open. The Baseline requires equal Windows Server and Linux support.
 - Production immudb hardening: dedicated audit credentials, TLS, retention/backup and independently anchored verification; wiring audited security call sites as those flows are implemented.
 - Abuse, negative authorization, recovery and cross-platform security tests, then the full Sonar Quality Gate.
 
