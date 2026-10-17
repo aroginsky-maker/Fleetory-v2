@@ -10,6 +10,59 @@ const { chromium } = require(process.env.FLEETORY_PLAYWRIGHT_MODULE || 'playwrig
 const lab = path.resolve(__dirname, '..', '..', 'work', 'security-lab');
 const certs = path.join(lab, 'certs');
 const repoRoot = path.resolve(__dirname, '..');
+const redirectUri = 'http://127.0.0.1:4173/auth/callback';
+const clientId = 'fleetory-admin-lab';
+
+function newAuthorization(prompt) {
+  const verifier = crypto.randomBytes(32).toString('base64url');
+  const url = new URL('http://localhost:8088/realms/fleetory/protocol/openid-connect/auth');
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('client_id', clientId);
+  url.searchParams.set('redirect_uri', redirectUri);
+  url.searchParams.set('scope', 'openid');
+  url.searchParams.set('code_challenge',
+    crypto.createHash('sha256').update(verifier).digest('base64url'));
+  url.searchParams.set('code_challenge_method', 'S256');
+  url.searchParams.set('state', crypto.randomBytes(16).toString('hex'));
+  if (prompt) url.searchParams.set('prompt', prompt);
+  return { url, verifier };
+}
+
+async function exchangeCode(callback, authorization) {
+  if (!callback || callback.searchParams.get('state') !== authorization.url.searchParams.get('state')) {
+    throw new Error('OIDC authorization callback is invalid.');
+  }
+  const code = callback.searchParams.get('code');
+  if (!code) throw new Error('OIDC authorization code is missing.');
+  const response = await fetch('http://localhost:8088/realms/fleetory/protocol/openid-connect/token', {
+    method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ grant_type: 'authorization_code', client_id: clientId,
+      redirect_uri: redirectUri, code, code_verifier: authorization.verifier })
+  });
+  if (!response.ok) throw new Error(`OIDC token exchange failed: ${response.status}`);
+  return (await response.json()).access_token;
+}
+
+function readClaims(token, personId) {
+  const claims = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8'));
+  const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
+  if (claims.sub !== personId || claims.azp !== clientId ||
+      !audiences.includes('fleetory-admin-api')) {
+    throw new Error('OIDC token is not bound to the Admin identity and API.');
+  }
+  return claims;
+}
+
+async function enterPassword(page, password) {
+  if (await page.locator('#username').isVisible()) {
+    await page.locator('#username').fill('lab-admin-person');
+  }
+  if (await page.locator('#password').isVisible()) {
+    await page.locator('#password').fill(password);
+    await page.locator('#kc-login').click();
+    await page.waitForLoadState('domcontentloaded');
+  }
+}
 
 async function resetLabPasskey() {
   const envLine = fs.readFileSync(path.join(lab, 'lab.env'), 'utf8').split(/\r?\n/)
@@ -70,88 +123,27 @@ async function resetLabPasskey() {
         automaticPresenceSimulation: true
       }
     });
-    const verifier = crypto.randomBytes(32).toString('base64url');
-    const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
-    const auth = new URL('http://localhost:8088/realms/fleetory/protocol/openid-connect/auth');
-    auth.searchParams.set('response_type', 'code');
-    auth.searchParams.set('client_id', 'fleetory-admin-lab');
-    auth.searchParams.set('redirect_uri', 'http://127.0.0.1:4173/auth/callback');
-    auth.searchParams.set('scope', 'openid');
-    auth.searchParams.set('code_challenge', challenge);
-    auth.searchParams.set('code_challenge_method', 'S256');
-    auth.searchParams.set('state', crypto.randomBytes(16).toString('hex'));
-    await page.goto(auth.toString(), { waitUntil: 'domcontentloaded' });
+    const registration = newAuthorization();
+    await page.goto(registration.url.toString(), { waitUntil: 'domcontentloaded' });
     const password = fs.readFileSync(path.join(certs, 'admin-user-password'), 'utf8').trim();
-    await page.locator('#username').fill('lab-admin-person');
-    await page.locator('#password').fill(password);
-    await page.locator('#kc-login').click();
-    await page.waitForLoadState('domcontentloaded');
+    await enterPassword(page, password);
     if (await page.locator('#registerWebAuthn').isVisible()) {
       await page.locator('#registerWebAuthn').click();
     }
     await page.waitForTimeout(1500);
-    if (!callbackUrl) throw new Error('Keycloak did not redirect with an authorization code.');
-    if (callbackUrl.searchParams.get('state') !== auth.searchParams.get('state')) {
-      throw new Error('OIDC state mismatch.');
-    }
-    const code = callbackUrl.searchParams.get('code');
-    if (!code) throw new Error('Authorization code is missing.');
-    const tokenResponse = await fetch('http://localhost:8088/realms/fleetory/protocol/openid-connect/token', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'authorization_code', client_id: 'fleetory-admin-lab',
-        redirect_uri: 'http://127.0.0.1:4173/auth/callback',
-        code, code_verifier: verifier
-      })
-    });
-    if (!tokenResponse.ok) throw new Error(`Token exchange failed: ${tokenResponse.status}`);
-    const tokens = await tokenResponse.json();
-    const claims = JSON.parse(Buffer.from(tokens.access_token.split('.')[1], 'base64url').toString('utf8'));
     const personId = fs.readFileSync(path.join(certs, 'admin-person-id'), 'utf8').trim();
-    const audiences = Array.isArray(claims.aud) ? claims.aud : [claims.aud];
-    if (claims.sub !== personId || claims.azp !== 'fleetory-admin-lab' ||
-        !audiences.includes('fleetory-admin-api')) {
-      throw new Error('Registration token is not bound to the Admin identity and API.');
-    }
+    readClaims(await exchangeCode(callbackUrl, registration), personId);
     callbackUrl = null;
-    const verifier2 = crypto.randomBytes(32).toString('base64url');
-    const auth2 = new URL(auth.toString());
-    auth2.searchParams.set('code_challenge',
-      crypto.createHash('sha256').update(verifier2).digest('base64url'));
-    auth2.searchParams.set('state', crypto.randomBytes(16).toString('hex'));
-    auth2.searchParams.set('prompt', 'login');
-    await page.goto(auth2.toString(), { waitUntil: 'domcontentloaded' });
-    if (await page.locator('#username').isVisible()) {
-      await page.locator('#username').fill('lab-admin-person');
-      await page.locator('#password').fill(password);
-      await page.locator('#kc-login').click();
-      await page.waitForLoadState('domcontentloaded');
-    } else if (await page.locator('#password').isVisible()) {
-      await page.locator('#password').fill(password);
-      await page.locator('#kc-login').click();
-      await page.waitForLoadState('domcontentloaded');
-    }
+    const reauthentication = newAuthorization('login');
+    await page.goto(reauthentication.url.toString(), { waitUntil: 'domcontentloaded' });
+    await enterPassword(page, password);
     if (await page.locator('#authenticateWebAuthnButton').isVisible()) {
       await page.locator('#authenticateWebAuthnButton').click();
     }
     await page.waitForTimeout(1000);
-    if (!callbackUrl || callbackUrl.searchParams.get('state') !== auth2.searchParams.get('state')) {
-      throw new Error('Second authorization callback is invalid.');
-    }
-    const code2 = callbackUrl.searchParams.get('code');
-    const secondTokenResponse = await fetch('http://localhost:8088/realms/fleetory/protocol/openid-connect/token', {
-      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ grant_type: 'authorization_code',
-        client_id: 'fleetory-admin-lab', redirect_uri: 'http://127.0.0.1:4173/auth/callback',
-        code: code2, code_verifier: verifier2 })
-    });
-    if (!secondTokenResponse.ok) throw new Error('Second token exchange failed.');
-    const secondTokens = await secondTokenResponse.json();
-    const secondClaims = JSON.parse(Buffer.from(secondTokens.access_token.split('.')[1], 'base64url').toString('utf8'));
-    if (secondClaims.sub !== personId || secondClaims.azp !== 'fleetory-admin-lab' ||
-        !(Array.isArray(secondClaims.aud) ? secondClaims.aud : [secondClaims.aud]).includes('fleetory-admin-api') ||
-        !Array.isArray(secondClaims.amr) || !secondClaims.amr.includes('webauthn')) {
+    const webAuthnToken = await exchangeCode(callbackUrl, reauthentication);
+    const secondClaims = readClaims(webAuthnToken, personId);
+    if (!Array.isArray(secondClaims.amr) || !secondClaims.amr.includes('webauthn')) {
       throw new Error('Signed access token lacks WebAuthn AMR.');
     }
     const dotnet = process.platform === 'win32'
@@ -227,7 +219,7 @@ async function resetLabPasskey() {
         request.end();
       });
       const withoutToken = await callAdmin(null);
-      const withToken = await callAdmin(secondTokens.access_token);
+      const withToken = await callAdmin(webAuthnToken);
       console.log(`Admin mTLS: no token ${withoutToken}; WebAuthn token ${withToken}.`);
       if (withoutToken !== 401 || withToken !== 403) {
         throw new Error('Admin OIDC/RBAC boundary did not return 401 then 403.');
