@@ -27,7 +27,7 @@ public interface IAgentCertificateBindingStore
 }
 
 /// <summary>
-/// Checks a registered certificate binding at connection establishment. The caller must first
+/// Checks a registered certificate binding for each Agent request. The caller must first
 /// obtain the certificate from an authenticated TLS client-certificate handshake.
 /// </summary>
 public interface IAgentCertificateBindingVerifier

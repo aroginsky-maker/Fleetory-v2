@@ -64,9 +64,15 @@ The only Agent route is `GET /agent/identity`, which returns `204` after success
 
 This is an identity probe, not Agent Protocol v2, an enrollment or a production Agent operation. CA revocation lists and OCSP are not configured: the pinned direct CA chain is checked in TLS, while the local database binding controls individual certificate revocation per request. The CA and server certificate rotate through secret provisioning and process restart. A production deployment must restrict and encrypt the web listener at its ingress and protect the secret mount. Enrollment approval, certificate issuance and audited rotation/revocation administration remain open.
 
+## Implemented internal certificate revocation boundary
+
+Core registers `AgentCertificateRevocationService` for trusted in-process callers. It requires a global `core.agent_certificate.revoke` permission through Platform RBAC, writes an audit event for denied or authorized requests through `IAuditWriter`, and only then atomically marks the matching Core certificate binding revoked. A failure to persist the authorized audit intent prevents the state change. Repeating a request cannot replace the original revocation time. The Agent gateway checks the updated binding on the next request. An integration test covers a denied actor, audit-store failure, successful revocation and retry against real PostgreSQL.
+
+There is no administrative HTTP route, default grant or source of authenticated admin actors yet. The caller must authenticate the actor before using the service. The audit event records an authorized **request**, not a guaranteed completed change: Platform audit persistence and Core state mutation are separate transactions. If the Core write fails after the audit succeeds, the audit request remains for reconciliation. A later administration workflow must record a confirmed outcome and resolve ambiguous failures.
+
 ## Remaining PHASE 7 work
 
-- Proof-of-possession enrollment and issuance, CA lifecycle, audited rotation/revocation administration, and propagation of revocation to future long-lived Agent streams.
+- Proof-of-possession enrollment and issuance, CA lifecycle, authenticated administration with confirmed revocation outcomes, rotation, and propagation of revocation to future long-lived Agent streams.
 - A protected signing service and trust distribution, plus production durable Agent-side replay storage and policy enforcement.
 - Human authentication with MFA/WebAuthn foundation, audited role/scope administration and enforcement at future privileged routes.
 - Concrete external SIEM/WORM audit sink, its credential integration and retention controls; wiring audited security call sites as those flows are implemented.

@@ -26,6 +26,7 @@ public sealed class CoreModule : FleetoryModuleBase
         services.TryAddSingleton<IClock, SystemClock>();
         services.AddScoped<IAgentCertificateBindingStore, PostgreSqlAgentCertificateBindingStore>();
         services.AddScoped<IAgentCertificateBindingVerifier, AgentCertificateBindingVerifier>();
+        services.AddScoped<AgentCertificateRevocationService>();
 
         services.AddDbContext<CoreDbContext>((serviceProvider, options) =>
         {
