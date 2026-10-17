@@ -28,15 +28,15 @@
 | Disposable PostgreSQL and migrations | PASS |
 | Windows/Linux server packages and Windows production smoke | PASS |
 | Local production line coverage | 92.12% |
-| CI production line coverage | Pending this increment |
-| Sonar overall coverage | Pending this increment |
-| Sonar new-code coverage | Pending this increment |
-| Sonar overall duplication | Pending this increment |
-| Sonar new-code duplication | Pending this increment |
-| Open Sonar issues for PR | Pending this increment |
-| Sonar Quality Gate | Pending this increment |
+| CI production line coverage | 92.63% |
+| Sonar overall coverage | 89.9% |
+| Sonar new-code coverage | 90.53% |
+| Sonar overall duplication | 0.0% |
+| Sonar new-code duplication | 0.0% |
+| Open Sonar issues for PR | 0 |
+| Sonar Quality Gate | PASS |
 
-Local PHASE 6 verification passed with disposable PostgreSQL, migrations, Windows/Linux packages and a Windows production smoke test using the secret file. The current mTLS increment passed local tests and coverage; its CI/Sonar analysis is pending. The preceding certificate-binding increment passed [GitHub Actions run 38970814465](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/38970814465), with 92.13% new-code coverage, 90.8% overall coverage, 0.0% new and overall duplication, zero open PR issues and a passing Quality Gate. Security Hotspots were not separately available from that metrics report. PHASE 7 as a whole remains IN PROGRESS.
+Local PHASE 6 verification passed with disposable PostgreSQL, migrations, Windows/Linux packages and a Windows production smoke test using the secret file. The mTLS increment passed [GitHub Actions run 39001573951](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39001573951) at commit `68e6df3`: Sonar reported 90.52823315118397% new-code coverage, rounded to 90.53% above. The Sonar issues API reported zero open issues for PR #2. Security Hotspots were not separately available from the metrics report. PHASE 7 as a whole remains IN PROGRESS.
 
 ## Required before PHASE 7 completion
 
