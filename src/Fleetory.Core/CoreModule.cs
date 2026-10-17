@@ -50,5 +50,13 @@ public sealed class CoreModule : FleetoryModuleBase
         {
             endpoints.MapGet("/agent/identity", static () => Results.NoContent());
         }
+
+        if (endpoints.ServiceProvider.GetRequiredService<IConfiguration>()
+            .GetValue<bool>("Fleetory:AdminGateway:Enabled"))
+        {
+            endpoints.MapPost(
+                "/admin/devices/{deviceId:guid}/certificates/{fingerprint}/revoke",
+                AdminCertificateEndpoints.RevokeAsync);
+        }
     }
 }

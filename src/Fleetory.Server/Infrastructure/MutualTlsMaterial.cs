@@ -5,22 +5,27 @@ using Fleetory.Platform.Contracts.Secrets;
 
 namespace Fleetory.Server.Infrastructure;
 
-internal sealed class AgentGatewayTls : IDisposable
+internal sealed class MutualTlsMaterial : IDisposable
 {
     private const string ClientAuthenticationOid = "1.3.6.1.5.5.7.3.2";
     private const string ServerAuthenticationOid = "1.3.6.1.5.5.7.3.1";
 
     private readonly X509Certificate2 rootCa;
 
-    private AgentGatewayTls(X509Certificate2 rootCa, X509Certificate2 serverCertificate)
+    private MutualTlsMaterial(X509Certificate2 rootCa, X509Certificate2 serverCertificate)
     {
         this.rootCa = rootCa;
         ServerCertificate = serverCertificate;
     }
 
     public X509Certificate2 ServerCertificate { get; }
+    public X509Certificate2 RootCa => rootCa;
 
-    public static AgentGatewayTls Load(ISecretProvider secrets)
+    public static MutualTlsMaterial Load(
+        ISecretProvider secrets,
+        string rootCaSecret,
+        string serverCertificateSecret,
+        string serverPrivateKeySecret)
     {
         ArgumentNullException.ThrowIfNull(secrets);
         X509Certificate2? root = null;
@@ -28,9 +33,9 @@ internal sealed class AgentGatewayTls : IDisposable
         try
         {
             root = X509Certificate2.CreateFromPem(
-                secrets.GetRequiredSecret(FleetorySecretNames.AgentGatewayRootCa));
-            var serverPem = secrets.GetRequiredSecret(FleetorySecretNames.AgentGatewayServerCertificate);
-            var keyPem = secrets.GetRequiredSecret(FleetorySecretNames.AgentGatewayServerPrivateKey);
+                secrets.GetRequiredSecret(rootCaSecret));
+            var serverPem = secrets.GetRequiredSecret(serverCertificateSecret);
+            var keyPem = secrets.GetRequiredSecret(serverPrivateKeySecret);
             server = X509Certificate2.CreateFromPem(serverPem, keyPem);
             var pkcs12 = server.Export(X509ContentType.Pkcs12);
             try
@@ -45,19 +50,19 @@ internal sealed class AgentGatewayTls : IDisposable
                 CryptographicOperations.ZeroMemory(pkcs12);
             }
 
-            if (!IsCertificateAuthority(root) || !server.HasPrivateKey ||
+            if (!IsCertificateAuthority(root) || !IsEndEntity(server) || !server.HasPrivateKey ||
                 !BuildChain(server, root, ServerAuthenticationOid))
             {
-                throw new InvalidOperationException("Agent gateway TLS material is invalid.");
+                throw new InvalidOperationException("Gateway TLS material is invalid.");
             }
 
-            return new AgentGatewayTls(root, server);
+            return new MutualTlsMaterial(root, server);
         }
         catch (Exception exception) when (exception is CryptographicException or ArgumentException)
         {
             root?.Dispose();
             server?.Dispose();
-            throw new InvalidOperationException("Agent gateway TLS material is invalid.");
+            throw new InvalidOperationException("Gateway TLS material is invalid.");
         }
         catch
         {
@@ -71,7 +76,8 @@ internal sealed class AgentGatewayTls : IDisposable
         X509Certificate2? certificate,
         X509Chain? _,
         SslPolicyErrors __) =>
-        certificate is not null && BuildChain(certificate, rootCa, ClientAuthenticationOid);
+        certificate is not null && IsEndEntity(certificate) &&
+        BuildChain(certificate, rootCa, ClientAuthenticationOid);
 
     public void Dispose()
     {
@@ -85,6 +91,14 @@ internal sealed class AgentGatewayTls : IDisposable
         var usage = certificate.Extensions.OfType<X509KeyUsageExtension>().SingleOrDefault();
         return constraints?.CertificateAuthority == true && usage is not null &&
             (usage.KeyUsages & X509KeyUsageFlags.KeyCertSign) != 0;
+    }
+
+    private static bool IsEndEntity(X509Certificate2 certificate)
+    {
+        var constraints = certificate.Extensions.OfType<X509BasicConstraintsExtension>().SingleOrDefault();
+        var usage = certificate.Extensions.OfType<X509KeyUsageExtension>().SingleOrDefault();
+        return constraints is { CertificateAuthority: false } && usage is not null &&
+            (usage.KeyUsages & X509KeyUsageFlags.DigitalSignature) != 0;
     }
 
     private static bool BuildChain(X509Certificate2 certificate, X509Certificate2 root, string purposeOid)

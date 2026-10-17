@@ -17,6 +17,7 @@ public sealed class AgentCertificateRevocationService(
 {
     public const string Permission = "core.agent_certificate.revoke";
     private const string AuditAction = "core.agent_certificate.revoke_requested";
+    private const string CompletedAction = "core.agent_certificate.revoke_completed";
 
     public async ValueTask<bool> RevokeAsync(
         ActorReference actor,
@@ -49,15 +50,25 @@ public sealed class AgentCertificateRevocationService(
             throw new UnauthorizedAccessException("Agent certificate revocation is not authorized.");
         }
 
-        // Persist the authorized intent before changing Core state. An unavailable audit store
-        // must not permit an unaudited revocation.
-
         var changed = await database.AgentCertificates
             .Where(row => row.CertificateSha256 == certificateSha256 &&
                 row.DeviceId == deviceId && row.RevokedAt == null)
             .ExecuteUpdateAsync(setters => setters
                 .SetProperty(row => row.RevokedAt, clock.UtcNow.ToUniversalTime()),
                 cancellationToken);
+
+        await audit.WriteAsync(new AuditRecord(
+            actor,
+            CompletedAction,
+            new AuditTarget("agent_certificate", certificateSha256),
+            correlationId,
+            clock.UtcNow,
+            new Dictionary<string, string>
+            {
+                ["device_id"] = deviceId.Value.ToString("D"),
+                ["outcome"] = changed == 1 ? "revoked" : "unchanged"
+            }), cancellationToken);
+
         return changed == 1;
     }
 

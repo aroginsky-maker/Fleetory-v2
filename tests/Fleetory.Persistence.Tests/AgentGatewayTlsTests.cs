@@ -5,15 +5,137 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Fleetory.Core.Contracts;
 using Fleetory.Core.Persistence;
+using Fleetory.Core.Security;
+using Fleetory.Platform.Contracts;
 using Fleetory.Server;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Npgsql;
 
 namespace Fleetory.Persistence.Tests;
 
 [Collection(PostgreSqlTestCollection.Name)]
 public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
 {
+    [Fact]
+    public void Admin_gateway_rejects_reuse_of_the_agent_root_ca()
+    {
+        using var pki = new TestPki(new DeviceId(Guid.NewGuid()));
+        using var secrets = new TestSecretDirectory();
+        secrets.Write("fleetory-postgresql", fixture.ConnectionString);
+        secrets.Write("agent-gateway-root-ca", pki.Root.ExportCertificatePem());
+        secrets.Write("agent-gateway-server-cert", pki.Server.ExportCertificatePem());
+        secrets.Write("agent-gateway-server-key", pki.ServerKey.ExportPkcs8PrivateKeyPem());
+        secrets.Write("admin-gateway-root-ca", pki.Root.ExportCertificatePem());
+        secrets.Write("admin-gateway-server-cert", pki.Server.ExportCertificatePem());
+        secrets.Write("admin-gateway-server-key", pki.ServerKey.ExportPkcs8PrivateKeyPem());
+
+        var exception = Assert.Throws<InvalidOperationException>(() => FleetoryApplication.Build([
+            "--environment=Development",
+            $"--Fleetory:Secrets:Directory={secrets.Path}",
+            "--Fleetory:AgentGateway:Enabled=true",
+            "--Fleetory:AdminGateway:Enabled=true",
+            "--Fleetory:Web:Port=45101",
+            "--Fleetory:AgentGateway:Port=45102",
+            "--Fleetory:AdminGateway:Port=45103"
+        ]));
+        Assert.Contains("separate root CAs", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Separate_admin_mtls_listener_revokes_a_bound_agent_certificate()
+    {
+        var deviceId = new DeviceId(Guid.NewGuid());
+        var adminId = Guid.NewGuid();
+        using var agentPki = new TestPki(deviceId);
+        using var adminPki = new TestPki(
+            new Uri($"urn:fleetory:admin:{adminId:D}"),
+            new Uri($"urn:fleetory:admin:{Guid.NewGuid():D}"));
+        using var secrets = new TestSecretDirectory();
+        secrets.Write("fleetory-postgresql", fixture.ConnectionString);
+        secrets.Write("agent-gateway-root-ca", agentPki.Root.ExportCertificatePem());
+        secrets.Write("agent-gateway-server-cert", agentPki.Server.ExportCertificatePem());
+        secrets.Write("agent-gateway-server-key", agentPki.ServerKey.ExportPkcs8PrivateKeyPem());
+        secrets.Write("admin-gateway-root-ca", adminPki.Root.ExportCertificatePem());
+        secrets.Write("admin-gateway-server-cert", adminPki.Server.ExportCertificatePem());
+        secrets.Write("admin-gateway-server-key", adminPki.ServerKey.ExportPkcs8PrivateKeyPem());
+
+        var ports = Enumerable.Range(0, 3).Select(_ => GetFreePort()).ToArray();
+        while (ports.Distinct().Count() != ports.Length)
+        {
+            ports = Enumerable.Range(0, 3).Select(_ => GetFreePort()).ToArray();
+        }
+
+        await using var app = FleetoryApplication.Build([
+            "--environment=Development",
+            $"--Fleetory:Secrets:Directory={secrets.Path}",
+            "--Fleetory:AgentGateway:Enabled=true",
+            "--Fleetory:AdminGateway:Enabled=true",
+            $"--Fleetory:Web:Port={ports[0]}",
+            $"--Fleetory:AgentGateway:Port={ports[1]}",
+            $"--Fleetory:AdminGateway:Port={ports[2]}"
+        ]);
+
+        await using (var scope = fixture.Services.CreateAsyncScope())
+        {
+            var database = scope.ServiceProvider.GetRequiredService<CoreDbContext>();
+            database.Devices.Add(DeviceRecord.Create(deviceId, "admin gateway test device", DateTimeOffset.UtcNow));
+            database.AgentCertificates.Add(AgentCertificateRecord.Create(
+                deviceId, Convert.ToHexString(SHA256.HashData(agentPki.Client.RawData)),
+                agentPki.Client.NotBefore.ToUniversalTime(),
+                agentPki.Client.NotAfter.ToUniversalTime()));
+            await database.SaveChangesAsync();
+        }
+
+        await GrantAdminRevocationAsync(adminId);
+        await app.StartAsync();
+        try
+        {
+            using var agent = agentPki.CreateClient(agentPki.Client);
+            using var admin = adminPki.CreateClient(adminPki.Client);
+            using var ungranted = adminPki.CreateClient(adminPki.UnregisteredClient);
+            using var wrongCa = agentPki.CreateClient(agentPki.Client);
+            using var web = new HttpClient();
+            var agentUrl = $"https://127.0.0.1:{ports[1]}/agent/identity";
+            var revokePath = $"/admin/devices/{deviceId.Value:D}/certificates/" +
+                Convert.ToHexString(SHA256.HashData(agentPki.Client.RawData)) + "/revoke";
+            var adminUrl = $"https://127.0.0.1:{ports[2]}{revokePath}";
+
+            using var before = await agent.GetAsync(agentUrl);
+            Assert.Equal(HttpStatusCode.NoContent, before.StatusCode);
+            using var webAttempt = await web.PostAsync($"http://127.0.0.1:{ports[0]}{revokePath}", null);
+            Assert.Equal(HttpStatusCode.NotFound, webAttempt.StatusCode);
+            using var agentAttempt = await agent.PostAsync(
+                $"https://127.0.0.1:{ports[1]}{revokePath}", null);
+            Assert.Equal(HttpStatusCode.NotFound, agentAttempt.StatusCode);
+            using var denied = await ungranted.PostAsync(adminUrl, null);
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+            using var invalidIdentity = adminPki.CreateClient(adminPki.MalformedIdentityClient);
+            using var invalid = await invalidIdentity.PostAsync(adminUrl, null);
+            Assert.Equal(HttpStatusCode.Forbidden, invalid.StatusCode);
+            await Assert.ThrowsAsync<HttpRequestException>(async () =>
+                await wrongCa.PostAsync(adminUrl, null));
+            using var noCertificate = adminPki.CreateClient();
+            await Assert.ThrowsAsync<HttpRequestException>(async () =>
+                await noCertificate.PostAsync(adminUrl, null));
+
+            var correlation = Guid.NewGuid().ToString("N");
+            using var request = new HttpRequestMessage(HttpMethod.Post, adminUrl);
+            request.Headers.Add("X-Correlation-ID", correlation);
+            using var revoked = await admin.SendAsync(request);
+            Assert.Equal(HttpStatusCode.NoContent, revoked.StatusCode);
+            using var after = await agent.GetAsync(agentUrl);
+            Assert.Equal(HttpStatusCode.Forbidden, after.StatusCode);
+            using var adminHealth = await admin.GetAsync($"https://127.0.0.1:{ports[2]}/health/live");
+            Assert.Equal(HttpStatusCode.NotFound, adminHealth.StatusCode);
+            Assert.Equal(2, await CountRevocationAuditAsync(correlation));
+        }
+        finally
+        {
+            await app.StopAsync();
+        }
+    }
+
     [Fact]
     public async Task Mutual_tls_accepts_only_a_bound_certificate_on_the_agent_listener()
     {
@@ -116,6 +238,43 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
         return port;
     }
 
+    private async Task GrantAdminRevocationAsync(Guid adminId)
+    {
+        var roleId = Guid.NewGuid();
+        await using var connection = new NpgsqlConnection(fixture.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand("""
+            INSERT INTO platform.authorization_roles (role_id, name)
+            VALUES (@role_id, @name);
+            INSERT INTO platform.authorization_role_permissions (role_id, permission)
+            VALUES (@role_id, @permission);
+            INSERT INTO platform.authorization_assignments
+                (assignment_id, actor_subject_id, actor_kind, role_id, scope_id)
+            VALUES (@assignment_id, @actor_subject_id, @actor_kind, @role_id, NULL);
+            """, connection);
+        command.Parameters.AddWithValue("role_id", roleId);
+        command.Parameters.AddWithValue("name", $"Admin Gateway {roleId:N}");
+        command.Parameters.AddWithValue("permission", AgentCertificateRevocationService.Permission);
+        command.Parameters.AddWithValue("assignment_id", Guid.NewGuid());
+        command.Parameters.AddWithValue("actor_subject_id", $"person:{adminId:N}");
+        command.Parameters.AddWithValue("actor_kind", (int)ActorKind.Person);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private async Task<int> CountRevocationAuditAsync(string correlation)
+    {
+        await using var connection = new NpgsqlConnection(fixture.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand("""
+            SELECT count(*) FROM platform.audit_events
+            WHERE correlation_id = @correlation_id
+              AND action IN ('core.agent_certificate.revoke_requested',
+                             'core.agent_certificate.revoke_completed')
+            """, connection);
+        command.Parameters.AddWithValue("correlation_id", correlation);
+        return Convert.ToInt32(await command.ExecuteScalarAsync());
+    }
+
     private sealed class TestSecretDirectory : IDisposable
     {
         public string Path { get; } = System.IO.Path.Combine(
@@ -152,6 +311,11 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
         private readonly ECDsa malformedIdentityKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
 
         public TestPki(DeviceId deviceId)
+            : this(new Uri($"urn:fleetory:device:{deviceId.Value:D}"))
+        {
+        }
+
+        public TestPki(Uri clientUri, Uri? unregisteredUri = null)
         {
             var now = DateTimeOffset.UtcNow;
             var rootRequest = new CertificateRequest("CN=Fleetory Test CA", rootKey, HashAlgorithmName.SHA256);
@@ -164,10 +328,10 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             Server = Issue("CN=localhost", ServerKey, "1.3.6.1.5.5.7.3.1", now,
                 san => san.AddIpAddress(IPAddress.Loopback));
             Client = Issue("CN=Fleetory Test Agent", clientKey, "1.3.6.1.5.5.7.3.2", now,
-                san => san.AddUri(new Uri($"urn:fleetory:device:{deviceId.Value:D}")));
+                san => san.AddUri(clientUri));
             UnregisteredClient = Issue("CN=Fleetory Unknown Agent", unregisteredKey,
                 "1.3.6.1.5.5.7.3.2", now,
-                san => san.AddUri(new Uri($"urn:fleetory:device:{deviceId.Value:D}")));
+                san => san.AddUri(unregisteredUri ?? clientUri));
             MalformedIdentityClient = Issue("CN=Fleetory Malformed Agent", malformedIdentityKey,
                 "1.3.6.1.5.5.7.3.2", now,
                 san => san.AddUri(new Uri("urn:fleetory:device:not-a-guid")));

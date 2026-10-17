@@ -13,6 +13,43 @@ namespace Fleetory.Persistence.Tests;
 public sealed class AgentCertificateRevocationTests(PostgreSqlTestFixture fixture)
 {
     [Fact]
+    public async Task Failed_completion_audit_leaves_a_reconcilable_request_and_retry_is_safe()
+    {
+        var deviceId = new DeviceId(Guid.NewGuid());
+        var fingerprint = Convert.ToHexString(Guid.NewGuid().ToByteArray()) +
+            Convert.ToHexString(Guid.NewGuid().ToByteArray());
+        var actor = new ActorReference($"person:{Guid.NewGuid():N}", ActorKind.Person);
+        var originalCorrelation = CorrelationId.New();
+        var retryCorrelation = CorrelationId.New();
+
+        await using var scope = fixture.Services.CreateAsyncScope();
+        var database = scope.ServiceProvider.GetRequiredService<CoreDbContext>();
+        database.Devices.Add(DeviceRecord.Create(deviceId, "audit recovery device", DateTimeOffset.UtcNow));
+        database.AgentCertificates.Add(AgentCertificateRecord.Create(
+            deviceId, fingerprint, DateTimeOffset.UtcNow.AddDays(-1),
+            DateTimeOffset.UtcNow.AddDays(1)));
+        await database.SaveChangesAsync();
+        await GrantRevocationAsync(actor);
+
+        var failing = new AgentCertificateRevocationService(
+            scope.ServiceProvider.GetRequiredService<IAuthorizationService>(),
+            new FailOnSecondAuditWriter(scope.ServiceProvider.GetRequiredService<IAuditWriter>()),
+            database, scope.ServiceProvider.GetRequiredService<IClock>());
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await failing.RevokeAsync(actor, deviceId, fingerprint, originalCorrelation));
+
+        Assert.NotNull(await ReadRevocationAsync(database, fingerprint));
+        Assert.Equal(["core.agent_certificate.revoke_requested"],
+            await ReadAuditActionsAsync(originalCorrelation));
+
+        var retry = scope.ServiceProvider.GetRequiredService<AgentCertificateRevocationService>();
+        Assert.False(await retry.RevokeAsync(actor, deviceId, fingerprint, retryCorrelation));
+        Assert.Equal(
+            ["core.agent_certificate.revoke_completed", "core.agent_certificate.revoke_requested"],
+            await ReadAuditActionsAsync(retryCorrelation));
+    }
+
+    [Fact]
     public async Task Revocation_requires_a_grant_and_durable_audit_before_state_changes()
     {
         var deviceId = new DeviceId(Guid.NewGuid());
@@ -34,8 +71,8 @@ public sealed class AgentCertificateRevocationTests(PostgreSqlTestFixture fixtur
         await Assert.ThrowsAsync<UnauthorizedAccessException>(async () =>
             await service.RevokeAsync(actor, deviceId, fingerprint, deniedCorrelation));
         Assert.Null(await ReadRevocationAsync(database, fingerprint));
-        Assert.Equal("core.agent_certificate.revoke_denied",
-            await ReadAuditActionAsync(deniedCorrelation));
+        Assert.Equal(["core.agent_certificate.revoke_denied"],
+            await ReadAuditActionsAsync(deniedCorrelation));
 
         await GrantRevocationAsync(actor);
         var noAudit = new AgentCertificateRevocationService(
@@ -52,8 +89,9 @@ public sealed class AgentCertificateRevocationTests(PostgreSqlTestFixture fixtur
 
         Assert.True(await service.RevokeAsync(actor, deviceId, fingerprint, acceptedCorrelation));
         Assert.NotNull(await ReadRevocationAsync(database, fingerprint));
-        Assert.Equal("core.agent_certificate.revoke_requested",
-            await ReadAuditActionAsync(acceptedCorrelation));
+        Assert.Equal(
+            ["core.agent_certificate.revoke_completed", "core.agent_certificate.revoke_requested"],
+            await ReadAuditActionsAsync(acceptedCorrelation));
         Assert.False(await service.RevokeAsync(actor, deviceId, fingerprint, CorrelationId.New()));
     }
 
@@ -64,15 +102,22 @@ public sealed class AgentCertificateRevocationTests(PostgreSqlTestFixture fixtur
             .Select(row => row.RevokedAt)
             .SingleAsync();
 
-    private async Task<string?> ReadAuditActionAsync(CorrelationId correlation)
+    private async Task<List<string>> ReadAuditActionsAsync(CorrelationId correlation)
     {
         await using var connection = new NpgsqlConnection(fixture.ConnectionString);
         await connection.OpenAsync();
         await using var command = new NpgsqlCommand(
-            "SELECT action FROM platform.audit_events WHERE correlation_id = @correlation_id",
+            "SELECT action FROM platform.audit_events WHERE correlation_id = @correlation_id ORDER BY action",
             connection);
         command.Parameters.AddWithValue("correlation_id", correlation.Value);
-        return (string?)await command.ExecuteScalarAsync();
+        await using var reader = await command.ExecuteReaderAsync();
+        var actions = new List<string>();
+        while (await reader.ReadAsync())
+        {
+            actions.Add(reader.GetString(0));
+        }
+
+        return actions;
     }
 
     private async Task GrantRevocationAsync(ActorReference actor)
@@ -102,5 +147,15 @@ public sealed class AgentCertificateRevocationTests(PostgreSqlTestFixture fixtur
     {
         public ValueTask WriteAsync(AuditRecord record, CancellationToken cancellationToken = default) =>
             ValueTask.FromException(new InvalidOperationException("Audit unavailable."));
+    }
+
+    private sealed class FailOnSecondAuditWriter(IAuditWriter inner) : IAuditWriter
+    {
+        private int writes;
+
+        public ValueTask WriteAsync(AuditRecord record, CancellationToken cancellationToken = default) =>
+            ++writes == 2
+                ? ValueTask.FromException(new InvalidOperationException("Completion audit unavailable."))
+                : inner.WriteAsync(record, cancellationToken);
     }
 }

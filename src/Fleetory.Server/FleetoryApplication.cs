@@ -24,7 +24,7 @@ public static class FleetoryApplication
         builder.Configuration.AddEnvironmentVariables(prefix: "FLEETORY_");
 
         var secrets = ConfigureSecrets(builder);
-        var agentGateway = AgentGatewayStartup.Configure(builder, secrets);
+        var gateway = GatewayStartup.Configure(builder, secrets);
 
         builder.Logging.ClearProviders();
         builder.Logging.AddJsonConsole(options => options.IncludeScopes = true);
@@ -45,11 +45,11 @@ public static class FleetoryApplication
 
         app.UseMiddleware<CorrelationIdMiddleware>();
 
-        if (agentGateway is not null)
+        if (gateway is not null)
         {
             app.Use(async (context, next) =>
             {
-                if (context.Connection.LocalPort == agentGateway.AgentPort)
+                if (context.Connection.LocalPort == gateway.AgentPort)
                 {
                     if (context.Request.Path != "/agent/identity")
                     {
@@ -75,7 +75,17 @@ public static class FleetoryApplication
                         return;
                     }
                 }
-                else if (context.Request.Path.StartsWithSegments("/agent"))
+                else if (context.Connection.LocalPort == gateway.AdminPort)
+                {
+                    if (!context.Request.Path.StartsWithSegments("/admin") ||
+                        await context.Connection.GetClientCertificateAsync() is null)
+                    {
+                        context.Response.StatusCode = StatusCodes.Status404NotFound;
+                        return;
+                    }
+                }
+                else if (context.Request.Path.StartsWithSegments("/agent") ||
+                    context.Request.Path.StartsWithSegments("/admin"))
                 {
                     context.Response.StatusCode = StatusCodes.Status404NotFound;
                     return;
