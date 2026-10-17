@@ -208,7 +208,7 @@ Do not:
 - weaken the Quality Gate;
 - ignore Security Hotspots.
 
-Small duplication across bounded contexts is preferable to introducing an incorrect shared abstraction only to satisfy duplication metrics.
+Review duplication reported by Sonar in the same increment and remove it when the repeated code has one responsibility. Keep bounded-context ownership and architecture tests intact; do not hide duplication with exclusions, suppressions or a weaker threshold.
 
 ## 12. Current code-hardening changes before external Sonar analysis
 

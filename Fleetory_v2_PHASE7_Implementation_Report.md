@@ -16,8 +16,9 @@
 10. An opt-in Kestrel Agent listener requires mutual TLS, a pinned Fleetory root CA, a SAN `DeviceId` and an active Core certificate binding on every request. Its `/agent/identity` probe is isolated from the web and health listener. Real TLS/PostgreSQL integration tests cover acceptance, revocation, unknown bindings and absent client certificates. Certificate issuance and enrollment remain open.
 11. An internal Core revocation service requires the global `core.agent_certificate.revoke` grant and persists an audit record before atomically changing the binding. Denied attempts are audited; no default grant is exposed.
 12. An opt-in Admin Gateway provides a separate mTLS listener with a distinct CA and SAN-bound Person actor. Core exposes one revoke route on that port only. RBAC is evaluated on every call, and a second audit event records the confirmed `revoked` or `unchanged` outcome. No grant is seeded; Agent issuance and certificate rotation remain open.
+13. Core now parses certificate SAN URIs once for both Admin and Agent identities, while retaining their distinct prefixes and domain types. This removed the duplication detected by Sonar without weakening either identity check.
 
-## Local verification
+## Verification
 
 | Gate | Result |
 | --- | ---: |
@@ -29,17 +30,16 @@
 | PostgreSQL integration tests | PASS, 26/26 |
 | Disposable PostgreSQL and migrations | PASS |
 | Windows/Linux server packages and Windows production smoke | PASS |
-| Local production line coverage | 92.10% |
-| CI production line coverage | 92.27% |
-| Sonar overall coverage | 89.9% |
-| Sonar new-code coverage | 90.48% |
-| Sonar overall duplication | 0.8% |
-| Sonar new-code duplication | 0.98% |
+| CI production line coverage | 92.55% |
+| Sonar overall coverage | 90.4% |
+| Sonar new-code coverage | 91.21% |
+| Sonar overall duplication | 0.0% |
+| Sonar new-code duplication | 0.0% |
 | New Sonar issues for PR | 0 |
 | New Security Hotspots for PR | 0 |
 | Sonar Quality Gate | PASS |
 
-Local PHASE 6 regression verification passed with disposable PostgreSQL, migrations, Windows/Linux packages and Windows runtime smoke. The Admin Gateway increment passed [GitHub Actions run 39004025384](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39004025384) at commit `3f1558c`: Sonar reported 90.48361934477379% new-code coverage and 0.9847365829640571% new-code duplication, rounded above. The Sonar GitHub check reported zero new issues, zero accepted issues and zero Security Hotspots. The first CI attempt exposed rule `S8949`; a later passing attempt still reported three maintainability findings, which were corrected in the current run. PHASE 7 as a whole remains IN PROGRESS.
+Local PHASE 6 regression verification passed with disposable PostgreSQL, migrations, Windows/Linux packages and Windows runtime smoke. The SAN parser consolidation passed [GitHub Actions run 39004678989](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39004678989) at commit `8fd0a63`: Sonar reported 91.21405750798722% new-code coverage and 0.0% new-code duplication, rounded above. Overall duplication is also 0.0%. The Sonar GitHub check reported zero new issues, zero accepted issues and zero Security Hotspots. PHASE 7 as a whole remains IN PROGRESS.
 
 ## Required before PHASE 7 completion
 
