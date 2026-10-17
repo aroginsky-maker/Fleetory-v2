@@ -9,9 +9,9 @@ if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows' -or
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $work = Join-Path $env:RUNNER_TEMP ('fleetory-tls-' + [guid]::NewGuid().ToString('N'))
-$openssl = (Get-Command openssl.exe -ErrorAction SilentlyContinue)?.Source
-if (-not $openssl) {
-    $openssl = 'C:\Program Files\Git\usr\bin\openssl.exe'
+$openssl = 'C:\Program Files\Git\mingw64\bin\openssl.exe'
+if (-not (Test-Path -LiteralPath $openssl -PathType Leaf)) {
+    $openssl = (Get-Command openssl.exe -ErrorAction SilentlyContinue)?.Source
 }
 if (-not (Test-Path -LiteralPath $openssl -PathType Leaf)) {
     throw 'OpenSSL is required for root-only wire verification.'
