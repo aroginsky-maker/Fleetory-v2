@@ -113,6 +113,10 @@ internal static class AuthorizationAdministrationEndpoints
         {
             return Results.BadRequest();
         }
+        catch (InvalidOperationException)
+        {
+            return Results.Conflict();
+        }
         catch (UnauthorizedAccessException)
         {
             return Results.StatusCode(StatusCodes.Status403Forbidden);

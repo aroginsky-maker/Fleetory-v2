@@ -149,7 +149,7 @@ internal sealed class PostgreSqlAuthorizationAdministration(
             }, cancellationToken);
     }
 
-    public ValueTask<bool> RevokeAssignmentAsync(
+    public async ValueTask<bool> RevokeAssignmentAsync(
         ActorReference actor,
         Guid assignmentId,
         CorrelationId correlationId,
@@ -160,18 +160,61 @@ internal sealed class PostgreSqlAuthorizationAdministration(
             throw new ArgumentException("Assignment is invalid.", nameof(assignmentId));
         }
 
-        return ExecuteAuthorizedAsync(actor, "platform.authorization.assignment_revoked",
+        var outcome = await ExecuteAuthorizedAsync(actor,
+            "platform.authorization.assignment_revoked",
             new AuditTarget("assignment", assignmentId.ToString("D")), correlationId,
             null,
             async (connection, transaction, token) =>
             {
+                await using (var lastManager = new NpgsqlCommand("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM platform.authorization_assignments AS assignment
+                        JOIN platform.authorization_role_permissions AS permission
+                          ON permission.role_id = assignment.role_id
+                        WHERE assignment.assignment_id = @assignment_id
+                          AND assignment.scope_id IS NULL
+                          AND permission.permission = @permission
+                    ) AND (
+                        SELECT COUNT(*) FROM platform.authorization_assignments AS assignment
+                        JOIN platform.authorization_role_permissions AS permission
+                          ON permission.role_id = assignment.role_id
+                        WHERE assignment.scope_id IS NULL
+                          AND permission.permission = @permission
+                    ) = 1
+                    """, connection, transaction))
+                {
+                    lastManager.Parameters.AddWithValue("assignment_id", NpgsqlDbType.Uuid,
+                        assignmentId);
+                    lastManager.Parameters.AddWithValue("permission", NpgsqlDbType.Varchar,
+                        Permission);
+                    if ((bool)(await lastManager.ExecuteScalarAsync(token))!)
+                    {
+                        return AssignmentRevocationOutcome.LastManagerProtected;
+                    }
+                }
+
                 await using var command = new NpgsqlCommand("""
                     DELETE FROM platform.authorization_assignments
                     WHERE assignment_id = @assignment_id
                     """, connection, transaction);
                 command.Parameters.AddWithValue("assignment_id", NpgsqlDbType.Uuid, assignmentId);
-                return await command.ExecuteNonQueryAsync(token) == 1;
-            }, cancellationToken);
+                return await command.ExecuteNonQueryAsync(token) == 1
+                    ? AssignmentRevocationOutcome.Revoked
+                    : AssignmentRevocationOutcome.Unchanged;
+            }, cancellationToken,
+            result => result switch
+            {
+                AssignmentRevocationOutcome.Revoked => "platform.authorization.assignment_revoked",
+                AssignmentRevocationOutcome.Unchanged => "platform.authorization.assignment_unchanged",
+                _ => "platform.authorization.assignment_revocation_blocked"
+            });
+        if (outcome == AssignmentRevocationOutcome.LastManagerProtected)
+        {
+            throw new InvalidOperationException(
+                "The last global authorization administrator cannot be revoked.");
+        }
+
+        return outcome == AssignmentRevocationOutcome.Revoked;
     }
 
     private async ValueTask<T> ExecuteAuthorizedAsync<T>(
@@ -181,7 +224,8 @@ internal sealed class PostgreSqlAuthorizationAdministration(
         CorrelationId correlationId,
         IReadOnlyDictionary<string, string>? context,
         Func<NpgsqlConnection, NpgsqlTransaction, CancellationToken, Task<T>> operation,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        Func<T, string>? actionForResult = null)
     {
         await using var connection = new NpgsqlConnection(settings.ConnectionString);
         await connection.OpenAsync(cancellationToken);
@@ -200,7 +244,8 @@ internal sealed class PostgreSqlAuthorizationAdministration(
 
         var result = await operation(connection, transaction, cancellationToken);
         await audit.WriteInTransactionAsync(new AuditRecord(
-            actor, action, target, correlationId, clock.UtcNow, context),
+            actor, actionForResult?.Invoke(result) ?? action, target,
+            correlationId, clock.UtcNow, context),
             connection, transaction, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return result;
@@ -212,5 +257,12 @@ internal sealed class PostgreSqlAuthorizationAdministration(
         {
             throw new ArgumentException("Authorization name is invalid.", nameof(name));
         }
+    }
+
+    private enum AssignmentRevocationOutcome
+    {
+        Revoked,
+        Unchanged,
+        LastManagerProtected
     }
 }

@@ -193,6 +193,60 @@ public sealed class PostgreSqlAuthorizationTests(PostgreSqlTestFixture fixture)
         Assert.Equal(0L, (long)(await missingRole.ExecuteScalarAsync())!);
     }
 
+    [Fact]
+    public async Task Last_global_administrator_cannot_be_revoked()
+    {
+        await using (var connection = new NpgsqlConnection(fixture.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var clear = new NpgsqlCommand("""
+                DELETE FROM platform.authorization_assignments AS assignment
+                USING platform.authorization_role_permissions AS permission
+                WHERE permission.role_id = assignment.role_id
+                  AND permission.permission = 'platform.authorization.manage'
+                  AND assignment.scope_id IS NULL
+                """, connection);
+            await clear.ExecuteNonQueryAsync();
+        }
+
+        var firstId = $"person:{Guid.NewGuid():N}";
+        var firstAssignment = await InsertGrantAsync(firstId, ActorKind.Person,
+            PostgreSqlAuthorizationAdministration.Permission);
+        var firstActor = new ActorReference(firstId, ActorKind.Person);
+        var correlation = new CorrelationId(Guid.NewGuid().ToString("N"));
+        await using var scope = fixture.Services.CreateAsyncScope();
+        var administration = scope.ServiceProvider.GetRequiredService<PostgreSqlAuthorizationAdministration>();
+        var authorizer = scope.ServiceProvider.GetRequiredService<IAuthorizationService>();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await administration.RevokeAssignmentAsync(firstActor, firstAssignment, correlation));
+        Assert.True((await authorizer.AuthorizeAsync(new AuthorizationRequest(
+            firstActor, PostgreSqlAuthorizationAdministration.Permission))).IsAllowed);
+
+        await using (var connection = new NpgsqlConnection(fixture.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var audit = new NpgsqlCommand("""
+                SELECT COUNT(*) FROM platform.audit_events
+                WHERE correlation_id = @correlation
+                  AND action = 'platform.authorization.assignment_revocation_blocked'
+                """, connection);
+            audit.Parameters.AddWithValue("correlation", correlation.Value);
+            Assert.Equal(1L, (long)(await audit.ExecuteScalarAsync())!);
+        }
+
+        var secondId = $"person:{Guid.NewGuid():N}";
+        await InsertGrantAsync(secondId, ActorKind.Person,
+            PostgreSqlAuthorizationAdministration.Permission);
+        Assert.True(await administration.RevokeAssignmentAsync(firstActor,
+            firstAssignment, correlation));
+        Assert.False((await authorizer.AuthorizeAsync(new AuthorizationRequest(
+            firstActor, PostgreSqlAuthorizationAdministration.Permission))).IsAllowed);
+        Assert.True((await authorizer.AuthorizeAsync(new AuthorizationRequest(
+            new ActorReference(secondId, ActorKind.Person),
+            PostgreSqlAuthorizationAdministration.Permission))).IsAllowed);
+    }
+
     private async Task InsertScopeAsync(Guid scopeId, Guid? parentScopeId = null)
     {
         await using var connection = new NpgsqlConnection(fixture.ConnectionString);
