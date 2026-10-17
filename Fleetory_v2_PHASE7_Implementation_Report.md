@@ -29,15 +29,15 @@
 | Disposable PostgreSQL and migrations | PASS |
 | Windows/Linux server packages and Windows production smoke | PASS |
 | Local production line coverage | 92.39% |
-| CI production line coverage | Pending this increment |
-| Sonar overall coverage | Pending this increment |
-| Sonar new-code coverage | Pending this increment |
-| Sonar overall duplication | Pending this increment |
-| Sonar new-code duplication | Pending this increment |
-| Open Sonar issues for PR | Pending this increment |
-| Sonar Quality Gate | Pending this increment |
+| CI production line coverage | 92.55% |
+| Sonar overall coverage | 90.0% |
+| Sonar new-code coverage | 90.60% |
+| Sonar overall duplication | 0.0% |
+| Sonar new-code duplication | 0.0% |
+| Open Sonar issues for PR | 0 |
+| Sonar Quality Gate | PASS |
 
-Local PHASE 6 regression verification passed with disposable PostgreSQL, migrations, Windows/Linux packages and Windows runtime smoke. The prior mTLS increment passed [GitHub Actions run 39001771983](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39001771983) at commit `9c82564`: Sonar reported 90.52823315118397% new-code coverage, 89.9% overall coverage, 0.0% duplication and zero open PR issues. The current revocation increment awaits CI/Sonar analysis. Security Hotspots were not separately available from the metrics report. PHASE 7 as a whole remains IN PROGRESS.
+Local PHASE 6 regression verification passed with disposable PostgreSQL, migrations, Windows/Linux packages and Windows runtime smoke. The revocation increment passed [GitHub Actions run 39002320879](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39002320879) at commit `d71ee8a`: Sonar reported 90.60283687943263% new-code coverage, rounded to 90.60% above. The Sonar issues API reported zero open issues for PR #2. Security Hotspots were not separately available from the metrics report. PHASE 7 as a whole remains IN PROGRESS.
 
 ## Required before PHASE 7 completion
 
