@@ -10,26 +10,27 @@
 - File and OpenBao secret providers; Agent-local ECDSA command verification, deny-by-default policy, durable SQLite replay store and per-device public-key trust files. No Agent command execution endpoint is exposed.
 - Lab-only OpenBao Transit signing key with a separate sign-only token and DeviceId-bound public trust file. The Server token is read-only for its KV secrets.
 - Reproducible local browser S256 PKCE and virtual WebAuthn check: the signed token carries `amr=webauthn` and the certificate-bound subject; the Admin route returns 401 without it and 403 at RBAC with it.
+- Admin Gateway startup rejects wildcard bind addresses, keeping its listener on loopback or an explicitly selected management IP.
 
 ## Verification snapshot
 
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local tests after adding lab verifier | 138/138 passed |
-| Local coverage after adding lab verifier | 90.99% |
+| Local tests | 141/141 passed |
+| Local coverage | 91.07% |
 | Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
 | Local full audit pipeline | PostgreSQL outbox → Fleetory worker → immudb readback passed |
 | Local WebAuthn/OIDC with real Admin mTLS | 401 without token; 403 with WebAuthn token at RBAC |
 | Windows server TLS chain | 1 certificate sent; root-only validation fails |
 | Linux container server TLS chain | 2 certificates sent; root-only OpenSSL verification code 0 |
-| CI coverage at `27f26b6` | 91.27% |
-| Sonar PR coverage at `27f26b6` | 88.9% |
-| Sonar new-code coverage at `27f26b6` | 89.04% |
-| Sonar duplication at `27f26b6` | 0.0% |
-| Sonar Quality Gate at `27f26b6` | PASS |
+| CI coverage at `6b00908` | 91.35% |
+| Sonar PR coverage at `6b00908` | 89.1% |
+| Sonar new-code coverage at `6b00908` | 89.23% |
+| Sonar duplication at `6b00908` | 0.0% |
+| Sonar Quality Gate at `6b00908` | PASS |
 
-The latest completed CI and Sonar numbers come from [run 39056571413](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39056571413). The previous [run 39055723453](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39055723453) failed on the browser verifier's `spawn('dotnet')` PATH lookup; the fixed absolute .NET path restored the Quality Gate. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
+The latest completed CI and Sonar numbers come from [run 39058456927](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39058456927). The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
 
 ## Required before completion
 
