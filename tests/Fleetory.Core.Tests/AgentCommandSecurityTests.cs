@@ -60,6 +60,31 @@ public sealed class AgentCommandSecurityTests
     }
 
     [Fact]
+    public async Task Replay_storage_rejects_invalid_identity_and_untrusted_directory()
+    {
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            var store = new SqliteCommandReplayStore(Path.Combine(directory, "replay.db"));
+            await Assert.ThrowsAsync<ArgumentException>(async () =>
+                await store.TryConsumeAsync(Device, Guid.Empty, "valid-nonce-123456", DateTimeOffset.UtcNow));
+
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(directory,
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
+                    UnixFileMode.OtherRead);
+                Assert.Throws<InvalidOperationException>(() =>
+                    new SqliteCommandReplayStore(Path.Combine(directory, "other.db")));
+            }
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task Local_policy_denies_other_targets_payloads_and_unsupported_commands()
     {
         var policy = new AgentCommandExecutionPolicy(Device);
@@ -88,6 +113,33 @@ public sealed class AgentCommandSecurityTests
 
             File.Delete(path);
             Assert.Null(await trust.FindPublicKeyAsync(Device, "key-1"));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Trust_directory_rejects_oversize_and_writable_key_files()
+    {
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            var path = Path.Combine(directory, $"{Device.Value:N}-key-1.spki");
+            var trust = new DirectoryCommandVerificationKeys(Device, directory);
+            await File.WriteAllBytesAsync(path, new byte[1025]);
+            await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+                await trust.FindPublicKeyAsync(Device, "key-1"));
+
+            if (!OperatingSystem.IsWindows())
+            {
+                await File.WriteAllBytesAsync(path, [1, 2, 3]);
+                File.SetUnixFileMode(path,
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.OtherWrite);
+                await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+                    await trust.FindPublicKeyAsync(Device, "key-1"));
+            }
         }
         finally
         {

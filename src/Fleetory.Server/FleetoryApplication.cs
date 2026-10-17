@@ -13,6 +13,8 @@ using Fleetory.Platform.Persistence;
 using Fleetory.Platform.Secrets;
 using Fleetory.Server.Infrastructure;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using System.Threading.RateLimiting;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Fleetory.Server;
 
@@ -31,6 +33,23 @@ public static class FleetoryApplication
         builder.Logging.AddJsonConsole(options => options.IncludeScopes = true);
 
         builder.Services.AddHealthChecks();
+        var adminRateLimit = builder.Configuration.GetValue<int?>("Fleetory:AdminGateway:RateLimitPerMinute") ?? 30;
+        if (adminRateLimit is < 1 or > 300)
+        {
+            throw new InvalidOperationException("Fleetory:AdminGateway:RateLimitPerMinute must be between 1 and 300.");
+        }
+
+        builder.Services.AddRateLimiter(options =>
+        {
+            options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            options.AddFixedWindowLimiter(CoreSecurityPolicyNames.AdminRateLimit, limiter =>
+            {
+                limiter.PermitLimit = adminRateLimit;
+                limiter.Window = TimeSpan.FromMinutes(1);
+                limiter.QueueLimit = 0;
+                limiter.AutoReplenishment = true;
+            });
+        });
 
         var modules = CreateModules();
         ValidateModules(modules);
@@ -44,6 +63,8 @@ public static class FleetoryApplication
 
         var app = builder.Build();
 
+        app.UseRouting();
+        app.UseRateLimiter();
         app.UseMiddleware<CorrelationIdMiddleware>();
 
         if (gateway is not null)

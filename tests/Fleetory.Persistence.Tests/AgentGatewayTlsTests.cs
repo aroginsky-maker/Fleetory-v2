@@ -20,6 +20,51 @@ namespace Fleetory.Persistence.Tests;
 public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
 {
     [Fact]
+    public async Task Admin_gateway_limits_requests_before_repeated_authorization_work()
+    {
+        using var adminPki = new TestPki(new Uri($"urn:fleetory:admin:{Guid.NewGuid():D}"));
+        using var secrets = new TestSecretDirectory();
+        secrets.Write("fleetory-postgresql", fixture.ConnectionString);
+        secrets.Write("admin-gateway-root-ca", adminPki.Root.ExportCertificatePem());
+        secrets.Write("admin-gateway-server-cert", adminPki.Server.ExportCertificatePem());
+        secrets.Write("admin-gateway-server-key", adminPki.ServerKey.ExportPkcs8PrivateKeyPem());
+
+        var webPort = GetFreePort();
+        var adminPort = GetFreePort();
+        while (webPort == adminPort)
+        {
+            adminPort = GetFreePort();
+        }
+
+        await using var app = FleetoryApplication.Build([
+            "--environment=Development",
+            $"--Fleetory:Secrets:Directory={secrets.Path}",
+            "--Fleetory:AdminGateway:Enabled=true",
+            "--Fleetory:AdminGateway:RateLimitPerMinute=3",
+            $"--Fleetory:Web:Port={webPort}",
+            $"--Fleetory:AdminGateway:Port={adminPort}"
+        ]);
+        await app.StartAsync();
+        try
+        {
+            using var admin = adminPki.CreateClient(adminPki.Client);
+            var url = $"https://127.0.0.1:{adminPort}/admin/devices/{Guid.NewGuid():D}/enrollment-grants";
+            for (var attempt = 0; attempt < 3; attempt++)
+            {
+                using var denied = await admin.PostAsJsonAsync(url, new { displayName = "denied" });
+                Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+            }
+
+            using var limited = await admin.PostAsJsonAsync(url, new { displayName = "denied" });
+            Assert.Equal(HttpStatusCode.TooManyRequests, limited.StatusCode);
+        }
+        finally
+        {
+            await app.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task Enrollment_requires_durable_audit_before_grant_or_binding_changes()
     {
         var deviceId = new DeviceId(Guid.NewGuid());

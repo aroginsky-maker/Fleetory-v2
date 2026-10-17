@@ -76,7 +76,9 @@ The service writes a second audit event after the Core update, with `revoked` or
 
 Core owns `POST /admin/devices/{deviceId}/certificates/{fingerprint}/revoke`. It is reachable only on the Admin mTLS port; web and Agent ports return 404. A successful call returns 204 after the authorized request, atomic Core update and completion audit event have been persisted. Denied authorization returns 403 and is audited. Invalid identity or a missing/foreign client certificate is refused. The Admin listener does not expose health or module routes. The end-to-end test covers the three-port boundary, separate CAs, denied grants and identities, audit completion and Agent rejection after revocation.
 
-This is certificate-based administrative authentication for certificate lifecycle operations, not general human login, MFA/WebAuthn or a role management UI. Deployment must restrict access to the Admin port to a management network and provision Admin certificates and grants under a separate approval process. Admin certificate lifecycle and issuance, rate limits and recovery of ambiguous audit outcomes remain open.
+This is certificate-based administrative authentication for certificate lifecycle operations, not general human login, MFA/WebAuthn or a role management UI. Deployment must restrict access to the Admin port to a management network and provision Admin certificates and grants under a separate approval process. Admin certificate lifecycle and issuance, distributed rate limits and recovery of ambiguous audit outcomes remain open.
+
+The Admin enrollment and revocation routes now share a fixed one-minute request limit per Server instance. The default is 30 requests per minute; `Fleetory:AdminGateway:RateLimitPerMinute` accepts 1–300 for deployment sizing. Excess requests return HTTP 429 before repeating authorization and database work. This limit is per process, so an ingress must enforce a fleet-wide limit across Server replicas. A real mTLS integration test verifies the 429 response.
 
 ## Implemented one-time Agent enrollment grant
 

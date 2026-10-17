@@ -10,6 +10,7 @@ using Fleetory.SharedKernel;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Fleetory.Core;
 
@@ -58,10 +59,12 @@ public sealed class CoreModule : FleetoryModuleBase
         {
             endpoints.MapPost(
                 "/admin/devices/{deviceId:guid}/certificates/{fingerprint}/revoke",
-                AdminCertificateEndpoints.RevokeAsync);
+                AdminCertificateEndpoints.RevokeAsync)
+                .RequireRateLimiting(CoreSecurityPolicyNames.AdminRateLimit);
             endpoints.MapPost(
                 "/admin/devices/{deviceId:guid}/enrollment-grants",
-                AgentEnrollmentEndpoints.CreateGrantAsync);
+                AgentEnrollmentEndpoints.CreateGrantAsync)
+                .RequireRateLimiting(CoreSecurityPolicyNames.AdminRateLimit);
         }
     }
 }
