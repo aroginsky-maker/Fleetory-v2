@@ -1,8 +1,8 @@
 # Fleetory PHASE 7 Security Foundation
 
-**Status:** IN PROGRESS — Command Plane verification, local audit persistence/export transport, RBAC evaluation, Agent mTLS enrollment and Admin OIDC gate, 17 October 2026.
+**Status:** IN PROGRESS — Command Plane verification, local audit persistence/export transport, RBAC evaluation, Agent mTLS enrollment and Admin OIDC gate, 18 October 2026.
 
-The local self-hosted integration stack and its current limits are documented in [SecurityLab.md](SecurityLab.md). Fleetory can now read its PostgreSQL connection through an OpenBao KV v2 provider. The Agent and Admin gateway loaders accept a pinned root with a bounded intermediate chain. Windows Kestrel currently sends only the leaf server certificate on the wire; the same published Server and certificates send the full chain on Linux, verified against only the root CA. Tests cover OpenBao failure modes and a real Windows mTLS request with a client that also has the intermediate CA.
+The local self-hosted integration stack and its current limits are documented in [SecurityLab.md](SecurityLab.md). Fleetory can now read its PostgreSQL connection through an OpenBao KV v2 provider. The Agent and Admin gateway loaders accept a pinned root with a bounded intermediate chain. A Windows CI probe verifies that the actual Admin listener sends leaf plus intermediate and passes root-only OpenSSL validation after the root and intermediate have been provisioned in the Windows host certificate stores. Windows deployments must provision those stores as part of host PKI setup; supplying the PEM bundle alone was insufficient in the original local probe. Tests also cover OpenBao failure modes and real Windows mTLS requests.
 
 Fleetory applies the same end-entity signing-key checks in the Core certificate verifier and Kestrel gateway. RFC 5280 allows Basic Constraints to be absent from a leaf; an actual step-ca leaf exposed the previous overly strict check. The shared policy rejects any certificate marked as a CA or granted certificate-signing key usage, even when Basic Constraints are absent. A lab run started both gateways with separate step-ca roots and OpenBao TLS material.
 
@@ -58,7 +58,24 @@ SET fleetory.bootstrap.admin_person_id = '<uuid-from-admin-certificate-san>';
 \i eng/bootstrap-first-admin.sql
 ```
 
-Run this from the repository root after Platform migrations, with `ON_ERROR_STOP` enabled. Supply database credentials through the operator's normal protected `psql` mechanism; do not put a password in the command line or repository. The script creates one global `platform.authorization.manage` assignment and an audit event plus export queue entry in one transaction. It uses a transaction-scoped advisory lock and refuses to run if any global manager already exists. The PostgreSQL integration test verifies the initial grant, audit/outbox and repeated-run rejection. Restrict and revoke the temporary database operator's Platform write access after bootstrap. This procedure cannot recover a deployment that still has a manager assignment but has lost that person's certificate or OIDC access; such recovery requires a separate approved break-glass procedure.
+Run this from the repository root after Platform migrations, with `ON_ERROR_STOP` enabled. Supply database credentials through the operator's normal protected `psql` mechanism; do not put a password in the command line or repository. The script creates one global `platform.authorization.manage` assignment and an audit event plus export queue entry in one transaction. It uses a transaction-scoped advisory lock and refuses to run if any global manager already exists. The PostgreSQL integration test verifies the initial grant, audit/outbox and repeated-run rejection. Restrict and revoke the temporary database operator's Platform write access after bootstrap. This procedure cannot recover a deployment that still has a manager assignment but has lost that person's certificate or OIDC access; use the controlled recovery procedure below.
+
+### Emergency Admin recovery
+
+If no existing global administrator can authenticate, an authorized database operator can run [recover-admin-access.sql](../../eng/recover-admin-access.sql). Before the database session, the incident owner and a separate approver must document the incident, verify that the replacement certificate has a single `urn:fleetory:admin:<uuid>` SAN with a protected private key, and verify that the replacement person can complete the OIDC/WebAuthn login. The SQL script cannot verify these external approvals or certificate custody; the operator must check them through the incident process. Use a short-lived database credential with Platform write privileges, outside the Fleetory Server identity.
+
+In a controlled `psql` session from the repository root after Platform migrations:
+
+```text
+\set ON_ERROR_STOP on
+BEGIN;
+SET LOCAL fleetory.recovery.admin_person_id = '<uuid-from-replacement-admin-certificate-san>';
+SET LOCAL fleetory.recovery.incident_id = '<approved-incident-reference>';
+\i eng/recover-admin-access.sql
+COMMIT;
+```
+
+The script requires an existing global manager assignment but refuses a duplicate grant to the replacement identity. It creates a new global management role and assignment, plus an audit event and export queue entry, atomically. The audit context includes the incident reference and PostgreSQL `session_user`; the script never accepts a caller-supplied operator name. It leaves previous grants intact so the operator can first confirm the replacement person's Admin mTLS plus OIDC access. The new administrator then revokes an inaccessible prior assignment through the audited Admin route, preserving the last-manager safeguard. Confirm audit export and revoke the temporary database credential. If no global manager assignment remains, use the separate first-admin bootstrap only under an approved restoration procedure. Tests cover recovery, audit export enqueue, duplicate denial and missing-manager denial.
 
 ## Implemented Secret Provider boundary
 
@@ -112,8 +129,8 @@ Fleetory Server does not issue or sign certificates and has no Agent CA private 
 
 - External Agent CA issuance and grant delivery, CA lifecycle, full rotation administration, Admin certificate lifecycle, identity-collision policy, reconciliation of ambiguous audit outcomes, and revocation propagation to future long-lived Agent streams.
 - A protected signing service and secure trust-file distribution, plus Agent runtime wiring of the verifier, replay store and policy before any command execution. High-risk and bulk command types require an approval protocol before they can be enabled.
-- Emergency administrator recovery after certificate or OIDC loss, role/scope lifecycle beyond creation, and enforcement at future privileged routes. The offline first-administrator bootstrap and last-global-grant safeguard are tested; the local Keycloak browser WebAuthn ceremony and signed-token request passed in the lab.
-- Fix wire-level server certificate chain delivery on Windows. Linux root-only chain verification passed in the local container; automated cross-platform verification remains open. The Baseline requires equal Windows Server and Linux support.
+- Role/scope lifecycle beyond creation and enforcement at future privileged routes. The first-admin bootstrap, controlled recovery and last-global-grant safeguard are tested; actual recovery depends on the deployment's approved incident procedure and replacement credential custody.
+- Maintain Windows host CA-store provisioning and root-only wire-chain regression checks alongside the existing Linux result; verify the production certificate-management procedure during deployment.
 - Production immudb hardening: dedicated audit credentials, TLS, retention/backup and independently anchored verification; wiring audited security call sites as those flows are implemented.
 - Abuse, negative authorization, recovery and cross-platform security tests, then the full Sonar Quality Gate.
 
