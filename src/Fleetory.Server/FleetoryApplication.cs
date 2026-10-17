@@ -119,7 +119,7 @@ public static class FleetoryApplication
         return app;
     }
 
-    private static ISecretProvider? ConfigureSecrets(WebApplicationBuilder builder)
+    private static FileSecretProvider? ConfigureSecrets(WebApplicationBuilder builder)
     {
         var directory = builder.Configuration["Fleetory:Secrets:Directory"];
         var directConnectionString = builder.Configuration.GetConnectionString("Fleetory");

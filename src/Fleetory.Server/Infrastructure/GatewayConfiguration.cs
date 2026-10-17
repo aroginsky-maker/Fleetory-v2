@@ -85,10 +85,10 @@ internal static class GatewayStartup
 
         builder.WebHost.ConfigureKestrel(options =>
         {
-            options.Listen(IPAddress.Any, webPort);
+            options.ListenAnyIP(webPort);
             if (agentPort is not null && agentTls is not null)
             {
-                options.Listen(IPAddress.Any, agentPort.Value, listen => listen.UseHttps(https =>
+                options.ListenAnyIP(agentPort.Value, listen => listen.UseHttps(https =>
                 {
                     https.ServerCertificate = agentTls.ServerCertificate;
                     https.ClientCertificateMode = ClientCertificateMode.RequireCertificate;
