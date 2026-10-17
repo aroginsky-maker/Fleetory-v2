@@ -32,15 +32,16 @@
 | Disposable PostgreSQL and migrations | PASS |
 | Windows/Linux server packages and Windows production smoke | PASS |
 | CI production line coverage | 93.00% |
-| Sonar overall coverage | 90.3% |
-| Sonar new-code coverage | 90.85% |
-| Sonar overall duplication | 0.0% |
-| Sonar new-code duplication | 0.0% |
+| Sonar `main` coverage, analysis of 16 October | 88.1% |
+| Sonar PR #2 `coverage` metric | 90.3% |
+| Sonar PR #2 new-code coverage | 90.85% |
+| Sonar PR #2 overall duplication | 0.0% |
+| Sonar PR #2 new-code duplication | 0.0% |
 | New Sonar issues for PR | 0 |
 | New Security Hotspots for PR | 0 |
 | Sonar Quality Gate | PASS |
 
-Local PHASE 6 regression verification passed with disposable PostgreSQL, migrations, Windows/Linux packages and Windows runtime smoke. The enrollment slice passed [GitHub Actions run 39005833720](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39005833720) at commit `2de64a5`: Sonar reported 90.84791386271871% new-code coverage and 0.0% new-code duplication, rounded above. Overall duplication is also 0.0%. The Sonar GitHub check reported zero new issues, zero accepted issues and zero Security Hotspots. PHASE 7 as a whole remains IN PROGRESS.
+Local PHASE 6 regression verification passed with disposable PostgreSQL, migrations, Windows/Linux packages and Windows runtime smoke. The enrollment slice passed [GitHub Actions run 39006115098](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39006115098) for PR #2: Sonar reported 90.84791386271871% new-code coverage and 0.0% new-code duplication, rounded above. The PR analysis also reported 90.3% for its `coverage` metric and 0.0% overall duplication. The Sonar GitHub check reported zero new issues, zero accepted issues and zero Security Hotspots. These PR measurements use `pullRequest=2`; the default Sonar project card shows the separate `main` analysis from [run 38960512710](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/38960512710) on 16 October, with 88.1% coverage. PR #2 is still a draft and has not changed `main`. PHASE 7 as a whole remains IN PROGRESS.
 
 ## Required before PHASE 7 completion
 
