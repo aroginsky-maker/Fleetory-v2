@@ -22,17 +22,19 @@
 | Local full audit pipeline | PostgreSQL outbox → Fleetory worker → immudb readback passed |
 | Local WebAuthn/OIDC with real Admin mTLS | 401 without token; 403 with WebAuthn token at RBAC |
 | Windows server TLS chain | 1 certificate sent; root-only validation fails |
+| Linux container server TLS chain | 2 certificates sent; root-only OpenSSL verification code 0 |
 | CI coverage at `dc1e460` | 91.27% |
 | Sonar PR coverage at `dc1e460` | 88.9% |
 | Sonar new-code coverage at `dc1e460` | 89.04% |
 | Sonar duplication at `dc1e460` | 0.0% |
 | Sonar Quality Gate at `dc1e460` | PASS |
+| Sonar Quality Gate at `6b56587` | FAIL: B security rating on new code; unsafe PATH lookup in lab verifier |
 
-The latest CI and Sonar numbers come from [run 39033391873](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39033391873). The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card. The WebAuthn check was run locally after that commit, so its result is not represented in this CI run.
+The last passing CI and Sonar numbers come from [run 39033391873](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39033391873). [Run 39055723453](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39055723453) passed build and tests at 91.27% CI coverage, 88.9% Sonar PR coverage, 89.04% new-code coverage and 0.0% duplication, but failed the Quality Gate on the new browser verifier's `spawn('dotnet')` PATH lookup. The verifier now uses a fixed absolute .NET executable path; CI for this change is pending. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
 
 ## Required before completion
 
-- Wire-level server certificate chain delivery on Windows: Kestrel currently sends only the leaf, so a client trusting just the root fails TLS verification. Audited administration of roles and scopes is also open.
+- Wire-level server certificate chain delivery on Windows: Kestrel currently sends only the leaf, so a client trusting just the root fails TLS verification. The same build passed root-only verification on Linux. Either fix Windows or explicitly define and automate the supported deployment path. Audited administration of roles and scopes is also open.
 - CA issuance and renewal policy, secure grant delivery, Admin certificate lifecycle, identity collision and audit reconciliation procedures.
 - Protected command signing and trust-file distribution, approval protocol for high-risk and bulk commands, and Agent runtime enforcement before execution is enabled.
 - Production immudb TLS and dedicated credentials, retention/backups and independently anchored verification; complete coverage of critical security call sites.

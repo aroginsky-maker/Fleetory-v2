@@ -154,7 +154,10 @@ async function resetLabPasskey() {
         !Array.isArray(secondClaims.amr) || !secondClaims.amr.includes('webauthn')) {
       throw new Error('Signed access token lacks WebAuthn AMR.');
     }
-    const server = spawn('dotnet', [path.join(repoRoot, 'src/Fleetory.Server/bin/Debug/net10.0/Fleetory.Server.dll'),
+    const dotnet = process.platform === 'win32'
+      ? 'C:/Program Files/dotnet/dotnet.exe'
+      : '/usr/share/dotnet/dotnet';
+    const server = spawn(dotnet, [path.join(repoRoot, 'src/Fleetory.Server/bin/Debug/net10.0/Fleetory.Server.dll'),
       '--environment=Development'], {
       cwd: repoRoot, windowsHide: true, stdio: 'ignore',
       env: { ...process.env,
