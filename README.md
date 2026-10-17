@@ -1,6 +1,6 @@
 # Fleetory v2 — PHASE 7 Security Foundation in progress
 
-PHASE 6 PostgreSQL persistence is complete. PHASE 7 is building command verification, an initial Agent mTLS listener, certificate binding, audit, RBAC and secret foundations; see `docs/architecture/SecurityFoundation.md` for their boundaries and remaining work.
+PHASE 6 PostgreSQL persistence is complete. PHASE 7 now includes signed-command verification, Agent/Admin mTLS gateways, certificate enrollment and revocation, durable audit with optional immudb export, RBAC, secret providers and an Admin OIDC gate. It remains in progress; see `docs/architecture/SecurityFoundation.md` and `docs/architecture/SecurityLab.md` for boundaries and remaining work.
 
 PHASE 6 was verified on 16 October 2026: 44/44 tests, disposable PostgreSQL migrations and readiness, Windows/Linux server packages, and Sonar Quality Gate passed. Sonar reported 85.9% new-code coverage, 0.0% new-code duplication, 88.1% overall coverage, and 0.0% overall duplication. See `Fleetory_v2_PHASE6_Implementation_Report.md` for the full evidence.
 
@@ -38,7 +38,7 @@ PHASE 6 introduces only the persistence foundation required to prove PostgreSQL 
 - safe PHASE 6 verification scripts;
 - PHASE 5 Windows/Linux package regression checks.
 
-PHASE 7 Security Foundation work is in progress. Authentication, Agent execution, v1 data migration and cross-context database access are not introduced.
+PHASE 7 Security Foundation work is in progress. The Admin OIDC gate is available, while Agent command execution, v1 data migration and cross-context database access are not introduced.
 
 ## Runtime configuration
 

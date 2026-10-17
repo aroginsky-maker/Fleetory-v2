@@ -2,7 +2,7 @@
 
 **Scope:** cross-cutting quality verification for every Fleetory phase.
 
-**Architecture status:** PHASE 6 is complete; the quality checks do not change module ownership or introduce PHASE 7 functionality.
+**Architecture status:** PHASE 6 is complete and PHASE 7 Security Foundation is in progress. These quality checks apply to every phase without changing module ownership.
 
 ## 1. What Sonar verifies
 
