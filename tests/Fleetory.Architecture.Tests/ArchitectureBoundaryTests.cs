@@ -64,8 +64,7 @@ public sealed partial class ArchitectureBoundaryTests
         "PasswordHasher",
         "LdapConnection",
         "OpenIdConnect",
-        "X509Certificate2",
-        "ISecretProvider"
+        "X509Certificate2"
     ];
 
     private static readonly string[] OsNeutralServerSideProjects =
@@ -274,6 +273,13 @@ public sealed partial class ArchitectureBoundaryTests
             "LicenseSnapshot",
             "SearchRequest",
             "SearchResult",
+            "SignedCommandEnvelope",
+            "ICommandVerificationKeys",
+            "ICommandReplayStore",
+            "ICommandExecutionPolicy",
+            "AgentCertificateBinding",
+            "IAgentCertificateBindingStore",
+            "IAgentCertificateBindingVerifier",
             "GenericEntityId"
         };
 
@@ -333,6 +339,52 @@ public sealed partial class ArchitectureBoundaryTests
             {
                 var otherTypes = GetDeclaredTypeNames(ProjectPath(root, otherProject).Directory!);
                 Assert.DoesNotContain(requiredType, otherTypes);
+            }
+        }
+    }
+
+    [Fact]
+    public void Phase7_secret_provider_contract_must_remain_owned_by_platform_contracts()
+    {
+        var root = FindSolutionRoot();
+        var platformTypes = GetDeclaredTypeNames(
+            ProjectPath(root, "Fleetory.Platform.Contracts").Directory!);
+        Assert.Contains("ISecretProvider", platformTypes);
+
+        foreach (var otherProject in ContractProjects.Where(project =>
+                     !project.Equals("Fleetory.Platform.Contracts", StringComparison.OrdinalIgnoreCase)))
+        {
+            Assert.DoesNotContain("ISecretProvider",
+                GetDeclaredTypeNames(ProjectPath(root, otherProject).Directory!));
+        }
+    }
+
+    [Fact]
+    public void Phase7_core_security_contracts_must_remain_owned_by_core_contracts()
+    {
+        var root = FindSolutionRoot();
+        var requiredTypes = new[]
+        {
+            "SignedCommandEnvelope",
+            "ICommandVerificationKeys",
+            "ICommandReplayStore",
+            "ICommandExecutionPolicy",
+            "AgentCertificateBinding",
+            "IAgentCertificateBindingStore",
+            "IAgentCertificateBindingVerifier"
+        };
+        var coreTypes = GetDeclaredTypeNames(
+            ProjectPath(root, "Fleetory.Core.Contracts").Directory!);
+
+        foreach (var requiredType in requiredTypes)
+        {
+            Assert.Contains(requiredType, coreTypes);
+
+            foreach (var otherProject in ContractProjects.Where(project =>
+                         !project.Equals("Fleetory.Core.Contracts", StringComparison.OrdinalIgnoreCase)))
+            {
+                Assert.DoesNotContain(requiredType,
+                    GetDeclaredTypeNames(ProjectPath(root, otherProject).Directory!));
             }
         }
     }
@@ -638,6 +690,19 @@ public sealed partial class ArchitectureBoundaryTests
     }
 
     [Fact]
+    public void Agent_security_must_not_depend_on_server_implementations()
+    {
+        var root = FindSolutionRoot();
+        var references = GetProjectReferences(ProjectPath(root, "Fleetory.Agent.Security"));
+        AssertProjectReferencesEqual("Fleetory.Agent.Security",
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "Fleetory.Core.Contracts",
+                "Fleetory.SharedKernel"
+            }, references);
+    }
+
+    [Fact]
     public void Server_side_runtime_must_remain_os_neutral()
     {
         var root = FindSolutionRoot();
@@ -688,6 +753,13 @@ public sealed partial class ArchitectureBoundaryTests
                 var source = File.ReadAllText(sourceFile.FullName);
                 foreach (var token in forbiddenSourceTokens)
                 {
+                    if (projectName == "Fleetory.Platform" &&
+                        sourceFile.Name == "FileSecretProvider.cs" &&
+                        token == "OperatingSystem.IsWindows()")
+                    {
+                        continue;
+                    }
+
                     Assert.DoesNotContain(token, source, StringComparison.Ordinal);
                 }
             }

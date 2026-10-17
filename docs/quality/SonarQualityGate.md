@@ -2,7 +2,7 @@
 
 **Scope:** cross-cutting quality verification for every Fleetory phase.
 
-**Architecture status:** PHASE 6 is complete; the quality checks do not change module ownership or introduce PHASE 7 functionality.
+**Architecture status:** PHASE 6 is complete and PHASE 7 Security Foundation is in progress. These quality checks apply to every phase without changing module ownership.
 
 ## 1. What Sonar verifies
 
@@ -208,7 +208,7 @@ Do not:
 - weaken the Quality Gate;
 - ignore Security Hotspots.
 
-Small duplication across bounded contexts is preferable to introducing an incorrect shared abstraction only to satisfy duplication metrics.
+Review duplication reported by Sonar in the same increment and remove it when the repeated code has one responsibility. Keep bounded-context ownership and architecture tests intact; do not hide duplication with exclusions, suppressions or a weaker threshold.
 
 ## 12. Current code-hardening changes before external Sonar analysis
 

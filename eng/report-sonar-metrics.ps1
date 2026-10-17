@@ -60,6 +60,13 @@ try {
         'SONAR DUPLICATION' = 'duplicated_lines_density'
         'SONAR NEW DUPLICATION' = 'new_duplicated_lines_density'
     }
+    $scope = if ([string]::IsNullOrWhiteSpace($pullRequest)) {
+        'main'
+    }
+    else {
+        "PR #$pullRequest"
+    }
+    Write-Host ('SONAR ANALYSIS SCOPE     {0}' -f $scope)
     foreach ($label in $labels.Keys) {
         $key = $labels[$label]
         $display = if ($measures.ContainsKey($key)) { $measures[$key] + '%' } else { 'NOT AVAILABLE' }
