@@ -50,6 +50,29 @@ public sealed class SecretProviderTests
         Assert.Contains("ports must differ", samePort.Message, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData("0.0.0.0")]
+    [InlineData("::")]
+    [InlineData("::ffff:0.0.0.0")]
+    public void Admin_gateway_rejects_wildcard_bind_addresses(string bindAddress)
+    {
+        using var directory = new TestSecretDirectory();
+        directory.Write(FleetorySecretNames.PostgreSqlConnectionString, TestConnectionString);
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            FleetoryApplication.Build([
+                "--environment=Development",
+                $"--Fleetory:Secrets:Directory={directory.Path}",
+                "--Fleetory:AdminGateway:Enabled=true",
+                "--Fleetory:Web:Port=4433",
+                "--Fleetory:AdminGateway:Port=4434",
+                $"--Fleetory:AdminGateway:BindAddress={bindAddress}"
+            ]));
+
+        Assert.Contains("must be a specific IP address", exception.Message,
+            StringComparison.Ordinal);
+    }
+
     [Fact]
     public void Production_uses_the_file_secret_provider()
     {

@@ -129,9 +129,12 @@ internal static class GatewayStartup
             return IPAddress.Loopback;
         }
 
-        if (!IPAddress.TryParse(value, out var address))
+        if (!IPAddress.TryParse(value, out var address) ||
+            address.Equals(IPAddress.Any) || address.Equals(IPAddress.IPv6Any) ||
+            (address.IsIPv4MappedToIPv6 && address.MapToIPv4().Equals(IPAddress.Any)))
         {
-            throw new InvalidOperationException("Fleetory:AdminGateway:BindAddress must be an IP address.");
+            throw new InvalidOperationException(
+                "Fleetory:AdminGateway:BindAddress must be a specific IP address.");
         }
 
         return address;
