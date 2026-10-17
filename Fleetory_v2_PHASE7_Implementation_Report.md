@@ -17,33 +17,34 @@
 11. An internal Core revocation service requires the global `core.agent_certificate.revoke` grant and persists an audit record before atomically changing the binding. Denied attempts are audited; no default grant is exposed.
 12. An opt-in Admin Gateway provides a separate mTLS listener with a distinct CA and SAN-bound Person actor. Core exposes one revoke route on that port only. RBAC is evaluated on every call, and a second audit event records the confirmed `revoked` or `unchanged` outcome. No grant is seeded; Agent issuance and certificate rotation remain open.
 13. Core now parses certificate SAN URIs once for both Admin and Agent identities, while retaining their distinct prefixes and domain types. This removed the duplication detected by Sonar without weakening either identity check.
+14. Admin mTLS now issues audited, five-minute, one-time Agent enrollment grants under a separate RBAC permission. The Agent presents its externally issued certificate and grant on the Agent mTLS port; Core atomically consumes the grant and binds the certificate to the device. This proves key possession through TLS and supports a second binding for rotation without creating a second device. The CA private key stays outside Server.
 
 ## Verification
 
 | Gate | Result |
 | --- | ---: |
 | Strict Release build | PASS, 0 warnings and 0 errors |
-| All tests | PASS, 101/101 |
+| All tests | PASS, 104/104 |
 | Architecture tests | PASS, 26/26 |
 | Core tests | PASS, 26/26 |
 | Server tests | PASS, 14/14 |
-| PostgreSQL integration tests | PASS, 26/26 |
+| PostgreSQL integration tests | PASS, 29/29 |
 | Disposable PostgreSQL and migrations | PASS |
 | Windows/Linux server packages and Windows production smoke | PASS |
-| CI production line coverage | 92.55% |
-| Sonar overall coverage | 90.4% |
-| Sonar new-code coverage | 91.21% |
+| CI production line coverage | 93.00% |
+| Sonar overall coverage | 90.3% |
+| Sonar new-code coverage | 90.85% |
 | Sonar overall duplication | 0.0% |
 | Sonar new-code duplication | 0.0% |
 | New Sonar issues for PR | 0 |
 | New Security Hotspots for PR | 0 |
 | Sonar Quality Gate | PASS |
 
-Local PHASE 6 regression verification passed with disposable PostgreSQL, migrations, Windows/Linux packages and Windows runtime smoke. The SAN parser consolidation passed [GitHub Actions run 39004678989](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39004678989) at commit `8fd0a63`: Sonar reported 91.21405750798722% new-code coverage and 0.0% new-code duplication, rounded above. Overall duplication is also 0.0%. The Sonar GitHub check reported zero new issues, zero accepted issues and zero Security Hotspots. PHASE 7 as a whole remains IN PROGRESS.
+Local PHASE 6 regression verification passed with disposable PostgreSQL, migrations, Windows/Linux packages and Windows runtime smoke. The enrollment slice passed [GitHub Actions run 39005833720](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39005833720) at commit `2de64a5`: Sonar reported 90.84791386271871% new-code coverage and 0.0% new-code duplication, rounded above. Overall duplication is also 0.0%. The Sonar GitHub check reported zero new issues, zero accepted issues and zero Security Hotspots. PHASE 7 as a whole remains IN PROGRESS.
 
 ## Required before PHASE 7 completion
 
-- Proof-of-possession Agent enrollment and issuance, CA lifecycle, certificate rotation, Admin certificate lifecycle, reconciliation of ambiguous audit outcomes, and revocation propagation to future long-lived streams.
+- External Agent CA issuance and secure grant delivery, CA lifecycle, full rotation administration, Admin certificate lifecycle, identity-collision policy, reconciliation of ambiguous audit outcomes, and revocation propagation to future long-lived streams.
 - Protected command signing and key distribution, production Agent-local policy and durable replay store.
 - Human authentication with MFA/WebAuthn foundation, audited role/scope administration and enforcement at privileged routes.
 - Concrete external SIEM/WORM audit sink, retention policy and coverage of all critical security call sites.
