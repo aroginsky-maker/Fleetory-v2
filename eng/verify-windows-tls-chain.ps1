@@ -1,7 +1,7 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-# This probe modifies CurrentUser certificate trust and is limited to an ephemeral CI runner.
+# This probe modifies LocalMachine certificate trust and is limited to an ephemeral CI runner.
 if ($env:GITHUB_ACTIONS -ne 'true' -or $env:RUNNER_OS -ne 'Windows' -or
     [string]::IsNullOrWhiteSpace($env:RUNNER_TEMP)) {
     throw 'Windows TLS chain verification runs only on an ephemeral GitHub Windows runner.'
@@ -20,9 +20,11 @@ if (-not (Test-Path -LiteralPath $openssl -PathType Leaf)) {
 $utf8 = [System.Text.UTF8Encoding]::new($false)
 $serverProcess = $null
 $installedRoot = $null
+$installedIntermediate = $null
 
-function Invoke-OpenSsl([string[]] $Arguments, [int] $TimeoutSeconds = 15) {
-    $start = [System.Diagnostics.ProcessStartInfo]::new($openssl)
+function Invoke-Tool([string] $FilePath, [string[]] $Arguments,
+    [int] $TimeoutSeconds = 15) {
+    $start = [System.Diagnostics.ProcessStartInfo]::new($FilePath)
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
     $start.RedirectStandardInput = $true
@@ -36,15 +38,19 @@ function Invoke-OpenSsl([string[]] $Arguments, [int] $TimeoutSeconds = 15) {
         $stderr = $process.StandardError.ReadToEndAsync()
         if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
             $process.Kill($true)
-            throw "OpenSSL timed out after $TimeoutSeconds seconds."
+            throw "$FilePath timed out after $TimeoutSeconds seconds."
         }
         $output = $stdout.GetAwaiter().GetResult() + $stderr.GetAwaiter().GetResult()
         if ($process.ExitCode -ne 0) {
-            throw "OpenSSL failed with exit code $($process.ExitCode): $output"
+            throw "$FilePath failed with exit code $($process.ExitCode): $output"
         }
         return $output
     }
     finally { $process.Dispose() }
+}
+
+function Invoke-OpenSsl([string[]] $Arguments) {
+    return Invoke-Tool -FilePath $openssl -Arguments $Arguments
 }
 
 function Get-FreePort {
@@ -130,24 +136,19 @@ subjectAltName = URI:urn:fleetory:admin:00000000-0000-4000-8000-000000000001
     $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
         (Join-Path $work 'root.crt'))
     $thumbprint = $certificate.Thumbprint
-    $rootStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
-        [System.Security.Cryptography.X509Certificates.StoreName]::Root,
-        [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
-    try {
-        $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-        if ($rootStore.Certificates.Find(
-            [System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
-            $thumbprint, $false).Count -ne 0) {
-            throw 'Ephemeral root unexpectedly exists before this CI probe.'
-        }
-        $rootStore.Add($certificate)
-        $installedRoot = $thumbprint
-    }
-    finally {
-        $rootStore.Dispose()
-        $certificate.Dispose()
-    }
-    Write-Host 'Ephemeral root installed in runner CurrentUser trust.'
+    $certificate.Dispose()
+    $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
+        (Join-Path $work 'intermediate.crt'))
+    $intermediateThumbprint = $certificate.Thumbprint
+    $certificate.Dispose()
+    Write-Host 'Installing ephemeral CA chain in runner LocalMachine stores.'
+    Invoke-Tool -FilePath 'certutil.exe' -Arguments @('-f', '-addstore', 'Root',
+        (Join-Path $work 'root.crt')) | Out-Null
+    $installedRoot = $thumbprint
+    Invoke-Tool -FilePath 'certutil.exe' -Arguments @('-f', '-addstore', 'CA',
+        (Join-Path $work 'intermediate.crt')) | Out-Null
+    $installedIntermediate = $intermediateThumbprint
+    Write-Host 'Ephemeral root and intermediate installed.'
 
     $webPort = Get-FreePort
     $adminPort = Get-FreePort
@@ -197,18 +198,12 @@ finally {
         Stop-Process -Id $serverProcess.Id -Force
         $serverProcess.WaitForExit()
     }
+    if ($installedIntermediate) {
+        Invoke-Tool -FilePath 'certutil.exe' -Arguments @('-f', '-delstore', 'CA',
+            $installedIntermediate) | Out-Null
+    }
     if ($installedRoot) {
-        $rootStore = [System.Security.Cryptography.X509Certificates.X509Store]::new(
-            [System.Security.Cryptography.X509Certificates.StoreName]::Root,
-            [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser)
-        try {
-            $rootStore.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-            foreach ($entry in $rootStore.Certificates.Find(
-                [System.Security.Cryptography.X509Certificates.X509FindType]::FindByThumbprint,
-                $installedRoot, $false)) {
-                $rootStore.Remove($entry)
-            }
-        }
-        finally { $rootStore.Dispose() }
+        Invoke-Tool -FilePath 'certutil.exe' -Arguments @('-f', '-delstore', 'Root',
+            $installedRoot) | Out-Null
     }
 }
