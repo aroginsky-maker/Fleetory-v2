@@ -23,4 +23,9 @@
     <ProjectReference Include="../../src/Fleetory.Core.Contracts/Fleetory.Core.Contracts.csproj" />
     <ProjectReference Include="../../src/Fleetory.Server/Fleetory.Server.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="../../eng/bootstrap-first-admin.sql"
+          Link="bootstrap-first-admin.sql"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>
