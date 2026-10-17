@@ -2,6 +2,7 @@ using Fleetory.Assets;
 using Fleetory.CMDB;
 using Fleetory.Core;
 using Fleetory.Core.Contracts;
+using Fleetory.Core.Security;
 using Fleetory.Integrations;
 using Fleetory.ITSM;
 using Fleetory.ModuleAbstractions;
@@ -60,7 +61,7 @@ public static class FleetoryApplication
                     var certificate = await context.Connection.GetClientCertificateAsync(
                         context.RequestAborted);
                     if (certificate is null ||
-                        !AgentGatewayIdentity.TryReadDeviceId(certificate, out var deviceId))
+                        !AgentCertificateIdentity.TryReadDeviceId(certificate, out var deviceId))
                     {
                         context.Response.StatusCode = StatusCodes.Status403Forbidden;
                         return;

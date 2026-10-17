@@ -1,22 +1,18 @@
 using System.Formats.Asn1;
 using System.Security.Cryptography.X509Certificates;
-using Fleetory.Core.Contracts;
 
-namespace Fleetory.Server.Infrastructure;
+namespace Fleetory.Core.Security;
 
-internal static class AgentGatewayIdentity
+internal static class CertificateSanIdentity
 {
-    private const string DeviceUriPrefix = "urn:fleetory:device:";
-
-    public static bool TryReadDeviceId(X509Certificate2 certificate, out DeviceId deviceId)
+    public static bool TryReadGuid(X509Certificate2 certificate, string uriPrefix, out Guid identity)
     {
         ArgumentNullException.ThrowIfNull(certificate);
-        deviceId = default;
+        identity = default;
 
         try
         {
-            var san = certificate.Extensions
-                .Cast<X509Extension>()
+            var san = certificate.Extensions.Cast<X509Extension>()
                 .SingleOrDefault(extension => extension.Oid?.Value == "2.5.29.17");
             if (san is null)
             {
@@ -37,19 +33,19 @@ internal static class AgentGatewayIdentity
 
                 var uri = names.ReadCharacterString(
                     UniversalTagNumber.IA5String, new Asn1Tag(TagClass.ContextSpecific, 6));
-                if (!uri.StartsWith(DeviceUriPrefix, StringComparison.Ordinal))
+                if (!uri.StartsWith(uriPrefix, StringComparison.Ordinal))
                 {
                     continue;
                 }
 
                 if (found ||
-                    !Guid.TryParseExact(uri.AsSpan(DeviceUriPrefix.Length), "D", out var parsed) ||
+                    !Guid.TryParseExact(uri.AsSpan(uriPrefix.Length), "D", out var parsed) ||
                     parsed == Guid.Empty)
                 {
                     return false;
                 }
 
-                deviceId = new DeviceId(parsed);
+                identity = parsed;
                 found = true;
             }
 
