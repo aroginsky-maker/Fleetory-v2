@@ -2,7 +2,7 @@
 
 **Status:** IN PROGRESS — Command Plane verification, local audit persistence/export transport, RBAC evaluation, Agent mTLS enrollment and Admin OIDC gate, 17 October 2026.
 
-The local self-hosted integration stack and its current limits are documented in [SecurityLab.md](SecurityLab.md). Fleetory can now read its PostgreSQL connection through an OpenBao KV v2 provider. The Agent and Admin gateway loaders accept a pinned root with a bounded intermediate chain and present the server chain during TLS. Tests cover OpenBao failure modes and a real mTLS request through an intermediate CA.
+The local self-hosted integration stack and its current limits are documented in [SecurityLab.md](SecurityLab.md). Fleetory can now read its PostgreSQL connection through an OpenBao KV v2 provider. The Agent and Admin gateway loaders accept a pinned root with a bounded intermediate chain. Windows Kestrel currently sends only the leaf server certificate on the wire; full chain delivery remains open despite the configured intermediate. Tests cover OpenBao failure modes and a real mTLS request with a client that also has the intermediate CA.
 
 Fleetory applies the same end-entity signing-key checks in the Core certificate verifier and Kestrel gateway. RFC 5280 allows Basic Constraints to be absent from a leaf; an actual step-ca leaf exposed the previous overly strict check. The shared policy rejects any certificate marked as a CA or granted certificate-signing key usage, even when Basic Constraints are absent. A lab run started both gateways with separate step-ca roots and OpenBao TLS material.
 
@@ -100,7 +100,8 @@ Fleetory Server does not issue or sign certificates and has no Agent CA private 
 
 - External Agent CA issuance and grant delivery, CA lifecycle, full rotation administration, Admin certificate lifecycle, identity-collision policy, reconciliation of ambiguous audit outcomes, and revocation propagation to future long-lived Agent streams.
 - A protected signing service and secure trust-file distribution, plus Agent runtime wiring of the verifier, replay store and policy before any command execution. High-risk and bulk command types require an approval protocol before they can be enabled.
-- Positive browser WebAuthn ceremony and signed-token integration test against the local Keycloak realm, audited role/scope administration and enforcement at future privileged routes.
+- Audited role/scope administration and enforcement at future privileged routes. The local Keycloak browser WebAuthn ceremony and signed-token request passed in the lab.
+- Wire-level server certificate chain delivery on Windows, verified by a client that trusts only the pinned root CA.
 - Production immudb hardening: dedicated audit credentials, TLS, retention/backup and independently anchored verification; wiring audited security call sites as those flows are implemented.
 - Abuse, negative authorization, recovery and cross-platform security tests, then the full Sonar Quality Gate.
 
