@@ -132,7 +132,11 @@ async function resetLabPasskey() {
     }
     await page.waitForTimeout(1500);
     const personId = fs.readFileSync(path.join(certs, 'admin-person-id'), 'utf8').trim();
-    readClaims(await exchangeCode(callbackUrl, registration), personId);
+    const registrationClaims = readClaims(
+      await exchangeCode(callbackUrl, registration), personId);
+    if (registrationClaims.amr?.includes('webauthn')) {
+      throw new Error('Passkey registration must not satisfy the WebAuthn login requirement.');
+    }
     callbackUrl = null;
     const reauthentication = newAuthorization('login');
     await page.goto(reauthentication.url.toString(), { waitUntil: 'domcontentloaded' });
