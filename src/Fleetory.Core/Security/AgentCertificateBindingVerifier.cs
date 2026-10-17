@@ -63,19 +63,7 @@ public sealed class AgentCertificateBindingVerifier(
 
     private static bool HasClientAuthenticationPurpose(X509Certificate2 certificate)
     {
-        var basicConstraints = certificate.Extensions
-            .OfType<X509BasicConstraintsExtension>()
-            .SingleOrDefault();
-        if (basicConstraints is null || basicConstraints.CertificateAuthority)
-        {
-            return false;
-        }
-
-        var keyUsage = certificate.Extensions
-            .OfType<X509KeyUsageExtension>()
-            .SingleOrDefault();
-        if (keyUsage is null ||
-            (keyUsage.KeyUsages & X509KeyUsageFlags.DigitalSignature) == 0)
+        if (!X509EndEntityPolicy.HasDigitalSignatureUsage(certificate))
         {
             return false;
         }

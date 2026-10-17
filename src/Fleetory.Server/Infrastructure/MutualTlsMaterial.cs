@@ -1,6 +1,7 @@
 using System.Net.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using Fleetory.Core.Contracts;
 using Fleetory.Platform.Contracts.Secrets;
 
 namespace Fleetory.Server.Infrastructure;
@@ -77,7 +78,7 @@ internal sealed class MutualTlsMaterial : IDisposable
                 CryptographicOperations.ZeroMemory(pkcs12);
             }
 
-            if (!IsCertificateAuthority(root) || !IsEndEntity(server) || !server.HasPrivateKey ||
+            if (!IsCertificateAuthority(root) || !X509EndEntityPolicy.HasDigitalSignatureUsage(server) || !server.HasPrivateKey ||
                 !BuildChain(server, root, ServerAuthenticationOid, intermediates))
             {
                 throw new InvalidOperationException("Gateway TLS material is invalid.");
@@ -106,7 +107,7 @@ internal sealed class MutualTlsMaterial : IDisposable
         X509Certificate2? certificate,
         X509Chain? peerChain,
         SslPolicyErrors __) =>
-        certificate is not null && IsEndEntity(certificate) &&
+        certificate is not null && X509EndEntityPolicy.HasDigitalSignatureUsage(certificate) &&
         BuildChain(certificate, rootCa, ClientAuthenticationOid,
             peerChain?.ChainElements.Cast<X509ChainElement>()
                 .Skip(1).Select(element => element.Certificate));
@@ -124,14 +125,6 @@ internal sealed class MutualTlsMaterial : IDisposable
         var usage = certificate.Extensions.OfType<X509KeyUsageExtension>().SingleOrDefault();
         return constraints?.CertificateAuthority == true && usage is not null &&
             (usage.KeyUsages & X509KeyUsageFlags.KeyCertSign) != 0;
-    }
-
-    private static bool IsEndEntity(X509Certificate2 certificate)
-    {
-        var constraints = certificate.Extensions.OfType<X509BasicConstraintsExtension>().SingleOrDefault();
-        var usage = certificate.Extensions.OfType<X509KeyUsageExtension>().SingleOrDefault();
-        return constraints is { CertificateAuthority: false } && usage is not null &&
-            (usage.KeyUsages & X509KeyUsageFlags.DigitalSignature) != 0;
     }
 
     private static bool BuildChain(X509Certificate2 certificate, X509Certificate2 root,

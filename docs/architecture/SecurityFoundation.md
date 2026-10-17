@@ -4,6 +4,8 @@
 
 The local self-hosted integration stack and its current limits are documented in [SecurityLab.md](SecurityLab.md). Fleetory can now read its PostgreSQL connection through an OpenBao KV v2 provider. The Agent and Admin gateway loaders accept a pinned root with a bounded intermediate chain and present the server chain during TLS. Tests cover OpenBao failure modes and a real mTLS request through an intermediate CA.
 
+Fleetory applies the same end-entity signing-key checks in the Core certificate verifier and Kestrel gateway. RFC 5280 allows Basic Constraints to be absent from a leaf; an actual step-ca leaf exposed the previous overly strict check. The shared policy rejects any certificate marked as a CA or granted certificate-signing key usage, even when Basic Constraints are absent. A lab run started both gateways with separate step-ca roots and OpenBao TLS material.
+
 The Fleetory Development Baseline places Agent identity, mTLS, certificate lifecycle, RBAC enforcement, durable audit, secret abstraction, signed commands and replay protection in PHASE 7, before Agent Protocol v2 and the first Agent deployment. A compromised application server must not automatically gain authority to command the whole fleet.
 
 ## Implemented first slice

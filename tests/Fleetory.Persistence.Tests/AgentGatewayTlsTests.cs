@@ -22,7 +22,8 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
     [Fact]
     public async Task Gateway_accepts_pinned_root_with_intermediate_server_chain()
     {
-        using var pki = new TestPki(new DeviceId(Guid.NewGuid()), useIntermediate: true);
+        using var pki = new TestPki(new DeviceId(Guid.NewGuid()),
+            useIntermediate: true, omitLeafBasicConstraints: true);
         using var secrets = new TestSecretDirectory();
         secrets.Write("fleetory-postgresql", fixture.ConnectionString);
         secrets.Write("agent-gateway-root-ca", pki.Root.ExportCertificatePem());
@@ -599,17 +600,22 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
     {
         private readonly ECDsa rootKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         private readonly ECDsa? intermediateKey;
+        private readonly bool omitLeafBasicConstraints;
         private readonly ECDsa clientKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         private readonly ECDsa unregisteredKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         private readonly ECDsa malformedIdentityKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
 
-        public TestPki(DeviceId deviceId, bool useIntermediate = false)
-            : this(new Uri($"urn:fleetory:device:{deviceId.Value:D}"), null, useIntermediate)
+        public TestPki(DeviceId deviceId, bool useIntermediate = false,
+            bool omitLeafBasicConstraints = false)
+            : this(new Uri($"urn:fleetory:device:{deviceId.Value:D}"), null,
+                useIntermediate, omitLeafBasicConstraints)
         {
         }
 
-        public TestPki(Uri clientUri, Uri? unregisteredUri = null, bool useIntermediate = false)
+        public TestPki(Uri clientUri, Uri? unregisteredUri = null,
+            bool useIntermediate = false, bool omitLeafBasicConstraints = false)
         {
+            this.omitLeafBasicConstraints = omitLeafBasicConstraints;
             var now = DateTimeOffset.UtcNow;
             var rootRequest = new CertificateRequest("CN=Fleetory Test CA", rootKey, HashAlgorithmName.SHA256);
             rootRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
@@ -727,7 +733,10 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             Action<SubjectAlternativeNameBuilder> configureSan)
         {
             var request = new CertificateRequest(subject, key, HashAlgorithmName.SHA256);
-            request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
+            if (!omitLeafBasicConstraints)
+            {
+                request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
+            }
             request.CertificateExtensions.Add(new X509KeyUsageExtension(
                 X509KeyUsageFlags.DigitalSignature, true));
             var purposes = new OidCollection { new Oid(purpose) };
