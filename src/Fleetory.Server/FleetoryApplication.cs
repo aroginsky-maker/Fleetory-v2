@@ -57,7 +57,8 @@ public static class FleetoryApplication
                         return;
                     }
 
-                    var certificate = await context.Connection.GetClientCertificateAsync();
+                    var certificate = await context.Connection.GetClientCertificateAsync(
+                        context.RequestAborted);
                     if (certificate is null ||
                         !AgentGatewayIdentity.TryReadDeviceId(certificate, out var deviceId))
                     {
@@ -78,7 +79,8 @@ public static class FleetoryApplication
                 else if (context.Connection.LocalPort == gateway.AdminPort)
                 {
                     if (!context.Request.Path.StartsWithSegments("/admin") ||
-                        await context.Connection.GetClientCertificateAsync() is null)
+                        await context.Connection.GetClientCertificateAsync(
+                            context.RequestAborted) is null)
                     {
                         context.Response.StatusCode = StatusCodes.Status404NotFound;
                         return;

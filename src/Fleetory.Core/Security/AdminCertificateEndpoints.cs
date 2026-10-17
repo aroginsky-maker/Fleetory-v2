@@ -12,7 +12,7 @@ internal static class AdminCertificateEndpoints
         string fingerprint,
         AgentCertificateRevocationService service)
     {
-        var certificate = await context.Connection.GetClientCertificateAsync();
+        var certificate = await context.Connection.GetClientCertificateAsync(context.RequestAborted);
         if (certificate is null ||
             !AdminCertificateIdentity.TryReadActor(certificate, out var actor) ||
             actor is null)
