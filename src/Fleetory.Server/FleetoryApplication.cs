@@ -46,7 +46,7 @@ public static class FleetoryApplication
         builder.Services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-            options.AddFixedWindowLimiter(CoreSecurityPolicyNames.AdminRateLimit, limiter =>
+            options.AddFixedWindowLimiter(AdminSecurityPolicyNames.AdminRateLimit, limiter =>
             {
                 limiter.PermitLimit = adminRateLimit;
                 limiter.Window = TimeSpan.FromMinutes(1);

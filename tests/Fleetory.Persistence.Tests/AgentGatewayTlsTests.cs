@@ -379,6 +379,91 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
     }
 
     [Fact]
+    public async Task Admin_mtls_route_manages_scoped_roles_with_audit()
+    {
+        var adminId = Guid.NewGuid();
+        using var pki = new TestPki(new Uri($"urn:fleetory:admin:{adminId:D}"));
+        using var secrets = new TestSecretDirectory();
+        secrets.Write("fleetory-postgresql", fixture.ConnectionString);
+        secrets.Write("admin-gateway-root-ca", pki.Root.ExportCertificatePem());
+        secrets.Write("admin-gateway-server-cert", pki.Server.ExportCertificatePem());
+        secrets.Write("admin-gateway-server-key", pki.ServerKey.ExportPkcs8PrivateKeyPem());
+        var webPort = GetFreePort();
+        var adminPort = GetFreePort();
+        while (adminPort == webPort) { adminPort = GetFreePort(); }
+
+        await using var app = FleetoryApplication.Build([
+            "--environment=Development",
+            $"--Fleetory:Secrets:Directory={secrets.Path}",
+            "--Fleetory:AdminGateway:Enabled=true",
+            $"--Fleetory:Web:Port={webPort}",
+            $"--Fleetory:AdminGateway:Port={adminPort}"
+        ]);
+        await app.StartAsync();
+        try
+        {
+            using var admin = pki.CreateClient(pki.Client);
+            using var web = new HttpClient();
+            var baseUrl = $"https://127.0.0.1:{adminPort}/admin/authorization";
+            var roleBody = new { name = "mTLS managed reader", permissions = new[] { "Core.Device.Read" } };
+            using var denied = await admin.PostAsJsonAsync($"{baseUrl}/roles", roleBody);
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+            using var webAttempt = await web.PostAsJsonAsync(
+                $"http://127.0.0.1:{webPort}/admin/authorization/roles", roleBody);
+            Assert.Equal(HttpStatusCode.NotFound, webAttempt.StatusCode);
+
+            await GrantAdminPermissionAsync(adminId, "platform.authorization.manage");
+            var correlation = Guid.NewGuid().ToString("N");
+            using var roleRequest = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/roles")
+            {
+                Content = JsonContent.Create(roleBody)
+            };
+            roleRequest.Headers.Add("X-Correlation-ID", correlation);
+            using var roleResponse = await admin.SendAsync(roleRequest);
+            Assert.Equal(HttpStatusCode.Created, roleResponse.StatusCode);
+            var roleId = (await roleResponse.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>())
+                .GetProperty("id").GetGuid();
+
+            using var scopeResponse = await admin.PostAsJsonAsync($"{baseUrl}/scopes",
+                new { name = "mTLS scope", parentScopeId = (Guid?)null });
+            Assert.Equal(HttpStatusCode.Created, scopeResponse.StatusCode);
+            var scopeId = (await scopeResponse.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>())
+                .GetProperty("id").GetGuid();
+            var target = $"person:{Guid.NewGuid():N}";
+            using var assignmentResponse = await admin.PostAsJsonAsync(
+                $"{baseUrl}/roles/{roleId:D}/assignments",
+                new { subjectId = target, kind = ActorKind.Person, scopeId });
+            Assert.Equal(HttpStatusCode.Created, assignmentResponse.StatusCode);
+            var assignmentId = (await assignmentResponse.Content
+                .ReadFromJsonAsync<System.Text.Json.JsonElement>()).GetProperty("id").GetGuid();
+
+            await using var scope = fixture.Services.CreateAsyncScope();
+            var authorizer = scope.ServiceProvider.GetRequiredService<IAuthorizationService>();
+            var request = new AuthorizationRequest(new ActorReference(target, ActorKind.Person),
+                "Core.Device.Read", new ScopeId(scopeId));
+            Assert.True((await authorizer.AuthorizeAsync(request)).IsAllowed);
+            using var revoked = await admin.DeleteAsync(
+                $"{baseUrl}/assignments/{assignmentId:D}");
+            Assert.Equal(HttpStatusCode.NoContent, revoked.StatusCode);
+            Assert.False((await authorizer.AuthorizeAsync(request)).IsAllowed);
+
+            await using var connection = new NpgsqlConnection(fixture.ConnectionString);
+            await connection.OpenAsync();
+            await using var audit = new NpgsqlCommand("""
+                SELECT COUNT(*) FROM platform.audit_events
+                WHERE correlation_id = @correlation
+                  AND action = 'platform.authorization.role_created'
+                """, connection);
+            audit.Parameters.AddWithValue("correlation", correlation);
+            Assert.Equal(1L, (long)(await audit.ExecuteScalarAsync())!);
+        }
+        finally
+        {
+            await app.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task Separate_admin_mtls_listener_revokes_a_bound_agent_certificate()
     {
         var deviceId = new DeviceId(Guid.NewGuid());

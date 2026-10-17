@@ -11,6 +11,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.AspNetCore.RateLimiting;
 using Fleetory.Platform.Contracts.Secrets;
 using Fleetory.SharedKernel;
 
@@ -19,6 +22,28 @@ namespace Fleetory.Platform;
 public sealed class PlatformModule : FleetoryModuleBase
 {
     public override string Name => "Platform";
+
+    public override void MapEndpoints(IEndpointRouteBuilder endpoints)
+    {
+        if (!endpoints.ServiceProvider.GetRequiredService<IConfiguration>()
+            .GetValue<bool>("Fleetory:AdminGateway:Enabled"))
+        {
+            return;
+        }
+
+        endpoints.MapPost("/admin/authorization/roles",
+            AuthorizationAdministrationEndpoints.CreateRoleAsync)
+            .RequireRateLimiting(AdminSecurityPolicyNames.AdminRateLimit);
+        endpoints.MapPost("/admin/authorization/scopes",
+            AuthorizationAdministrationEndpoints.CreateScopeAsync)
+            .RequireRateLimiting(AdminSecurityPolicyNames.AdminRateLimit);
+        endpoints.MapPost("/admin/authorization/roles/{roleId:guid}/assignments",
+            AuthorizationAdministrationEndpoints.AssignRoleAsync)
+            .RequireRateLimiting(AdminSecurityPolicyNames.AdminRateLimit);
+        endpoints.MapDelete("/admin/authorization/assignments/{assignmentId:guid}",
+            AuthorizationAdministrationEndpoints.RevokeAssignmentAsync)
+            .RequireRateLimiting(AdminSecurityPolicyNames.AdminRateLimit);
+    }
 
     public override void RegisterServices(
         IServiceCollection services,
@@ -29,8 +54,10 @@ public sealed class PlatformModule : FleetoryModuleBase
         services.AddSingleton<IModuleRegistry, ModuleRegistry>();
         services.AddSingleton<ISearchService, SearchService>();
         services.AddSingleton<IClock, SystemClock>();
-        services.AddScoped<IAuditWriter, PostgreSqlAuditWriter>();
+        services.AddScoped<PostgreSqlAuditWriter>();
+        services.AddScoped<IAuditWriter>(provider => provider.GetRequiredService<PostgreSqlAuditWriter>());
         services.AddScoped<IAuthorizationService, PostgreSqlAuthorizationService>();
+        services.AddScoped<PostgreSqlAuthorizationAdministration>();
         if (configuration.GetValue<bool>("Fleetory:AuditExport:Enabled"))
         {
             if (configuration["Fleetory:AuditExport:Sink"] == "Immudb")

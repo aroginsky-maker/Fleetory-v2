@@ -1,8 +1,8 @@
-using System.Text.Json;
 using Fleetory.Core.Contracts;
+using Fleetory.ModuleAbstractions;
+using Fleetory.Platform.Contracts;
 using Fleetory.SharedKernel;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Http.Features;
 
 namespace Fleetory.Core.Security;
 
@@ -23,7 +23,8 @@ internal static class AgentEnrollmentEndpoints
             return Results.StatusCode(StatusCodes.Status403Forbidden);
         }
 
-        var request = await ReadRequestAsync<CreateGrantRequest>(context);
+        var request = await BoundedJsonRequestReader.ReadAsync<CreateGrantRequest>(
+            context, MaximumBodyBytes);
         if (request is null)
         {
             return Results.BadRequest();
@@ -58,7 +59,8 @@ internal static class AgentEnrollmentEndpoints
             return Results.StatusCode(StatusCodes.Status403Forbidden);
         }
 
-        var request = await ReadRequestAsync<EnrollRequest>(context);
+        var request = await BoundedJsonRequestReader.ReadAsync<EnrollRequest>(
+            context, MaximumBodyBytes);
         if (request is null)
         {
             return Results.BadRequest();
@@ -73,29 +75,6 @@ internal static class AgentEnrollmentEndpoints
         catch (UnauthorizedAccessException)
         {
             return Results.StatusCode(StatusCodes.Status403Forbidden);
-        }
-    }
-
-    private static async Task<T?> ReadRequestAsync<T>(HttpContext context)
-    {
-        if (context.Request.ContentLength is > MaximumBodyBytes)
-        {
-            return default;
-        }
-
-        var sizeFeature = context.Features.Get<IHttpMaxRequestBodySizeFeature>();
-        if (sizeFeature is { IsReadOnly: false })
-        {
-            sizeFeature.MaxRequestBodySize = MaximumBodyBytes;
-        }
-
-        try
-        {
-            return await context.Request.ReadFromJsonAsync<T>(context.RequestAborted);
-        }
-        catch (Exception exception) when (exception is JsonException or BadHttpRequestException or InvalidOperationException)
-        {
-            return default;
         }
     }
 

@@ -1,7 +1,5 @@
 using System.Security.Cryptography.X509Certificates;
-using Fleetory.Platform.Contracts;
-
-namespace Fleetory.Core.Security;
+namespace Fleetory.Platform.Contracts;
 
 public static class AdminCertificateIdentity
 {

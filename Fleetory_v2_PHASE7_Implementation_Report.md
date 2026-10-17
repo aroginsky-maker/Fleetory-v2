@@ -1,11 +1,12 @@
 # Fleetory v2 — PHASE 7 Security Foundation progress report
 
-**Status:** IN PROGRESS, 17 October 2026. PHASE 6 is complete; PHASE 8 has not started. Draft [PR #2](https://github.com/aroginsky-maker/Fleetory-v2/pull/2) contains the current implementation. The detailed controls and limits are maintained in [SecurityFoundation](docs/architecture/SecurityFoundation.md) and the [local lab guide](docs/architecture/SecurityLab.md).
+**Status:** IN PROGRESS, 18 October 2026. PHASE 6 is complete; PHASE 8 has not started. Draft [PR #2](https://github.com/aroginsky-maker/Fleetory-v2/pull/2) contains the current implementation. The detailed controls and limits are maintained in [SecurityFoundation](docs/architecture/SecurityFoundation.md) and the [local lab guide](docs/architecture/SecurityLab.md).
 
 ## Implemented
 
 - Separate Agent and Admin mTLS gateways, pinned CA roots, intermediate chains, device/person SAN validation, certificate binding, one-time Agent enrollment grants, rotation overlap and revocation.
 - Local PostgreSQL RBAC with exact permissions and scoped grants; Admin OIDC gate validates signed tokens, WebAuthn AMR, client ID and certificate subject matching. Keycloak lab realm enforces WebAuthn and S256 PKCE.
+- Platform-owned Admin routes create immutable roles and scopes, assign scoped roles and revoke assignments. Every write requires the global `platform.authorization.manage` permission; authorization, state change and audit/outbox entry share a serializable PostgreSQL transaction. No management grant is seeded.
 - PostgreSQL audit event and outbox transaction, lease-based background export and retry. Optional immudb sink uses conditional EventId writes, readback and revision checks. The lab supplies its password through OpenBao.
 - File and OpenBao secret providers; Agent-local ECDSA command verification, deny-by-default policy, durable SQLite replay store and per-device public-key trust files. No Agent command execution endpoint is exposed.
 - Lab-only OpenBao Transit signing key with a separate sign-only token and DeviceId-bound public trust file. The Server token is read-only for its KV secrets.
@@ -17,8 +18,8 @@
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local tests | 141/141 passed |
-| Local coverage | 91.07% |
+| Local tests | 144/144 passed |
+| Local coverage | 89.61% |
 | Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
 | Local full audit pipeline | PostgreSQL outbox → Fleetory worker → immudb readback passed |
 | Local WebAuthn/OIDC with real Admin mTLS | 401 without token; 403 with WebAuthn token at RBAC |
@@ -34,7 +35,8 @@ The latest completed CI and Sonar numbers come from [run 39058456927](https://gi
 
 ## Required before completion
 
-- Wire-level server certificate chain delivery on Windows: Kestrel currently sends only the leaf, so a client trusting just the root fails TLS verification. The same build passed root-only verification on Linux. The Baseline requires equal Windows Server and Linux support, so the Windows path must be fixed and root-only wire verification automated. Audited administration of roles and scopes is also open.
+- Wire-level server certificate chain delivery on Windows: Kestrel currently sends only the leaf, so a client trusting just the root fails TLS verification. The same build passed root-only verification on Linux. The Baseline requires equal Windows Server and Linux support, so the Windows path must be fixed and root-only wire verification automated.
+- Bootstrap and recovery procedures for the first RBAC administrator, role/scope lifecycle beyond creation, and prevention of administrative lockout.
 - CA issuance and renewal policy, secure grant delivery, Admin certificate lifecycle, identity collision and audit reconciliation procedures.
 - Protected command signing and trust-file distribution, approval protocol for high-risk and bulk commands, and Agent runtime enforcement before execution is enabled.
 - Production immudb TLS and dedicated credentials, retention/backups and independently anchored verification; complete coverage of critical security call sites.

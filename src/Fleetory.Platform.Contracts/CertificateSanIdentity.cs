@@ -1,9 +1,9 @@
 using System.Formats.Asn1;
 using System.Security.Cryptography.X509Certificates;
 
-namespace Fleetory.Core.Security;
+namespace Fleetory.Platform.Contracts;
 
-internal static class CertificateSanIdentity
+public static class CertificateSanIdentity
 {
     public static bool TryReadGuid(X509Certificate2 certificate, string uriPrefix, out Guid identity)
     {

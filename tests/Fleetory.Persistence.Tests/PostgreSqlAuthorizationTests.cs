@@ -1,6 +1,7 @@
 using Fleetory.Platform.Authorization;
 using Fleetory.Platform.Contracts;
 using Fleetory.Platform.Persistence;
+using Fleetory.SharedKernel;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
 
@@ -112,6 +113,84 @@ public sealed class PostgreSqlAuthorizationTests(PostgreSqlTestFixture fixture)
 
         await Assert.ThrowsAsync<NpgsqlException>(
             async () => await authorizer.AuthorizeAsync(request));
+    }
+
+    [Fact]
+    public async Task Audited_administration_creates_scoped_grant_and_revokes_it()
+    {
+        var administratorId = $"person:{Guid.NewGuid():N}";
+        await InsertGrantAsync(administratorId, ActorKind.Person,
+            PostgreSqlAuthorizationAdministration.Permission);
+        var administrator = new ActorReference(administratorId, ActorKind.Person);
+        var target = new ActorReference($"person:{Guid.NewGuid():N}", ActorKind.Person);
+        var correlation = new CorrelationId(Guid.NewGuid().ToString("N"));
+        await using var scope = fixture.Services.CreateAsyncScope();
+        var administration = scope.ServiceProvider.GetRequiredService<PostgreSqlAuthorizationAdministration>();
+        var authorizer = scope.ServiceProvider.GetRequiredService<IAuthorizationService>();
+
+        var root = await administration.CreateScopeAsync(administrator, "Security test root", null,
+            correlation);
+        var child = await administration.CreateScopeAsync(administrator, "Security test child",
+            new ScopeId(root), correlation);
+        var roleId = await administration.CreateRoleAsync(administrator, "Security test reader",
+            [ReadPermission], correlation);
+        var assignmentId = await administration.AssignRoleAsync(administrator, target, roleId,
+            new ScopeId(root), correlation);
+
+        Assert.True((await authorizer.AuthorizeAsync(new AuthorizationRequest(
+            target, ReadPermission, new ScopeId(child)))).IsAllowed);
+        Assert.False((await authorizer.AuthorizeAsync(new AuthorizationRequest(
+            target, ReadPermission))).IsAllowed);
+        Assert.True(await administration.RevokeAssignmentAsync(administrator, assignmentId, correlation));
+        Assert.False(await administration.RevokeAssignmentAsync(administrator, assignmentId, correlation));
+        Assert.False((await authorizer.AuthorizeAsync(new AuthorizationRequest(
+            target, ReadPermission, new ScopeId(child)))).IsAllowed);
+
+        await using var connection = new NpgsqlConnection(fixture.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand("""
+            SELECT COUNT(*) FROM platform.audit_events AS event
+            JOIN platform.audit_export_queue AS queue ON queue.audit_event_id = event.event_id
+            WHERE event.correlation_id = @correlation
+            """, connection);
+        command.Parameters.AddWithValue("correlation", correlation.Value);
+        Assert.Equal(6L, (long)(await command.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
+    public async Task Administration_denial_is_audited_and_failed_audit_rolls_back_role()
+    {
+        var deniedActor = new ActorReference($"person:{Guid.NewGuid():N}", ActorKind.Person);
+        var deniedCorrelation = new CorrelationId(Guid.NewGuid().ToString("N"));
+        await using var scope = fixture.Services.CreateAsyncScope();
+        var administration = scope.ServiceProvider.GetRequiredService<PostgreSqlAuthorizationAdministration>();
+
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(async () =>
+            await administration.CreateRoleAsync(deniedActor, "Denied security test role",
+                [ReadPermission], deniedCorrelation));
+
+        var administratorId = $"person:{Guid.NewGuid():N}";
+        await InsertGrantAsync(administratorId, ActorKind.Person,
+            PostgreSqlAuthorizationAdministration.Permission);
+        var administrator = new ActorReference(administratorId, ActorKind.Person);
+        var roleName = $"Rollback {Guid.NewGuid():N}";
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await administration.CreateRoleAsync(administrator, roleName, [ReadPermission],
+                new CorrelationId(string.Empty)));
+
+        await using var connection = new NpgsqlConnection(fixture.ConnectionString);
+        await connection.OpenAsync();
+        await using var deniedAudit = new NpgsqlCommand("""
+            SELECT COUNT(*) FROM platform.audit_events
+            WHERE correlation_id = @correlation AND action = 'platform.authorization.manage_denied'
+            """, connection);
+        deniedAudit.Parameters.AddWithValue("correlation", deniedCorrelation.Value);
+        Assert.Equal(1L, (long)(await deniedAudit.ExecuteScalarAsync())!);
+        await using var missingRole = new NpgsqlCommand("""
+            SELECT COUNT(*) FROM platform.authorization_roles WHERE name = @name
+            """, connection);
+        missingRole.Parameters.AddWithValue("name", roleName);
+        Assert.Equal(0L, (long)(await missingRole.ExecuteScalarAsync())!);
     }
 
     private async Task InsertScopeAsync(Guid scopeId, Guid? parentScopeId = null)

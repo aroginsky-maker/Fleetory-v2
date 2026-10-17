@@ -1,5 +1,6 @@
 using Fleetory.Core.Persistence;
 using Fleetory.Core.Contracts;
+using Fleetory.Platform.Contracts;
 using Fleetory.Core.Security;
 using Fleetory.ModuleAbstractions;
 using Fleetory.Platform.Contracts.Secrets;
@@ -60,11 +61,11 @@ public sealed class CoreModule : FleetoryModuleBase
             endpoints.MapPost(
                 "/admin/devices/{deviceId:guid}/certificates/{fingerprint}/revoke",
                 AdminCertificateEndpoints.RevokeAsync)
-                .RequireRateLimiting(CoreSecurityPolicyNames.AdminRateLimit);
+                .RequireRateLimiting(AdminSecurityPolicyNames.AdminRateLimit);
             endpoints.MapPost(
                 "/admin/devices/{deviceId:guid}/enrollment-grants",
                 AgentEnrollmentEndpoints.CreateGrantAsync)
-                .RequireRateLimiting(CoreSecurityPolicyNames.AdminRateLimit);
+                .RequireRateLimiting(AdminSecurityPolicyNames.AdminRateLimit);
         }
     }
 }

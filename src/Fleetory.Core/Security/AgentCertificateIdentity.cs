@@ -1,4 +1,5 @@
 using System.Security.Cryptography.X509Certificates;
+using Fleetory.Platform.Contracts;
 using Fleetory.Core.Contracts;
 
 namespace Fleetory.Core.Security;

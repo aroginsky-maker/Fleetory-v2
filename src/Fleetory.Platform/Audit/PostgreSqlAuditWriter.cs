@@ -22,6 +22,26 @@ internal sealed class PostgreSqlAuditWriter(
         AuditRecord record,
         CancellationToken cancellationToken = default)
     {
+        var contextJson = Prepare(record);
+        await using var connection = new NpgsqlConnection(settings.ConnectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        await AppendAsync(record, contextJson, connection, transaction, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    internal ValueTask WriteInTransactionAsync(
+        AuditRecord record,
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        CancellationToken cancellationToken = default)
+    {
+        var contextJson = Prepare(record);
+        return AppendAsync(record, contextJson, connection, transaction, cancellationToken);
+    }
+
+    private static string? Prepare(AuditRecord record)
+    {
         ArgumentNullException.ThrowIfNull(record);
         Validate(record);
 
@@ -31,12 +51,18 @@ internal sealed class PostgreSqlAuditWriter(
             throw new ArgumentException("Audit context exceeds the 16 KiB limit.", nameof(record));
         }
 
+        return contextJson;
+    }
+
+    private async ValueTask AppendAsync(
+        AuditRecord record,
+        string? contextJson,
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        CancellationToken cancellationToken)
+    {
         var eventId = Guid.CreateVersion7();
         var recordedAt = clock.UtcNow.ToUniversalTime();
-
-        await using var connection = new NpgsqlConnection(settings.ConnectionString);
-        await connection.OpenAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
         await using (var insertEvent = connection.CreateCommand())
         {
@@ -78,7 +104,6 @@ internal sealed class PostgreSqlAuditWriter(
             await enqueueExport.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        await transaction.CommitAsync(cancellationToken);
     }
 
     private static void Validate(AuditRecord record)

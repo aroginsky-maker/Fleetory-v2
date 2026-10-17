@@ -1,4 +1,5 @@
 using Fleetory.Core.Contracts;
+using Fleetory.Platform.Contracts;
 using Fleetory.SharedKernel;
 using Microsoft.AspNetCore.Http;
 

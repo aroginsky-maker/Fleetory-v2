@@ -46,20 +46,28 @@ internal sealed class PostgreSqlAuthorizationService(
         AuthorizationRequest request,
         CancellationToken cancellationToken = default)
     {
-        if (request is null || request.Actor is null ||
-            request.Actor.Kind is ActorKind.Anonymous ||
-            !Enum.IsDefined(request.Actor.Kind) ||
-            string.IsNullOrWhiteSpace(request.Actor.SubjectId) ||
-            request.Actor.SubjectId.Length > 128 ||
-            !IsValidPermission(request.Permission) ||
-            request.ScopeId?.Value == Guid.Empty)
+        if (!IsValidRequest(request))
         {
             return AuthorizationDecision.Deny(InvalidRequest);
         }
 
         await using var connection = new NpgsqlConnection(settings.ConnectionString);
         await connection.OpenAsync(cancellationToken);
-        await using var command = new NpgsqlCommand(Query, connection);
+        return await AuthorizeInTransactionAsync(request, connection, null, cancellationToken);
+    }
+
+    internal static async ValueTask<AuthorizationDecision> AuthorizeInTransactionAsync(
+        AuthorizationRequest request,
+        NpgsqlConnection connection,
+        NpgsqlTransaction? transaction,
+        CancellationToken cancellationToken = default)
+    {
+        if (!IsValidRequest(request))
+        {
+            return AuthorizationDecision.Deny(InvalidRequest);
+        }
+
+        await using var command = new NpgsqlCommand(Query, connection, transaction);
         command.Parameters.AddWithValue("requested_scope", NpgsqlDbType.Uuid,
             (object?)request.ScopeId?.Value ?? DBNull.Value);
         command.Parameters.AddWithValue("actor_subject_id", NpgsqlDbType.Varchar,
@@ -73,7 +81,16 @@ internal sealed class PostgreSqlAuthorizationService(
         return allowed ? AuthorizationDecision.Allow() : AuthorizationDecision.Deny(PermissionNotGranted);
     }
 
-    private static bool IsValidPermission(string? permission)
+    private static bool IsValidRequest(AuthorizationRequest? request) =>
+        !(request is null || request.Actor is null ||
+            request.Actor.Kind is ActorKind.Anonymous ||
+            !Enum.IsDefined(request.Actor.Kind) ||
+            string.IsNullOrWhiteSpace(request.Actor.SubjectId) ||
+            request.Actor.SubjectId.Length > 128 ||
+            !IsValidPermission(request.Permission) ||
+            request.ScopeId?.Value == Guid.Empty);
+
+    internal static bool IsValidPermission(string? permission)
     {
         if (string.IsNullOrWhiteSpace(permission) || permission.Length > 128 ||
             permission[0] == '.' || permission[^1] == '.')
