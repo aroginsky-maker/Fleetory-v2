@@ -21,11 +21,30 @@ $utf8 = [System.Text.UTF8Encoding]::new($false)
 $serverProcess = $null
 $installedRoot = $null
 
-function Invoke-OpenSsl([string[]] $Arguments) {
-    $output = & $openssl @Arguments 2>&1 | Out-String
-    if ($LASTEXITCODE -ne 0) {
-        throw "OpenSSL certificate generation failed: $output"
+function Invoke-OpenSsl([string[]] $Arguments, [int] $TimeoutSeconds = 15) {
+    $start = [System.Diagnostics.ProcessStartInfo]::new($openssl)
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardInput = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    foreach ($argument in $Arguments) { $start.ArgumentList.Add($argument) }
+    $process = [System.Diagnostics.Process]::Start($start)
+    try {
+        $process.StandardInput.Close()
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            $process.Kill($true)
+            throw "OpenSSL timed out after $TimeoutSeconds seconds."
+        }
+        $output = $stdout.GetAwaiter().GetResult() + $stderr.GetAwaiter().GetResult()
+        if ($process.ExitCode -ne 0) {
+            throw "OpenSSL failed with exit code $($process.ExitCode): $output"
+        }
+        return $output
     }
+    finally { $process.Dispose() }
 }
 
 function Get-FreePort {
@@ -150,14 +169,12 @@ subjectAltName = URI:urn:fleetory:admin:00000000-0000-4000-8000-000000000001
             [System.IO.File]::ReadAllText((Join-Path $work 'server.stderr.log')))
     }
 
-    $wire = '' | & $openssl s_client -connect "127.0.0.1:$adminPort" `
-        -cert (Join-Path $work 'client-chain.crt') `
-        -key (Join-Path $work 'client.key') `
-        -CAfile (Join-Path $work 'root.crt') -verify_return_error -showcerts 2>&1 |
-        Out-String
+    $wire = Invoke-OpenSsl -Arguments @('s_client', '-connect', "127.0.0.1:$adminPort",
+        '-cert', (Join-Path $work 'client-chain.crt'),
+        '-key', (Join-Path $work 'client.key'),
+        '-CAfile', (Join-Path $work 'root.crt'), '-verify_return_error', '-showcerts')
     $certificateCount = [regex]::Matches($wire, '-----BEGIN CERTIFICATE-----').Count
-    if ($LASTEXITCODE -ne 0 -or
-        $wire -notmatch 'Verify return code: 0 \(ok\)' -or $certificateCount -lt 2) {
+    if ($wire -notmatch 'Verify return code: 0 \(ok\)' -or $certificateCount -lt 2) {
         throw "Windows root-only TLS verification failed; sent=$certificateCount`n$wire"
     }
     Write-Host "WINDOWS ROOT-ONLY TLS CHAIN PASS: $certificateCount certificates, verify code 0"
