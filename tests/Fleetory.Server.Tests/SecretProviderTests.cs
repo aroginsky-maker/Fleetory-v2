@@ -114,6 +114,54 @@ public sealed class SecretProviderTests
     }
 
     [Fact]
+    public void OpenBao_rejects_mixed_secret_sources_and_missing_connection_configuration()
+    {
+        var mixedSources = Assert.Throws<InvalidOperationException>(() =>
+            FleetoryApplication.Build([
+                "--environment=Development",
+                "--Fleetory:Secrets:Provider=OpenBao",
+                $"--ConnectionStrings:Fleetory={TestConnectionString}"
+            ]));
+        Assert.Contains("cannot be combined", mixedSources.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(TestConnectionString, mixedSources.ToString(), StringComparison.Ordinal);
+
+        var missingConfiguration = Assert.Throws<InvalidOperationException>(() =>
+            FleetoryApplication.Build([
+                "--environment=Development",
+                "--Fleetory:Secrets:Provider=OpenBao"
+            ]));
+        Assert.Contains("TokenDirectory and Address", missingConfiguration.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Unknown_secret_provider_is_rejected_before_server_startup()
+    {
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            FleetoryApplication.Build([
+                "--environment=Development",
+                "--Fleetory:Secrets:Provider=Unknown"
+            ]));
+        Assert.Contains("Unknown Fleetory:Secrets:Provider", exception.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(301)]
+    public void Admin_rate_limit_refuses_values_outside_supported_range(int perMinute)
+    {
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            FleetoryApplication.Build([
+                "--environment=Development",
+                $"--ConnectionStrings:Fleetory={TestConnectionString}",
+                $"--Fleetory:AdminGateway:RateLimitPerMinute={perMinute}"
+            ]));
+        Assert.Contains("must be between 1 and 300", exception.Message,
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void Missing_or_invalid_secret_prevents_startup_without_echoing_its_value()
     {
         using var directory = new TestSecretDirectory();

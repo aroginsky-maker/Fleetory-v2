@@ -55,6 +55,42 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
     }
 
     [Fact]
+    public void Gateway_rejects_wrong_key_root_and_malformed_certificate_chain()
+    {
+        using var pki = new TestPki(new DeviceId(Guid.NewGuid()));
+        using var foreignPki = new TestPki(new DeviceId(Guid.NewGuid()));
+        using var secrets = new TestSecretDirectory();
+        secrets.Write("fleetory-postgresql", fixture.ConnectionString);
+        var rootPem = pki.Root.ExportCertificatePem();
+        var serverPem = pki.Server.ExportCertificatePem();
+        var serverKeyPem = pki.ServerKey.ExportPkcs8PrivateKeyPem();
+
+        void AssertRejected(string root, string chain, string key)
+        {
+            secrets.Write("agent-gateway-root-ca", root);
+            secrets.Write("agent-gateway-server-cert", chain);
+            secrets.Write("agent-gateway-server-key", key);
+            var exception = Assert.Throws<InvalidOperationException>(() =>
+                FleetoryApplication.Build([
+                    "--environment=Development",
+                    $"--Fleetory:Secrets:Directory={secrets.Path}",
+                    "--Fleetory:AgentGateway:Enabled=true",
+                    "--Fleetory:Web:Port=45121",
+                    "--Fleetory:AgentGateway:Port=45122"
+                ]));
+            Assert.Contains("Gateway TLS material is invalid", exception.Message,
+                StringComparison.Ordinal);
+            Assert.DoesNotContain(key, exception.ToString(), StringComparison.Ordinal);
+        }
+
+        AssertRejected(rootPem, serverPem, foreignPki.ServerKey.ExportPkcs8PrivateKeyPem());
+        AssertRejected(foreignPki.Root.ExportCertificatePem(), serverPem, serverKeyPem);
+        AssertRejected(rootPem, serverPem + pki.Client.ExportCertificatePem(), serverKeyPem);
+        AssertRejected(rootPem, string.Concat(Enumerable.Repeat(serverPem, 5)), serverKeyPem);
+        AssertRejected("not a certificate", serverPem, serverKeyPem);
+    }
+
+    [Fact]
     public async Task Admin_gateway_limits_requests_before_repeated_authorization_work()
     {
         using var adminPki = new TestPki(new Uri($"urn:fleetory:admin:{Guid.NewGuid():D}"));
@@ -419,6 +455,40 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             Assert.Equal(HttpStatusCode.NotFound, webRetirement.StatusCode);
 
             await GrantAdminPermissionAsync(adminId, "platform.authorization.manage");
+            using var emptyRoleName = await admin.PostAsJsonAsync($"{baseUrl}/roles",
+                new { name = "", permissions = new[] { "Core.Device.Read" } });
+            Assert.Equal(HttpStatusCode.BadRequest, emptyRoleName.StatusCode);
+            using var duplicatePermissions = await admin.PostAsJsonAsync($"{baseUrl}/roles",
+                new { name = "Duplicate permissions", permissions = new[]
+                    { "Core.Device.Read", "Core.Device.Read" } });
+            Assert.Equal(HttpStatusCode.BadRequest, duplicatePermissions.StatusCode);
+            using var malformedRole = await admin.PostAsync($"{baseUrl}/roles",
+                new StringContent("{", System.Text.Encoding.UTF8, "application/json"));
+            Assert.Equal(HttpStatusCode.BadRequest, malformedRole.StatusCode);
+            using var missingParent = await admin.PostAsJsonAsync($"{baseUrl}/scopes",
+                new { name = "Orphan scope", parentScopeId = Guid.NewGuid() });
+            Assert.Equal(HttpStatusCode.BadRequest, missingParent.StatusCode);
+            using var invalidScope = await admin.PostAsJsonAsync($"{baseUrl}/scopes",
+                new { name = " ", parentScopeId = (Guid?)null });
+            Assert.Equal(HttpStatusCode.BadRequest, invalidScope.StatusCode);
+            using var invalidAssignment = await admin.PostAsJsonAsync(
+                $"{baseUrl}/roles/{Guid.NewGuid():D}/assignments",
+                new { subjectId = "", kind = ActorKind.Person, scopeId = (Guid?)null });
+            Assert.Equal(HttpStatusCode.BadRequest, invalidAssignment.StatusCode);
+            using var missingRoleAssignment = await admin.PostAsJsonAsync(
+                $"{baseUrl}/roles/{Guid.NewGuid():D}/assignments",
+                new { subjectId = $"person:{Guid.NewGuid():N}", kind = ActorKind.Person,
+                    scopeId = (Guid?)null });
+            Assert.Equal(HttpStatusCode.BadRequest, missingRoleAssignment.StatusCode);
+            using var emptyRevocation = await admin.DeleteAsync(
+                $"{baseUrl}/assignments/{Guid.Empty:D}");
+            Assert.Equal(HttpStatusCode.BadRequest, emptyRevocation.StatusCode);
+            using var emptyRoleRetirement = await admin.DeleteAsync(
+                $"{baseUrl}/roles/{Guid.Empty:D}");
+            Assert.Equal(HttpStatusCode.BadRequest, emptyRoleRetirement.StatusCode);
+            using var emptyScopeRetirement = await admin.DeleteAsync(
+                $"{baseUrl}/scopes/{Guid.Empty:D}");
+            Assert.Equal(HttpStatusCode.BadRequest, emptyScopeRetirement.StatusCode);
             var correlation = Guid.NewGuid().ToString("N");
             using var roleRequest = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/roles")
             {
