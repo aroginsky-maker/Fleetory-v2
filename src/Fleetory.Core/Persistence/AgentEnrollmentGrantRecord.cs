@@ -13,13 +13,14 @@ internal sealed class AgentEnrollmentGrantRecord
 
     private AgentEnrollmentGrantRecord(string tokenSha256, DeviceId deviceId,
         DateTimeOffset expiresAt, string? expectedCertificateSha256,
-        string? replacementCertificateSha256)
+        string? replacementCertificateSha256, Guid? recoveryRequestId)
     {
         TokenSha256 = tokenSha256;
         DeviceId = deviceId;
         ExpiresAt = expiresAt.ToUniversalTime();
         ExpectedCertificateSha256 = expectedCertificateSha256;
         ReplacementCertificateSha256 = replacementCertificateSha256;
+        RecoveryRequestId = recoveryRequestId;
     }
 
     [Key]
@@ -44,21 +45,27 @@ internal sealed class AgentEnrollmentGrantRecord
     [Column("replacement_certificate_sha256")]
     public string? ReplacementCertificateSha256 { get; private set; }
 
+    [Column("recovery_request_id", TypeName = "uuid")]
+    public Guid? RecoveryRequestId { get; private set; }
+
     public static AgentEnrollmentGrantRecord Create(
         string tokenSha256, DeviceId deviceId, DateTimeOffset expiresAt,
-        string? expectedCertificateSha256, string? replacementCertificateSha256)
+        string? expectedCertificateSha256, string? replacementCertificateSha256,
+        Guid? recoveryRequestId = null)
     {
         if (deviceId.Value == Guid.Empty || !AgentCertificateFingerprint.IsValid(tokenSha256) ||
             expectedCertificateSha256 is not null &&
             !AgentCertificateFingerprint.IsValid(expectedCertificateSha256) ||
             (expectedCertificateSha256 is null) != (replacementCertificateSha256 is null) ||
             replacementCertificateSha256 is not null &&
-            !AgentCertificateFingerprint.IsValid(replacementCertificateSha256))
+            !AgentCertificateFingerprint.IsValid(replacementCertificateSha256) ||
+            recoveryRequestId is not null &&
+            (recoveryRequestId == Guid.Empty || expectedCertificateSha256 is null))
         {
             throw new ArgumentException("Agent enrollment grant is invalid.");
         }
 
         return new AgentEnrollmentGrantRecord(tokenSha256, deviceId, expiresAt,
-            expectedCertificateSha256, replacementCertificateSha256);
+            expectedCertificateSha256, replacementCertificateSha256, recoveryRequestId);
     }
 }

@@ -109,8 +109,8 @@ public sealed class AgentEnrollmentService(
             throw new UnauthorizedAccessException("Agent enrollment grant is not authorized.");
         }
 
-        var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
-        var tokenHash = HashToken(token);
+        var token = AgentEnrollmentToken.Create();
+        var tokenHash = AgentEnrollmentToken.Hash(token);
         try
         {
             await using (var transaction = await database.Database.BeginTransactionAsync(cancellationToken))
@@ -221,7 +221,7 @@ public sealed class AgentEnrollmentService(
             throw new UnauthorizedAccessException("Agent enrollment is denied.");
         }
 
-        var tokenHash = HashToken(token);
+        var tokenHash = AgentEnrollmentToken.Hash(token);
         var grantExists = await database.AgentEnrollmentGrants.AsNoTracking().AnyAsync(
             row => row.TokenSha256 == tokenHash && row.DeviceId == deviceId &&
                 row.ConsumedAt == null && row.ExpiresAt > now, cancellationToken);
@@ -245,8 +245,12 @@ public sealed class AgentEnrollmentService(
                 throw new UnauthorizedAccessException("Agent enrollment is denied.");
             }
 
-            if (!await MatchesExpectedBindingAsync(
-                    deviceId, grant.ExpectedCertificateSha256, cancellationToken))
+            var bindingMatches = grant.RecoveryRequestId is null
+                ? await MatchesExpectedBindingAsync(
+                    deviceId, grant.ExpectedCertificateSha256, cancellationToken)
+                : await MatchesRecoveryBindingAsync(deviceId,
+                    grant.ExpectedCertificateSha256!, cancellationToken);
+            if (!bindingMatches)
             {
                 await WriteAuditInTransactionAsync(actor, "core.agent_enrollment.denied_collision",
                     deviceId, correlationId, clock.UtcNow, transaction, cancellationToken);
@@ -322,11 +326,19 @@ public sealed class AgentEnrollmentService(
             new AuditTarget("device", deviceId.Value.ToString("D")),
             correlationId, occurredAt);
 
-    private static string HashToken(string token) =>
-        Convert.ToHexString(SHA256.HashData(System.Text.Encoding.ASCII.GetBytes(token)));
-
     private static string CertificateFingerprint(X509Certificate2 certificate) =>
         Convert.ToHexString(SHA256.HashData(certificate.RawData));
+
+    private async ValueTask<bool> MatchesRecoveryBindingAsync(
+        DeviceId deviceId, string expectedCertificateSha256,
+        CancellationToken cancellationToken) =>
+        await database.AgentCertificates.AsNoTracking().AnyAsync(
+            row => row.DeviceId == deviceId &&
+                row.CertificateSha256 == expectedCertificateSha256 &&
+                row.RevokedAt != null, cancellationToken) &&
+        !await database.AgentCertificates.AsNoTracking().AnyAsync(
+            row => row.DeviceId == deviceId && row.RevokedAt == null,
+            cancellationToken);
 
     private ValueTask<bool> ActiveBindingExistsAsync(DeviceId deviceId,
         string fingerprint, DateTimeOffset now, CancellationToken cancellationToken) =>

@@ -53,6 +53,69 @@ namespace Fleetory.Core.Persistence.Migrations
                     b.ToTable("agent_certificates", "core");
                 });
 
+            modelBuilder.Entity("Fleetory.Core.Persistence.AgentCertificateRecoveryRecord", b =>
+                {
+                    b.Property<Guid>("RecoveryId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("recovery_id");
+
+                    b.Property<DateTimeOffset?>("ApprovedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("approved_at");
+
+                    b.Property<string>("ApproverSubjectId")
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("approver_subject_id");
+
+                    b.Property<Guid>("DeviceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("device_id");
+
+                    b.Property<string>("EvidenceSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("evidence_sha256");
+
+                    b.Property<string>("ExpectedCertificateSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("expected_certificate_sha256");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<string>("IncidentReference")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("incident_reference");
+
+                    b.Property<string>("ReplacementCertificateSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("replacement_certificate_sha256");
+
+                    b.Property<string>("RequesterSubjectId")
+                        .IsRequired()
+                        .HasMaxLength(128)
+                        .HasColumnType("character varying(128)")
+                        .HasColumnName("requester_subject_id");
+
+                    b.HasKey("RecoveryId");
+
+                    b.HasIndex("DeviceId");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.ToTable("agent_certificate_recoveries", "core");
+                });
+
             modelBuilder.Entity("Fleetory.Core.Persistence.AgentEnrollmentGrantRecord", b =>
                 {
                     b.Property<string>("TokenSha256")
@@ -77,6 +140,10 @@ namespace Fleetory.Core.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("expires_at");
 
+                    b.Property<Guid?>("RecoveryRequestId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("recovery_request_id");
+
                     b.Property<string>("ReplacementCertificateSha256")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)")
@@ -87,6 +154,8 @@ namespace Fleetory.Core.Persistence.Migrations
                     b.HasIndex("DeviceId");
 
                     b.HasIndex("ExpiresAt");
+
+                    b.HasIndex("RecoveryRequestId");
 
                     b.ToTable("agent_enrollment_grants", "core");
                 });
@@ -168,6 +237,15 @@ namespace Fleetory.Core.Persistence.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("Fleetory.Core.Persistence.AgentCertificateRecoveryRecord", b =>
+                {
+                    b.HasOne("Fleetory.Core.Persistence.DeviceRecord", null)
+                        .WithMany()
+                        .HasForeignKey("DeviceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
             modelBuilder.Entity("Fleetory.Core.Persistence.AgentEnrollmentGrantRecord", b =>
                 {
                     b.HasOne("Fleetory.Core.Persistence.DeviceRecord", null)
@@ -175,6 +253,11 @@ namespace Fleetory.Core.Persistence.Migrations
                         .HasForeignKey("DeviceId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("Fleetory.Core.Persistence.AgentCertificateRecoveryRecord", null)
+                        .WithMany()
+                        .HasForeignKey("RecoveryRequestId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("Fleetory.Core.Persistence.AgentRotationIntentRecord", b =>

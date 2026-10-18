@@ -389,6 +389,134 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
     }
 
     [Fact]
+    public async Task Lost_key_recovery_requires_separate_approver_and_rolls_back_on_audit_failure()
+    {
+        var deviceId = new DeviceId(Guid.NewGuid());
+        var requesterId = Guid.NewGuid();
+        var approverId = Guid.NewGuid();
+        var requester = new ActorReference($"person:{requesterId:N}", ActorKind.Person);
+        var approver = new ActorReference($"person:{approverId:N}", ActorKind.Person);
+        using var pki = new TestPki(deviceId);
+        var oldFingerprint = Convert.ToHexString(SHA256.HashData(pki.Client.RawData));
+        var newFingerprint = Convert.ToHexString(SHA256.HashData(pki.UnregisteredClient.RawData));
+        var evidenceHash = new string('B', 64);
+        const string incident = "INC-2026-10-18-01";
+        await GrantAdminPermissionAsync(requesterId, AgentEnrollmentService.Permission);
+
+        await using var scope = fixture.Services.CreateAsyncScope();
+        var services = scope.ServiceProvider;
+        var database = services.GetRequiredService<CoreDbContext>();
+        var enrollment = services.GetRequiredService<AgentEnrollmentService>();
+        var recovery = services.GetRequiredService<AgentCertificateRecoveryService>();
+        var initialToken = await enrollment.CreateGrantAsync(
+            requester, deviceId, "recovery device", CorrelationId.New());
+        await enrollment.EnrollAsync(deviceId, pki.Client, initialToken, CorrelationId.New());
+
+        var deniedCorrelation = CorrelationId.New();
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(async () =>
+            await recovery.RequestAsync(requester, deviceId, oldFingerprint,
+                newFingerprint, evidenceHash, incident, deniedCorrelation));
+        Assert.Equal(1, await CountAuditActionAsync(deniedCorrelation,
+            "core.agent_certificate.recovery_denied"));
+
+        await GrantAdminPermissionAsync(requesterId,
+            AgentCertificateRecoveryService.RequestPermission);
+        var failedRequestRecovery = new AgentCertificateRecoveryService(
+            services.GetRequiredService<IAuthorizationService>(),
+            new FailingTransactionalAuditWriter(services.GetRequiredService<IAuditWriter>()),
+            database, services.GetRequiredService<IClock>());
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await failedRequestRecovery.RequestAsync(requester, deviceId,
+                oldFingerprint, newFingerprint, evidenceHash, incident,
+                CorrelationId.New()));
+        database.ChangeTracker.Clear();
+        Assert.False(await database.AgentCertificateRecoveries.AsNoTracking().AnyAsync(
+            row => row.DeviceId == deviceId));
+
+        var expiredRecoveryId = await recovery.RequestAsync(requester, deviceId,
+            oldFingerprint, newFingerprint, evidenceHash, incident,
+            CorrelationId.New());
+        await database.AgentCertificateRecoveries
+            .Where(row => row.RecoveryId == expiredRecoveryId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(row => row.ExpiresAt, DateTimeOffset.UtcNow.AddMinutes(-1)));
+        var recoveryId = await recovery.RequestAsync(requester, deviceId,
+            oldFingerprint, newFingerprint, evidenceHash, incident,
+            CorrelationId.New());
+        await Assert.ThrowsAsync<AgentRecoveryConflictException>(async () =>
+            await recovery.RequestAsync(requester, deviceId, oldFingerprint,
+                newFingerprint, evidenceHash, incident, CorrelationId.New()));
+
+        await GrantAdminPermissionAsync(requesterId,
+            AgentCertificateRecoveryService.ApprovePermission);
+        var sameActorCorrelation = CorrelationId.New();
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(async () =>
+            await recovery.ApproveAsync(requester, deviceId, recoveryId,
+                newFingerprint, evidenceHash, incident, sameActorCorrelation));
+        Assert.Equal(1, await CountAuditActionAsync(sameActorCorrelation,
+            "core.agent_certificate.recovery_approval_denied"));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(async () =>
+            await recovery.ApproveAsync(approver, deviceId, recoveryId,
+                newFingerprint, evidenceHash, incident, CorrelationId.New()));
+
+        await GrantAdminPermissionAsync(approverId,
+            AgentCertificateRecoveryService.ApprovePermission);
+        await Assert.ThrowsAsync<AgentRecoveryConflictException>(async () =>
+            await recovery.ApproveAsync(approver, deviceId, expiredRecoveryId,
+                newFingerprint, evidenceHash, incident, CorrelationId.New()));
+        await Assert.ThrowsAsync<AgentRecoveryConflictException>(async () =>
+            await recovery.ApproveAsync(approver, deviceId, recoveryId,
+                newFingerprint, new string('C', 64), incident,
+                CorrelationId.New()));
+
+        var failedAuditRecovery = new AgentCertificateRecoveryService(
+            services.GetRequiredService<IAuthorizationService>(),
+            new FailingTransactionalAuditWriter(services.GetRequiredService<IAuditWriter>()),
+            database, services.GetRequiredService<IClock>());
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await failedAuditRecovery.ApproveAsync(approver, deviceId, recoveryId,
+                newFingerprint, evidenceHash, incident, CorrelationId.New()));
+        database.ChangeTracker.Clear();
+        Assert.True(await database.AgentCertificates.AsNoTracking().AnyAsync(
+            row => row.DeviceId == deviceId && row.CertificateSha256 == oldFingerprint &&
+                row.RevokedAt == null));
+        Assert.True(await database.AgentCertificateRecoveries.AsNoTracking().AnyAsync(
+            row => row.RecoveryId == recoveryId && row.ApprovedAt == null));
+        Assert.False(await database.AgentEnrollmentGrants.AsNoTracking().AnyAsync(
+            row => row.RecoveryRequestId == recoveryId));
+
+        var token = await recovery.ApproveAsync(approver, deviceId, recoveryId,
+            newFingerprint, evidenceHash, incident, CorrelationId.New());
+        await Assert.ThrowsAsync<AgentRecoveryConflictException>(async () =>
+            await recovery.RequestAsync(requester, deviceId, oldFingerprint,
+                newFingerprint, evidenceHash, incident, CorrelationId.New()));
+        Assert.True(await database.AgentCertificates.AsNoTracking().AnyAsync(
+            row => row.DeviceId == deviceId && row.CertificateSha256 == oldFingerprint &&
+                row.RevokedAt != null));
+        Assert.True(await database.AgentCertificateRecoveries.AsNoTracking().AnyAsync(
+            row => row.RecoveryId == recoveryId &&
+                row.ApproverSubjectId == approver.SubjectId));
+        await Assert.ThrowsAsync<AgentRecoveryConflictException>(async () =>
+            await recovery.ApproveAsync(approver, deviceId, recoveryId,
+                newFingerprint, evidenceHash, incident, CorrelationId.New()));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(async () =>
+            await enrollment.EnrollAsync(deviceId, pki.Client,
+                token, CorrelationId.New()));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(async () =>
+            await enrollment.EnrollAsync(deviceId, pki.RecoveryClient,
+                token, CorrelationId.New()));
+        Assert.True(await database.AgentEnrollmentGrants.AsNoTracking().AnyAsync(
+            row => row.RecoveryRequestId == recoveryId && row.ConsumedAt == null));
+        await enrollment.EnrollAsync(deviceId, pki.UnregisteredClient,
+            token, CorrelationId.New());
+        Assert.Equal(2, await database.AgentCertificates.CountAsync(
+            row => row.DeviceId == deviceId));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(async () =>
+            await enrollment.EnrollAsync(deviceId, pki.UnregisteredClient,
+                token, CorrelationId.New()));
+    }
+
+    [Fact]
     public async Task Concurrent_initial_grants_cannot_bind_two_certificates_to_one_device()
     {
         var deviceId = new DeviceId(Guid.NewGuid());
@@ -476,8 +604,11 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
     {
         var deviceId = new DeviceId(Guid.NewGuid());
         var adminId = Guid.NewGuid();
+        var recoveryApproverId = Guid.NewGuid();
         using var agentPki = new TestPki(deviceId);
-        using var adminPki = new TestPki(new Uri($"urn:fleetory:admin:{adminId:D}"));
+        using var adminPki = new TestPki(
+            new Uri($"urn:fleetory:admin:{adminId:D}"),
+            new Uri($"urn:fleetory:admin:{recoveryApproverId:D}"));
         using var secrets = new TestSecretDirectory();
         secrets.Write("fleetory-postgresql", fixture.ConnectionString);
         secrets.Write("agent-gateway-root-ca", agentPki.Root.ExportCertificatePem());
@@ -507,6 +638,7 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
         {
             using var agent = agentPki.CreateClient(agentPki.Client);
             using var admin = adminPki.CreateClient(adminPki.Client);
+            using var recoveryApprover = adminPki.CreateClient(adminPki.UnregisteredClient);
             using var web = new HttpClient();
             var agentBase = $"https://127.0.0.1:{ports[1]}";
             var grantUrl = $"https://127.0.0.1:{ports[2]}/admin/devices/{deviceId.Value:D}/enrollment-grants";
@@ -633,6 +765,72 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             Assert.Equal(2, await database.AgentCertificates.CountAsync(row => row.DeviceId == deviceId));
             Assert.Equal(2, await database.AgentEnrollmentGrants.CountAsync(
                 row => row.DeviceId == deviceId && row.ConsumedAt != null));
+
+            var recoveryUrl =
+                $"https://127.0.0.1:{ports[2]}/admin/devices/{deviceId.Value:D}/certificate-recoveries";
+            var recoveredFingerprint = Convert.ToHexString(
+                SHA256.HashData(agentPki.RecoveryClient.RawData));
+            var recoveryRequest = new
+            {
+                expectedCertificateSha256 = replacementFingerprint,
+                replacementCertificateSha256 = recoveredFingerprint,
+                evidenceSha256 = new string('D', 64),
+                incidentReference = "INC-GATEWAY-RECOVERY"
+            };
+            using var recoveryDenied = await admin.PostAsJsonAsync(recoveryUrl, recoveryRequest);
+            Assert.Equal(HttpStatusCode.Forbidden, recoveryDenied.StatusCode);
+            await GrantAdminPermissionAsync(adminId,
+                AgentCertificateRecoveryService.RequestPermission);
+            using var recoveryCreated = await admin.PostAsJsonAsync(recoveryUrl, recoveryRequest);
+            Assert.Equal(HttpStatusCode.OK, recoveryCreated.StatusCode);
+            var recoveryBody = await recoveryCreated.Content
+                .ReadFromJsonAsync<System.Text.Json.JsonElement>();
+            var recoveryId = recoveryBody.GetProperty("recoveryId").GetGuid();
+            var approvalUrl = $"{recoveryUrl}/{recoveryId:D}/approve";
+            var approvalBody = new
+            {
+                recoveryRequest.replacementCertificateSha256,
+                recoveryRequest.evidenceSha256,
+                recoveryRequest.incidentReference
+            };
+            await GrantAdminPermissionAsync(adminId,
+                AgentCertificateRecoveryService.ApprovePermission);
+            using var sameActor = await admin.PostAsJsonAsync(approvalUrl, approvalBody);
+            Assert.Equal(HttpStatusCode.Forbidden, sameActor.StatusCode);
+            using var ungrantedApprover = await recoveryApprover.PostAsJsonAsync(
+                approvalUrl, approvalBody);
+            Assert.Equal(HttpStatusCode.Forbidden, ungrantedApprover.StatusCode);
+            await GrantAdminPermissionAsync(recoveryApproverId,
+                AgentCertificateRecoveryService.ApprovePermission);
+            using var wrongEvidence = await recoveryApprover.PostAsJsonAsync(
+                approvalUrl, new
+                {
+                    approvalBody.replacementCertificateSha256,
+                    evidenceSha256 = new string('E', 64),
+                    approvalBody.incidentReference
+                });
+            Assert.Equal(HttpStatusCode.Conflict, wrongEvidence.StatusCode);
+            using var recoveryApproved = await recoveryApprover.PostAsJsonAsync(
+                approvalUrl, approvalBody);
+            Assert.Equal(HttpStatusCode.OK, recoveryApproved.StatusCode);
+            Assert.Equal("no-store", recoveryApproved.Headers.CacheControl?.ToString());
+            var recoveryGrant = await recoveryApproved.Content
+                .ReadFromJsonAsync<System.Text.Json.JsonElement>();
+            var recoveryToken = recoveryGrant.GetProperty("token").GetString();
+            Assert.NotNull(recoveryToken);
+            using var retired = await candidate.GetAsync($"{agentBase}/agent/identity");
+            Assert.Equal(HttpStatusCode.Forbidden, retired.StatusCode);
+            using var recoveredAgent = agentPki.CreateClient(agentPki.RecoveryClient);
+            using var recovered = await recoveredAgent.PostAsJsonAsync(
+                $"{agentBase}/agent/enroll", new { token = recoveryToken });
+            Assert.Equal(HttpStatusCode.NoContent, recovered.StatusCode);
+            using var recoveredIdentity = await recoveredAgent.GetAsync(
+                $"{agentBase}/agent/identity");
+            Assert.Equal(HttpStatusCode.NoContent, recoveredIdentity.StatusCode);
+            Assert.Equal(3, await database.AgentCertificates.CountAsync(
+                row => row.DeviceId == deviceId));
+            Assert.Equal(2, await database.AgentCertificates.CountAsync(
+                row => row.DeviceId == deviceId && row.RevokedAt != null));
         }
         finally
         {
@@ -1104,6 +1302,7 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
         private readonly bool omitLeafBasicConstraints;
         private readonly ECDsa clientKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         private readonly ECDsa unregisteredKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        private readonly ECDsa recoveryKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         private readonly ECDsa malformedIdentityKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
 
         public TestPki(DeviceId deviceId, bool useIntermediate = false,
@@ -1118,7 +1317,9 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
         {
             this.omitLeafBasicConstraints = omitLeafBasicConstraints;
             var now = DateTimeOffset.UtcNow;
-            var rootRequest = new CertificateRequest("CN=Fleetory Test CA", rootKey, HashAlgorithmName.SHA256);
+            var caIdentity = Guid.NewGuid().ToString("N");
+            var rootRequest = new CertificateRequest($"CN=Fleetory Test CA {caIdentity}",
+                rootKey, HashAlgorithmName.SHA256);
             rootRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
             rootRequest.CertificateExtensions.Add(new X509KeyUsageExtension(
                 X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign, true));
@@ -1127,7 +1328,8 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             if (useIntermediate)
             {
                 intermediateKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
-                var request = new CertificateRequest("CN=Fleetory Test Intermediate",
+                var request = new CertificateRequest(
+                    $"CN=Fleetory Test Intermediate {caIdentity}",
                     intermediateKey, HashAlgorithmName.SHA256);
                 request.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
                 request.CertificateExtensions.Add(new X509KeyUsageExtension(
@@ -1145,6 +1347,8 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             UnregisteredClient = Issue("CN=Fleetory Unknown Agent", unregisteredKey,
                 "1.3.6.1.5.5.7.3.2", now,
                 san => san.AddUri(unregisteredUri ?? clientUri));
+            RecoveryClient = Issue("CN=Fleetory Recovery Agent", recoveryKey,
+                "1.3.6.1.5.5.7.3.2", now, san => san.AddUri(clientUri));
             MalformedIdentityClient = Issue("CN=Fleetory Malformed Agent", malformedIdentityKey,
                 "1.3.6.1.5.5.7.3.2", now,
                 san => san.AddUri(new Uri("urn:fleetory:device:not-a-guid")));
@@ -1156,6 +1360,7 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
         public X509Certificate2 Server { get; }
         public X509Certificate2 Client { get; }
         public X509Certificate2 UnregisteredClient { get; }
+        public X509Certificate2 RecoveryClient { get; }
         public X509Certificate2 MalformedIdentityClient { get; }
         public ECDsa ServerKey { get; }
 
@@ -1213,6 +1418,7 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
         public void Dispose()
         {
             UnregisteredClient.Dispose();
+            RecoveryClient.Dispose();
             MalformedIdentityClient.Dispose();
             Client.Dispose();
             Server.Dispose();
@@ -1221,6 +1427,7 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             intermediateKey?.Dispose();
             Root.Dispose();
             unregisteredKey.Dispose();
+            recoveryKey.Dispose();
             malformedIdentityKey.Dispose();
             clientKey.Dispose();
             rootKey.Dispose();

@@ -22,15 +22,16 @@
 - Agent grant creation, certificate binding and certificate revocation now commit their Core state, completion audit event and export-queue entry in one PostgreSQL transaction. A completion-audit failure rolls back the Core change; integration tests cover failure and retry. The Platform audit writer accepts the caller's transaction while retaining ownership of its tables. The architecture guide includes a read-only recovery procedure for a lost commit acknowledgement.
 - Agent identity collision checks now require the Admin to name a previously bound certificate fingerprint when issuing a replacement grant. The expectation is stored with the token digest and checked again under a per-device PostgreSQL row lock at redemption. Missing or foreign fingerprints return 409; a stale initial grant cannot bind a second certificate after another grant succeeds. Collision denials are audited, and integration tests cover both a stale grant and concurrent first enrollments. The physical-device verification and approval process remains an operational requirement.
 - Replacement grants additionally require the global `core.agent_certificate.rotate` permission alongside enrollment permission. Without it, the Admin route returns 403 and writes a denial audit event without issuing a token; real mTLS/PostgreSQL tests cover denial and authorized rotation. Neither permission is seeded by default.
-- An active Agent certificate must now create a five-minute rotation intent over its mTLS port for the exact replacement certificate SHA-256. Admin uses that one-time intent alongside both permissions and the old fingerprint; the grant can be redeemed only by that replacement certificate. The device row lock serializes grant, enrollment and revocation checks. Tests cover unbound Agent denial, expiry, replay, wrong replacement, revocation and audit rollback. Possession of the old key is verified; independent physical-device approval and lost-key recovery remain open.
+- An active Agent certificate must now create a five-minute rotation intent over its mTLS port for the exact replacement certificate SHA-256. Admin uses that one-time intent alongside both permissions and the old fingerprint; the grant can be redeemed only by that replacement certificate. The device row lock serializes grant, enrollment and revocation checks. Tests cover unbound Agent denial, expiry, replay, wrong replacement, revocation and audit rollback. Possession of the old key is verified; independent physical-device approval remains open.
+- A separate lost-key recovery path now requires two distinct Admin identities with `core.agent_certificate.recover.request` and `.approve` permissions. Both independently name the new certificate SHA-256, incident reference and evidence-bundle SHA-256. Approval atomically revokes all old bindings, invalidates pending grants and rotation intents, issues a five-minute grant bound to the new certificate and writes durable audit. PostgreSQL and real mTLS tests cover separation, denied permissions, evidence mismatch, expiry, replay, old-certificate rejection and audit rollback. Physical evidence validation, secure token delivery and the production incident procedure remain open.
 
 ## Verification snapshot
 
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local tests after Agent rotation intent | 157/157 passed |
-| Local production coverage | 92.92% |
+| Local tests after two-person Agent recovery | 158/158 passed |
+| Local production coverage | 93.39% |
 | CI production coverage at `c54f84f` | 93.06% |
 | Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
 | Local full audit pipeline | PostgreSQL outbox → Fleetory worker → immudb readback passed |
@@ -51,7 +52,7 @@ The latest completed CI and Sonar numbers come from [run 39154974561](https://gi
 
 - Production Windows PKI provisioning and renewal must install the approved root and intermediate in the host certificate stores. The automated root-only wire test passes on an ephemeral runner; the earlier local machine without those store entries still needs its own provisioning before that probe can pass.
 - Validate the controlled Admin recovery runbook with production incident approval and credential custody; define role/scope replacement and versioning beyond safe retirement.
-- CA issuance and renewal policy, secure grant delivery, Admin certificate lifecycle and verified physical-device approval for certificate replacement.
+- CA issuance and renewal policy, secure grant delivery, Admin certificate lifecycle and verified physical-device approval for certificate replacement or lost-key recovery; production custody and retention of recovery evidence.
 - Protected command signing and trust-file distribution, approval protocol for high-risk and bulk commands, and Agent runtime enforcement before execution is enabled.
 - Production immudb TLS and dedicated credentials, retention/backups and independently anchored verification; complete coverage of critical security call sites.
 - Negative and recovery security tests, then final strict build, full test suite and current Sonar Quality Gate.

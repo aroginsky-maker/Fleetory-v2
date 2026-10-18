@@ -11,6 +11,8 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options) : DbC
     internal DbSet<AgentCertificateRecord> AgentCertificates => Set<AgentCertificateRecord>();
     internal DbSet<AgentEnrollmentGrantRecord> AgentEnrollmentGrants => Set<AgentEnrollmentGrantRecord>();
     internal DbSet<AgentRotationIntentRecord> AgentRotationIntents => Set<AgentRotationIntentRecord>();
+    internal DbSet<AgentCertificateRecoveryRecord> AgentCertificateRecoveries =>
+        Set<AgentCertificateRecoveryRecord>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -57,10 +59,29 @@ public sealed class CoreDbContext(DbContextOptions<CoreDbContext> options) : DbC
                 .HasForeignKey(record => record.DeviceId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            entity.HasOne<AgentCertificateRecoveryRecord>()
+                .WithMany()
+                .HasForeignKey(record => record.RecoveryRequestId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             entity.HasIndex(record => record.ExpiresAt);
         });
 
         modelBuilder.Entity<AgentRotationIntentRecord>(entity =>
+        {
+            entity.Property(record => record.DeviceId)
+                .HasConversion(id => id.Value, value => new DeviceId(value))
+                .ValueGeneratedNever();
+
+            entity.HasOne<DeviceRecord>()
+                .WithMany()
+                .HasForeignKey(record => record.DeviceId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(record => record.ExpiresAt);
+        });
+
+        modelBuilder.Entity<AgentCertificateRecoveryRecord>(entity =>
         {
             entity.Property(record => record.DeviceId)
                 .HasConversion(id => id.Value, value => new DeviceId(value))

@@ -30,6 +30,7 @@ public sealed class CoreModule : FleetoryModuleBase
         services.AddScoped<IAgentCertificateBindingVerifier, AgentCertificateBindingVerifier>();
         services.AddScoped<AgentCertificateRevocationService>();
         services.AddScoped<AgentEnrollmentService>();
+        services.AddScoped<AgentCertificateRecoveryService>();
 
         services.AddDbContext<CoreDbContext>((serviceProvider, options) =>
         {
@@ -67,6 +68,14 @@ public sealed class CoreModule : FleetoryModuleBase
             endpoints.MapPost(
                 "/admin/devices/{deviceId:guid}/enrollment-grants",
                 AgentEnrollmentEndpoints.CreateGrantAsync)
+                .RequireRateLimiting(AdminSecurityPolicyNames.AdminRateLimit);
+            endpoints.MapPost(
+                "/admin/devices/{deviceId:guid}/certificate-recoveries",
+                AgentCertificateRecoveryEndpoints.RequestAsync)
+                .RequireRateLimiting(AdminSecurityPolicyNames.AdminRateLimit);
+            endpoints.MapPost(
+                "/admin/devices/{deviceId:guid}/certificate-recoveries/{recoveryId:guid}/approve",
+                AgentCertificateRecoveryEndpoints.ApproveAsync)
                 .RequireRateLimiting(AdminSecurityPolicyNames.AdminRateLimit);
         }
     }
