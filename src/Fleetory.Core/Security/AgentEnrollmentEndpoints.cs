@@ -35,7 +35,8 @@ internal static class AgentEnrollmentEndpoints
             var token = await service.CreateGrantAsync(
                 actor, new DeviceId(deviceId), request.DisplayName,
                 new CorrelationId(context.TraceIdentifier), context.RequestAborted,
-                request.ExpectedCertificateSha256, request.RotationIntentId);
+                request.ExpectedCertificateSha256, request.RotationIntentId,
+                request.InitialCertificateSha256);
             context.Response.Headers.CacheControl = "no-store";
             return Results.Json(new GrantResponse(token));
         }
@@ -124,7 +125,8 @@ internal static class AgentEnrollmentEndpoints
     }
 
     private sealed record CreateGrantRequest(string DisplayName,
-        string? ExpectedCertificateSha256 = null, Guid? RotationIntentId = null);
+        string? ExpectedCertificateSha256 = null, Guid? RotationIntentId = null,
+        string? InitialCertificateSha256 = null);
     private sealed record CreateRotationIntentRequest(string ReplacementCertificateSha256);
     private sealed record EnrollRequest(string Token);
     private sealed record GrantResponse(string Token);

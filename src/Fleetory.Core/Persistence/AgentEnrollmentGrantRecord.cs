@@ -56,8 +56,6 @@ internal sealed class AgentEnrollmentGrantRecord
         if (deviceId.Value == Guid.Empty || !AgentCertificateFingerprint.IsValid(tokenSha256) ||
             expectedCertificateSha256 is not null &&
             !AgentCertificateFingerprint.IsValid(expectedCertificateSha256) ||
-            (expectedCertificateSha256 is null) != (replacementCertificateSha256 is null) ||
-            replacementCertificateSha256 is not null &&
             !AgentCertificateFingerprint.IsValid(replacementCertificateSha256) ||
             recoveryRequestId is not null &&
             (recoveryRequestId == Guid.Empty || expectedCertificateSha256 is null))

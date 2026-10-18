@@ -125,6 +125,11 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             using var otherAdmin = adminPki.CreateClient(adminPki.UnregisteredClient);
             using var web = new HttpClient();
             var url = $"https://127.0.0.1:{adminPort}/admin/devices/{Guid.NewGuid():D}/enrollment-grants";
+            var enrollmentRequest = new
+            {
+                displayName = "denied",
+                initialCertificateSha256 = new string('A', 64)
+            };
             for (var attempt = 0; attempt < 3; attempt++)
             {
                 using var webAttempt = await web.PostAsJsonAsync(
@@ -135,14 +140,14 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
 
             for (var attempt = 0; attempt < 3; attempt++)
             {
-                using var denied = await admin.PostAsJsonAsync(url, new { displayName = "denied" });
+                using var denied = await admin.PostAsJsonAsync(url, enrollmentRequest);
                 Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
             }
 
-            using var limited = await admin.PostAsJsonAsync(url, new { displayName = "denied" });
+            using var limited = await admin.PostAsJsonAsync(url, enrollmentRequest);
             Assert.Equal(HttpStatusCode.TooManyRequests, limited.StatusCode);
             using var otherAllowed = await otherAdmin.PostAsJsonAsync(url,
-                new { displayName = "denied" });
+                enrollmentRequest);
             Assert.Equal(HttpStatusCode.Forbidden, otherAllowed.StatusCode);
         }
         finally
@@ -223,7 +228,8 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             services.GetRequiredService<IClock>());
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await unavailableAudit.CreateGrantAsync(
-                actor, deviceId, "audit test device", CorrelationId.New()));
+                actor, deviceId, "audit test device", CorrelationId.New(),
+                initialCertificateSha256: CertificateSha256(pki.Client)));
         Assert.False(await database.Devices.AnyAsync(row => row.DeviceId == deviceId));
         Assert.False(await database.AgentEnrollmentGrants.AnyAsync(row => row.DeviceId == deviceId));
 
@@ -235,14 +241,31 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             services.GetRequiredService<IClock>());
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await completionAuditFailure.CreateGrantAsync(
-                actor, deviceId, "audit test device", CorrelationId.New()));
+                actor, deviceId, "audit test device", CorrelationId.New(),
+                initialCertificateSha256: CertificateSha256(pki.Client)));
         database.ChangeTracker.Clear();
         Assert.False(await database.Devices.AnyAsync(row => row.DeviceId == deviceId));
         Assert.False(await database.AgentEnrollmentGrants.AnyAsync(row => row.DeviceId == deviceId));
 
         var service = services.GetRequiredService<AgentEnrollmentService>();
         var token = await service.CreateGrantAsync(
-            actor, deviceId, "audit test device", CorrelationId.New());
+            actor, deviceId, "audit test device", CorrelationId.New(),
+            initialCertificateSha256: CertificateSha256(pki.Client));
+        var tokenHash = Convert.ToHexString(SHA256.HashData(
+            System.Text.Encoding.ASCII.GetBytes(token)));
+        await database.AgentEnrollmentGrants
+            .Where(row => row.TokenSha256 == tokenHash)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(row => row.ReplacementCertificateSha256, (string?)null));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(async () =>
+            await service.EnrollAsync(deviceId, pki.Client, token, CorrelationId.New()));
+        Assert.True(await database.AgentEnrollmentGrants.AsNoTracking().AnyAsync(
+            row => row.TokenSha256 == tokenHash && row.ConsumedAt == null));
+        await database.AgentEnrollmentGrants
+            .Where(row => row.TokenSha256 == tokenHash)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(row => row.ReplacementCertificateSha256,
+                    CertificateSha256(pki.Client)));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(async () =>
             await service.EnrollAsync(new DeviceId(Guid.NewGuid()), pki.Client,
                 token, CorrelationId.New()));
@@ -291,9 +314,11 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
         var service = services.GetRequiredService<AgentEnrollmentService>();
         var database = services.GetRequiredService<CoreDbContext>();
         var firstToken = await service.CreateGrantAsync(
-            actor, deviceId, "collision device", CorrelationId.New());
+            actor, deviceId, "collision device", CorrelationId.New(),
+            initialCertificateSha256: CertificateSha256(pki.Client));
         var staleToken = await service.CreateGrantAsync(
-            actor, deviceId, "collision device", CorrelationId.New());
+            actor, deviceId, "collision device", CorrelationId.New(),
+            initialCertificateSha256: CertificateSha256(pki.UnregisteredClient));
 
         await service.EnrollAsync(deviceId, pki.Client, firstToken, CorrelationId.New());
         var rejectedCorrelation = CorrelationId.New();
@@ -312,7 +337,8 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
         var grantCollisionCorrelation = CorrelationId.New();
         await Assert.ThrowsAsync<AgentEnrollmentConflictException>(async () =>
             await service.CreateGrantAsync(actor, deviceId, "collision device",
-                grantCollisionCorrelation));
+                grantCollisionCorrelation,
+                initialCertificateSha256: CertificateSha256(pki.Client)));
         await Assert.ThrowsAsync<AgentEnrollmentConflictException>(async () =>
             await service.CreateGrantAsync(actor, deviceId, "collision device", CorrelationId.New(),
                 expectedCertificateSha256: new string('A', 64)));
@@ -424,7 +450,8 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
         var enrollment = services.GetRequiredService<AgentEnrollmentService>();
         var recovery = services.GetRequiredService<AgentCertificateRecoveryService>();
         var initialToken = await enrollment.CreateGrantAsync(
-            requester, deviceId, "recovery device", CorrelationId.New());
+            requester, deviceId, "recovery device", CorrelationId.New(),
+            initialCertificateSha256: oldFingerprint);
         await enrollment.EnrollAsync(deviceId, pki.Client, initialToken, CorrelationId.New());
 
         var deniedCorrelation = CorrelationId.New();
@@ -545,9 +572,11 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
         {
             var service = scope.ServiceProvider.GetRequiredService<AgentEnrollmentService>();
             firstToken = await service.CreateGrantAsync(actor, deviceId,
-                "parallel identity", CorrelationId.New());
+                "parallel identity", CorrelationId.New(),
+                initialCertificateSha256: CertificateSha256(pki.Client));
             secondToken = await service.CreateGrantAsync(actor, deviceId,
-                "parallel identity", CorrelationId.New());
+                "parallel identity", CorrelationId.New(),
+                initialCertificateSha256: CertificateSha256(pki.UnregisteredClient));
         }
 
         async Task<bool> TryEnrollAsync(X509Certificate2 certificate, string grantToken)
@@ -588,7 +617,8 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
         {
             token = await scope.ServiceProvider.GetRequiredService<AgentEnrollmentService>()
                 .CreateGrantAsync(new ActorReference($"person:{adminId:N}", ActorKind.Person),
-                    deviceId, "concurrent device", CorrelationId.New());
+                    deviceId, "concurrent device", CorrelationId.New(),
+                    initialCertificateSha256: CertificateSha256(pki.Client));
         }
 
         async Task<bool> TryEnrollAsync(X509Certificate2 certificate)
@@ -659,13 +689,18 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             using var web = new HttpClient();
             var agentBase = $"https://127.0.0.1:{ports[1]}";
             var grantUrl = $"https://127.0.0.1:{ports[2]}/admin/devices/{deviceId.Value:D}/enrollment-grants";
+            var initialFingerprint = CertificateSha256(agentPki.Client);
 
             using var before = await agent.GetAsync($"{agentBase}/agent/identity");
             Assert.Equal(HttpStatusCode.Forbidden, before.StatusCode);
             using var noGrant = await agent.PostAsJsonAsync(
                 $"{agentBase}/agent/enroll", new { token = new string('A', 64) });
             Assert.Equal(HttpStatusCode.Forbidden, noGrant.StatusCode);
-            using var denied = await admin.PostAsJsonAsync(grantUrl, new { displayName = "enrolled device" });
+            using var denied = await admin.PostAsJsonAsync(grantUrl, new
+            {
+                displayName = "enrolled device",
+                initialCertificateSha256 = initialFingerprint
+            });
             Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
 
             await GrantAdminPermissionAsync(adminId, AgentEnrollmentService.Permission);
@@ -675,7 +710,14 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             using var oversized = await admin.PostAsJsonAsync(grantUrl,
                 new { displayName = new string('x', 2048) });
             Assert.Equal(HttpStatusCode.BadRequest, oversized.StatusCode);
-            using var grant = await admin.PostAsJsonAsync(grantUrl, new { displayName = "enrolled device" });
+            using var missingFingerprint = await admin.PostAsJsonAsync(grantUrl,
+                new { displayName = "enrolled device" });
+            Assert.Equal(HttpStatusCode.BadRequest, missingFingerprint.StatusCode);
+            using var grant = await admin.PostAsJsonAsync(grantUrl, new
+            {
+                displayName = "enrolled device",
+                initialCertificateSha256 = initialFingerprint
+            });
             Assert.Equal(HttpStatusCode.OK, grant.StatusCode);
             Assert.Equal("no-store", grant.Headers.CacheControl?.ToString());
             var response = await grant.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
@@ -690,6 +732,10 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             using var malformed = await malformedIdentity.PostAsJsonAsync(
                 $"{agentBase}/agent/enroll", new { token });
             Assert.Equal(HttpStatusCode.Forbidden, malformed.StatusCode);
+            using var wrongInitialCertificate = agentPki.CreateClient(agentPki.UnregisteredClient);
+            using var wrongInitial = await wrongInitialCertificate.PostAsJsonAsync(
+                $"{agentBase}/agent/enroll", new { token });
+            Assert.Equal(HttpStatusCode.Forbidden, wrongInitial.StatusCode);
             using var enrolled = await agent.PostAsJsonAsync($"{agentBase}/agent/enroll", new { token });
             Assert.Equal(HttpStatusCode.NoContent, enrolled.StatusCode);
             using var identity = await agent.GetAsync($"{agentBase}/agent/identity");
@@ -703,8 +749,11 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             Assert.Equal(HttpStatusCode.NoContent, identityAfterLimit.StatusCode);
 
             var currentFingerprint = Convert.ToHexString(SHA256.HashData(agentPki.Client.RawData));
-            using var collision = await admin.PostAsJsonAsync(
-                grantUrl, new { displayName = "ignored for existing device" });
+            using var collision = await admin.PostAsJsonAsync(grantUrl, new
+            {
+                displayName = "ignored for existing device",
+                initialCertificateSha256 = initialFingerprint
+            });
             Assert.Equal(HttpStatusCode.Conflict, collision.StatusCode);
             using var wrongBinding = await admin.PostAsJsonAsync(
                 grantUrl, new
@@ -1211,6 +1260,9 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             await app.StopAsync();
         }
     }
+
+    private static string CertificateSha256(X509Certificate2 certificate) =>
+        Convert.ToHexString(SHA256.HashData(certificate.RawData));
 
     private static int GetFreePort()
     {

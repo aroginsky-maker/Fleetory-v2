@@ -86,13 +86,17 @@ public sealed class AgentEnrollmentService(
         CorrelationId correlationId,
         CancellationToken cancellationToken = default,
         string? expectedCertificateSha256 = null,
-        Guid? rotationIntentId = null)
+        Guid? rotationIntentId = null,
+        string? initialCertificateSha256 = null)
     {
         if (deviceId.Value == Guid.Empty || string.IsNullOrWhiteSpace(displayName) ||
             displayName.Length > 256 ||
             expectedCertificateSha256 is not null &&
             !AgentCertificateFingerprint.IsValid(expectedCertificateSha256) ||
-            expectedCertificateSha256 is null && rotationIntentId is not null)
+            expectedCertificateSha256 is null &&
+            (rotationIntentId is not null ||
+                !AgentCertificateFingerprint.IsValid(initialCertificateSha256)) ||
+            expectedCertificateSha256 is not null && initialCertificateSha256 is not null)
         {
             throw new ArgumentException("Agent enrollment target is invalid.");
         }
@@ -139,7 +143,7 @@ public sealed class AgentEnrollmentService(
                         "Agent certificate rotation is not authorized.");
                 }
 
-                string? replacementCertificateSha256 = null;
+                var replacementCertificateSha256 = initialCertificateSha256;
                 if (expectedCertificateSha256 is not null)
                 {
                     var intent = rotationIntentId is null ? null :
@@ -258,8 +262,7 @@ public sealed class AgentEnrollmentService(
                 throw new UnauthorizedAccessException("Agent enrollment is denied.");
             }
 
-            if (grant.ReplacementCertificateSha256 is not null &&
-                grant.ReplacementCertificateSha256 != CertificateFingerprint(certificate))
+            if (grant.ReplacementCertificateSha256 != CertificateFingerprint(certificate))
             {
                 await WriteAuditInTransactionAsync(actor,
                     "core.agent_enrollment.denied_replacement_mismatch", deviceId,
