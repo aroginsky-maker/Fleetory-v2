@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Net;
 using System.Net.Http.Json;
 using System.Net.Security;
@@ -211,6 +212,19 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
         Assert.False(await database.Devices.AnyAsync(row => row.DeviceId == deviceId));
         Assert.False(await database.AgentEnrollmentGrants.AnyAsync(row => row.DeviceId == deviceId));
 
+        var completionAuditFailure = new AgentEnrollmentService(
+            services.GetRequiredService<IAuthorizationService>(),
+            new FailingTransactionalAuditWriter(services.GetRequiredService<IAuditWriter>()),
+            services.GetRequiredService<IAgentCertificateBindingVerifier>(),
+            database,
+            services.GetRequiredService<IClock>());
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await completionAuditFailure.CreateGrantAsync(
+                actor, deviceId, "audit test device", CorrelationId.New()));
+        database.ChangeTracker.Clear();
+        Assert.False(await database.Devices.AnyAsync(row => row.DeviceId == deviceId));
+        Assert.False(await database.AgentEnrollmentGrants.AnyAsync(row => row.DeviceId == deviceId));
+
         var service = services.GetRequiredService<AgentEnrollmentService>();
         var token = await service.CreateGrantAsync(
             actor, deviceId, "audit test device", CorrelationId.New());
@@ -220,6 +234,14 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
             await unavailableAudit.EnrollAsync(deviceId, pki.Client,
                 token, CorrelationId.New()));
+        Assert.False(await database.AgentCertificates.AnyAsync(row => row.DeviceId == deviceId));
+        Assert.True(await database.AgentEnrollmentGrants.AnyAsync(
+            row => row.DeviceId == deviceId && row.ConsumedAt == null));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await completionAuditFailure.EnrollAsync(deviceId, pki.Client,
+                token, CorrelationId.New()));
+        database.ChangeTracker.Clear();
         Assert.False(await database.AgentCertificates.AnyAsync(row => row.DeviceId == deviceId));
         Assert.True(await database.AgentEnrollmentGrants.AnyAsync(
             row => row.DeviceId == deviceId && row.ConsumedAt == null));
@@ -817,6 +839,20 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
     {
         public ValueTask WriteAsync(AuditRecord record, CancellationToken cancellationToken = default) =>
             ValueTask.FromException(new InvalidOperationException("Audit unavailable."));
+
+        public ValueTask WriteInTransactionAsync(AuditRecord record, DbTransaction transaction,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromException(new InvalidOperationException("Audit unavailable."));
+    }
+
+    private sealed class FailingTransactionalAuditWriter(IAuditWriter inner) : IAuditWriter
+    {
+        public ValueTask WriteAsync(AuditRecord record, CancellationToken cancellationToken = default) =>
+            inner.WriteAsync(record, cancellationToken);
+
+        public ValueTask WriteInTransactionAsync(AuditRecord record, DbTransaction transaction,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.FromException(new InvalidOperationException("Completion audit unavailable."));
     }
 
     private sealed class TestPki : IDisposable

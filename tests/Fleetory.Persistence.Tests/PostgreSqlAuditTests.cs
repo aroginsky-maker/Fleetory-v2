@@ -11,6 +11,38 @@ namespace Fleetory.Persistence.Tests;
 public sealed class PostgreSqlAuditTests(PostgreSqlTestFixture fixture)
 {
     [Fact]
+    public async Task Caller_rollback_removes_audit_event_and_export_queue_entry()
+    {
+        var correlationId = CorrelationId.New();
+        var record = new AuditRecord(
+            new ActorReference("system:transaction-test", ActorKind.System),
+            "Platform.Audit.TransactionTest",
+            null,
+            correlationId,
+            DateTimeOffset.UtcNow);
+
+        await using (var scope = fixture.Services.CreateAsyncScope())
+        await using (var connection = new NpgsqlConnection(fixture.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var transaction = await connection.BeginTransactionAsync();
+            await scope.ServiceProvider.GetRequiredService<IAuditWriter>()
+                .WriteInTransactionAsync(record, transaction);
+            await transaction.RollbackAsync();
+        }
+
+        await using var verification = new NpgsqlConnection(fixture.ConnectionString);
+        await verification.OpenAsync();
+        await using var command = new NpgsqlCommand("""
+            SELECT count(*) FROM platform.audit_events AS event
+            JOIN platform.audit_export_queue AS queue ON queue.audit_event_id = event.event_id
+            WHERE event.correlation_id = @correlation_id
+            """, verification);
+        command.Parameters.AddWithValue("correlation_id", correlationId.Value);
+        Assert.Equal(0L, await command.ExecuteScalarAsync());
+    }
+
+    [Fact]
     public async Task Audit_event_and_export_queue_entry_are_persisted_together()
     {
         var correlationId = CorrelationId.New();

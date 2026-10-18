@@ -3,6 +3,7 @@ using Fleetory.Core.Persistence;
 using Fleetory.Platform.Contracts;
 using Fleetory.SharedKernel;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Fleetory.Core.Security;
 
@@ -50,6 +51,7 @@ public sealed class AgentCertificateRevocationService(
             throw new UnauthorizedAccessException("Agent certificate revocation is not authorized.");
         }
 
+        await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
         var changed = await database.AgentCertificates
             .Where(row => row.CertificateSha256 == certificateSha256 &&
                 row.DeviceId == deviceId && row.RevokedAt == null)
@@ -57,7 +59,7 @@ public sealed class AgentCertificateRevocationService(
                 .SetProperty(row => row.RevokedAt, clock.UtcNow.ToUniversalTime()),
                 cancellationToken);
 
-        await audit.WriteAsync(new AuditRecord(
+        await audit.WriteInTransactionAsync(new AuditRecord(
             actor,
             CompletedAction,
             new AuditTarget("agent_certificate", certificateSha256),
@@ -67,7 +69,9 @@ public sealed class AgentCertificateRevocationService(
             {
                 ["device_id"] = deviceId.Value.ToString("D"),
                 ["outcome"] = changed == 1 ? "revoked" : "unchanged"
-            }), cancellationToken);
+            }), transaction.GetDbTransaction(), cancellationToken);
+
+        await transaction.CommitAsync(cancellationToken);
 
         return changed == 1;
     }

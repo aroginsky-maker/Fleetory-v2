@@ -5,6 +5,7 @@ using Fleetory.Core.Persistence;
 using Fleetory.Platform.Contracts;
 using Fleetory.SharedKernel;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Fleetory.Core.Security;
 
@@ -59,11 +60,11 @@ public sealed class AgentEnrollmentService(
             database.AgentEnrollmentGrants.Add(AgentEnrollmentGrantRecord.Create(
                 tokenHash, deviceId, now.Add(GrantLifetime)));
             await database.SaveChangesAsync(cancellationToken);
+            await WriteAuditInTransactionAsync(actor, "core.agent_enrollment.grant_created",
+                deviceId, correlationId, clock.UtcNow, transaction, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         }
 
-        await WriteAuditAsync(actor, "core.agent_enrollment.grant_created",
-            deviceId, correlationId, clock.UtcNow, cancellationToken);
         return token;
     }
 
@@ -123,24 +124,43 @@ public sealed class AgentEnrollmentService(
                 await database.SaveChangesAsync(cancellationToken);
             }
 
+            await WriteAuditInTransactionAsync(actor, "core.agent_enrollment.completed",
+                deviceId, correlationId, clock.UtcNow, transaction, cancellationToken);
             await transaction.CommitAsync(cancellationToken);
         }
-
-        await WriteAuditAsync(actor, "core.agent_enrollment.completed",
-            deviceId, correlationId, clock.UtcNow, cancellationToken);
     }
 
-    private async ValueTask WriteAuditAsync(
+    private ValueTask WriteAuditAsync(
         ActorReference actor,
         string action,
         DeviceId deviceId,
         CorrelationId correlationId,
         DateTimeOffset occurredAt,
         CancellationToken cancellationToken) =>
-        await audit.WriteAsync(new AuditRecord(
+        audit.WriteAsync(CreateAuditRecord(actor, action, deviceId, correlationId, occurredAt),
+            cancellationToken);
+
+    private ValueTask WriteAuditInTransactionAsync(
+        ActorReference actor,
+        string action,
+        DeviceId deviceId,
+        CorrelationId correlationId,
+        DateTimeOffset occurredAt,
+        IDbContextTransaction transaction,
+        CancellationToken cancellationToken) =>
+        audit.WriteInTransactionAsync(CreateAuditRecord(actor, action, deviceId, correlationId, occurredAt),
+            transaction.GetDbTransaction(), cancellationToken);
+
+    private static AuditRecord CreateAuditRecord(
+        ActorReference actor,
+        string action,
+        DeviceId deviceId,
+        CorrelationId correlationId,
+        DateTimeOffset occurredAt) =>
+        new(
             actor, action,
             new AuditTarget("device", deviceId.Value.ToString("D")),
-            correlationId, occurredAt), cancellationToken);
+            correlationId, occurredAt);
 
     private static string HashToken(string token) =>
         Convert.ToHexString(SHA256.HashData(System.Text.Encoding.ASCII.GetBytes(token)));

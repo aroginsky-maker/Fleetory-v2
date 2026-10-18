@@ -1,3 +1,4 @@
+using System.Data.Common;
 using System.Text;
 using System.Text.Json;
 using Fleetory.Platform.Contracts;
@@ -28,6 +29,20 @@ internal sealed class PostgreSqlAuditWriter(
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         await AppendAsync(record, contextJson, connection, transaction, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
+    }
+
+    public ValueTask WriteInTransactionAsync(
+        AuditRecord record,
+        DbTransaction transaction,
+        CancellationToken cancellationToken = default)
+    {
+        if (transaction is not NpgsqlTransaction postgresTransaction ||
+            transaction.Connection is not NpgsqlConnection connection)
+        {
+            throw new ArgumentException("An active PostgreSQL transaction is required.", nameof(transaction));
+        }
+
+        return WriteInTransactionAsync(record, connection, postgresTransaction, cancellationToken);
     }
 
     internal ValueTask WriteInTransactionAsync(

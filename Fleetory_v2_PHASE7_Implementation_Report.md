@@ -19,14 +19,15 @@
 - Windows CI provisions an ephemeral root and intermediate in the runner certificate stores, then confirms the actual Admin listener sends two certificates and passes root-only OpenSSL verification. Windows hosts require equivalent approved CA-store provisioning.
 - Lab certificate provisioning restricts the local key directory before copying new keys, validates each leaf certificate/key pair, archives the previous pair for rotation recovery and removes temporary leaf keys from CA containers. An isolated crypto-backed test verifies successful rotation and failed-copy rollback without touching the live lab.
 - Negative security checks exercise malformed Admin RBAC requests through the real mTLS listener, fail-closed Gateway startup for a wrong key, foreign CA and malformed chain, and rejection of mixed or incomplete OpenBao configuration and unsafe Admin rate-limit values.
+- Agent grant creation, certificate binding and certificate revocation now commit their Core state, completion audit event and export-queue entry in one PostgreSQL transaction. A completion-audit failure rolls back the Core change; integration tests cover failure and retry. The Platform audit writer accepts the caller's transaction while retaining ownership of its tables. The architecture guide includes a read-only recovery procedure for a lost commit acknowledgement.
 
 ## Verification snapshot
 
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local tests after negative security checks | 154/154 passed |
-| Local production coverage | 91.97% |
+| Local tests after transactional audit changes | 155/155 passed |
+| Local production coverage | 91.96% |
 | CI production coverage at `f275163` | 92.20% |
 | Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
 | Local full audit pipeline | PostgreSQL outbox → Fleetory worker → immudb readback passed |
@@ -40,13 +41,13 @@
 | Sonar duplication at `f275163` | 0.0% |
 | Sonar Quality Gate at `f275163` | PASS |
 
-The latest completed CI and Sonar numbers come from [run 39120096617](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39120096617). A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The PowerShell provisioning test runs in CI and remains under Sonar static analysis; it is excluded from the .NET coverage denominator because `dotnet-coverage` cannot instrument PowerShell. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
+The latest completed CI and Sonar numbers come from [run 39120096617](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39120096617); the transactional audit changes have only local verification until the next push. A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The PowerShell provisioning test runs in CI and remains under Sonar static analysis; it is excluded from the .NET coverage denominator because `dotnet-coverage` cannot instrument PowerShell. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
 
 ## Required before completion
 
 - Production Windows PKI provisioning and renewal must install the approved root and intermediate in the host certificate stores. The automated root-only wire test passes on an ephemeral runner; the earlier local machine without those store entries still needs its own provisioning before that probe can pass.
 - Validate the controlled Admin recovery runbook with production incident approval and credential custody; define role/scope replacement and versioning beyond safe retirement.
-- CA issuance and renewal policy, secure grant delivery, Admin certificate lifecycle, identity collision and audit reconciliation procedures.
+- CA issuance and renewal policy, secure grant delivery, Admin certificate lifecycle and identity collision policy.
 - Protected command signing and trust-file distribution, approval protocol for high-risk and bulk commands, and Agent runtime enforcement before execution is enabled.
 - Production immudb TLS and dedicated credentials, retention/backups and independently anchored verification; complete coverage of critical security call sites.
 - Negative and recovery security tests, then final strict build, full test suite and current Sonar Quality Gate.
