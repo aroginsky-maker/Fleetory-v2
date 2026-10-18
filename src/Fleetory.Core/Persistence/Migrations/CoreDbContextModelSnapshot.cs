@@ -68,6 +68,11 @@ namespace Fleetory.Core.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("device_id");
 
+                    b.Property<string>("ExpectedCertificateSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("expected_certificate_sha256");
+
                     b.Property<DateTimeOffset>("ExpiresAt")
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("expires_at");

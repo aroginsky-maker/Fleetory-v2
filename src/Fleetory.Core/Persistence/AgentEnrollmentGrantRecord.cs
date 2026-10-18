@@ -11,11 +11,13 @@ internal sealed class AgentEnrollmentGrantRecord
     {
     }
 
-    private AgentEnrollmentGrantRecord(string tokenSha256, DeviceId deviceId, DateTimeOffset expiresAt)
+    private AgentEnrollmentGrantRecord(string tokenSha256, DeviceId deviceId,
+        DateTimeOffset expiresAt, string? expectedCertificateSha256)
     {
         TokenSha256 = tokenSha256;
         DeviceId = deviceId;
         ExpiresAt = expiresAt.ToUniversalTime();
+        ExpectedCertificateSha256 = expectedCertificateSha256;
     }
 
     [Key]
@@ -32,15 +34,22 @@ internal sealed class AgentEnrollmentGrantRecord
     [Column("consumed_at", TypeName = "timestamp with time zone")]
     public DateTimeOffset? ConsumedAt { get; private set; }
 
+    [MaxLength(64)]
+    [Column("expected_certificate_sha256")]
+    public string? ExpectedCertificateSha256 { get; private set; }
+
     public static AgentEnrollmentGrantRecord Create(
-        string tokenSha256, DeviceId deviceId, DateTimeOffset expiresAt)
+        string tokenSha256, DeviceId deviceId, DateTimeOffset expiresAt,
+        string? expectedCertificateSha256)
     {
-        if (deviceId.Value == Guid.Empty || tokenSha256.Length != 64 ||
-            tokenSha256.Any(character => character is not (>= '0' and <= '9' or >= 'A' and <= 'F')))
+        if (deviceId.Value == Guid.Empty || !AgentCertificateFingerprint.IsValid(tokenSha256) ||
+            expectedCertificateSha256 is not null &&
+            !AgentCertificateFingerprint.IsValid(expectedCertificateSha256))
         {
             throw new ArgumentException("Agent enrollment grant is invalid.");
         }
 
-        return new AgentEnrollmentGrantRecord(tokenSha256, deviceId, expiresAt);
+        return new AgentEnrollmentGrantRecord(tokenSha256, deviceId, expiresAt,
+            expectedCertificateSha256);
     }
 }

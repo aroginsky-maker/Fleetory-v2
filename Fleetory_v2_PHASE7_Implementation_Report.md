@@ -20,14 +20,15 @@
 - Lab certificate provisioning restricts the local key directory before copying new keys, validates each leaf certificate/key pair, archives the previous pair for rotation recovery and removes temporary leaf keys from CA containers. An isolated crypto-backed test verifies successful rotation and failed-copy rollback without touching the live lab.
 - Negative security checks exercise malformed Admin RBAC requests through the real mTLS listener, fail-closed Gateway startup for a wrong key, foreign CA and malformed chain, and rejection of mixed or incomplete OpenBao configuration and unsafe Admin rate-limit values.
 - Agent grant creation, certificate binding and certificate revocation now commit their Core state, completion audit event and export-queue entry in one PostgreSQL transaction. A completion-audit failure rolls back the Core change; integration tests cover failure and retry. The Platform audit writer accepts the caller's transaction while retaining ownership of its tables. The architecture guide includes a read-only recovery procedure for a lost commit acknowledgement.
+- Agent identity collision checks now require the Admin to name a previously bound certificate fingerprint when issuing a replacement grant. The expectation is stored with the token digest and checked again under a per-device PostgreSQL row lock at redemption. Missing or foreign fingerprints return 409; a stale initial grant cannot bind a second certificate after another grant succeeds. Collision denials are audited, and integration tests cover both a stale grant and concurrent first enrollments. The physical-device verification and approval process remains an operational requirement.
 
 ## Verification snapshot
 
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local tests after transactional audit changes | 155/155 passed |
-| Local production coverage | 91.96% |
+| Local tests after identity collision checks | 157/157 passed |
+| Local production coverage | 92.47% |
 | CI production coverage at `863c951` | 92.20% |
 | Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
 | Local full audit pipeline | PostgreSQL outbox → Fleetory worker → immudb readback passed |
@@ -48,7 +49,7 @@ The latest completed CI and Sonar numbers come from [run 39121576832](https://gi
 
 - Production Windows PKI provisioning and renewal must install the approved root and intermediate in the host certificate stores. The automated root-only wire test passes on an ephemeral runner; the earlier local machine without those store entries still needs its own provisioning before that probe can pass.
 - Validate the controlled Admin recovery runbook with production incident approval and credential custody; define role/scope replacement and versioning beyond safe retirement.
-- CA issuance and renewal policy, secure grant delivery, Admin certificate lifecycle and identity collision policy.
+- CA issuance and renewal policy, secure grant delivery, Admin certificate lifecycle and verified physical-device approval for certificate replacement.
 - Protected command signing and trust-file distribution, approval protocol for high-risk and bulk commands, and Agent runtime enforcement before execution is enabled.
 - Production immudb TLS and dedicated credentials, retention/backups and independently anchored verification; complete coverage of critical security call sites.
 - Negative and recovery security tests, then final strict build, full test suite and current Sonar Quality Gate.

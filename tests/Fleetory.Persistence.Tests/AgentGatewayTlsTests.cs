@@ -251,6 +251,103 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
     }
 
     [Fact]
+    public async Task Stale_initial_grant_cannot_bind_a_second_certificate_without_explicit_rotation()
+    {
+        var deviceId = new DeviceId(Guid.NewGuid());
+        var adminId = Guid.NewGuid();
+        var actor = new ActorReference($"person:{adminId:N}", ActorKind.Person);
+        using var pki = new TestPki(deviceId);
+        await GrantAdminPermissionAsync(adminId, AgentEnrollmentService.Permission);
+
+        await using var scope = fixture.Services.CreateAsyncScope();
+        var services = scope.ServiceProvider;
+        var service = services.GetRequiredService<AgentEnrollmentService>();
+        var database = services.GetRequiredService<CoreDbContext>();
+        var firstToken = await service.CreateGrantAsync(
+            actor, deviceId, "collision device", CorrelationId.New());
+        var staleToken = await service.CreateGrantAsync(
+            actor, deviceId, "collision device", CorrelationId.New());
+
+        await service.EnrollAsync(deviceId, pki.Client, firstToken, CorrelationId.New());
+        var rejectedCorrelation = CorrelationId.New();
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(async () =>
+            await service.EnrollAsync(deviceId, pki.UnregisteredClient,
+                staleToken, rejectedCorrelation));
+        Assert.Equal(1, await database.AgentCertificates.CountAsync(row => row.DeviceId == deviceId));
+        var staleHash = Convert.ToHexString(SHA256.HashData(
+            System.Text.Encoding.ASCII.GetBytes(staleToken)));
+        Assert.True(await database.AgentEnrollmentGrants.AsNoTracking().AnyAsync(
+            row => row.TokenSha256 == staleHash && row.ConsumedAt == null));
+
+        Assert.Equal(1, await CountAuditActionAsync(
+            rejectedCorrelation, "core.agent_enrollment.denied_collision"));
+
+        var grantCollisionCorrelation = CorrelationId.New();
+        await Assert.ThrowsAsync<AgentEnrollmentConflictException>(async () =>
+            await service.CreateGrantAsync(actor, deviceId, "collision device",
+                grantCollisionCorrelation));
+        await Assert.ThrowsAsync<AgentEnrollmentConflictException>(async () =>
+            await service.CreateGrantAsync(actor, deviceId, "collision device", CorrelationId.New(),
+                expectedCertificateSha256: new string('A', 64)));
+
+        Assert.Equal(1, await CountAuditActionAsync(
+            grantCollisionCorrelation, "core.agent_enrollment.grant_collision"));
+
+        var fingerprint = Convert.ToHexString(SHA256.HashData(pki.Client.RawData));
+        var rotationToken = await service.CreateGrantAsync(
+            actor, deviceId, "collision device", CorrelationId.New(),
+            expectedCertificateSha256: fingerprint);
+        await service.EnrollAsync(deviceId, pki.UnregisteredClient,
+            rotationToken, CorrelationId.New());
+        Assert.Equal(2, await database.AgentCertificates.CountAsync(row => row.DeviceId == deviceId));
+    }
+
+    [Fact]
+    public async Task Concurrent_initial_grants_cannot_bind_two_certificates_to_one_device()
+    {
+        var deviceId = new DeviceId(Guid.NewGuid());
+        var adminId = Guid.NewGuid();
+        using var pki = new TestPki(deviceId);
+        await GrantAdminPermissionAsync(adminId, AgentEnrollmentService.Permission);
+        var actor = new ActorReference($"person:{adminId:N}", ActorKind.Person);
+        string firstToken;
+        string secondToken;
+        await using (var scope = fixture.Services.CreateAsyncScope())
+        {
+            var service = scope.ServiceProvider.GetRequiredService<AgentEnrollmentService>();
+            firstToken = await service.CreateGrantAsync(actor, deviceId,
+                "parallel identity", CorrelationId.New());
+            secondToken = await service.CreateGrantAsync(actor, deviceId,
+                "parallel identity", CorrelationId.New());
+        }
+
+        async Task<bool> TryEnrollAsync(X509Certificate2 certificate, string grantToken)
+        {
+            await using var scope = fixture.Services.CreateAsyncScope();
+            try
+            {
+                await scope.ServiceProvider.GetRequiredService<AgentEnrollmentService>()
+                    .EnrollAsync(deviceId, certificate, grantToken, CorrelationId.New());
+                return true;
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return false;
+            }
+        }
+
+        var results = await Task.WhenAll(
+            TryEnrollAsync(pki.Client, firstToken),
+            TryEnrollAsync(pki.UnregisteredClient, secondToken));
+        Assert.Equal(1, results.Count(success => success));
+        await using var verificationScope = fixture.Services.CreateAsyncScope();
+        var database = verificationScope.ServiceProvider.GetRequiredService<CoreDbContext>();
+        Assert.Equal(1, await database.AgentCertificates.CountAsync(row => row.DeviceId == deviceId));
+        Assert.Equal(1, await database.AgentEnrollmentGrants.CountAsync(
+            row => row.DeviceId == deviceId && row.ConsumedAt != null));
+    }
+
+    [Fact]
     public async Task Concurrent_redemption_of_one_grant_binds_only_one_certificate()
     {
         var deviceId = new DeviceId(Guid.NewGuid());
@@ -365,9 +462,26 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             using var replay = await agent.PostAsJsonAsync($"{agentBase}/agent/enroll", new { token });
             Assert.Equal(HttpStatusCode.Forbidden, replay.StatusCode);
 
-            using var candidate = agentPki.CreateClient(agentPki.UnregisteredClient);
-            using var expiringGrant = await admin.PostAsJsonAsync(
+            var currentFingerprint = Convert.ToHexString(SHA256.HashData(agentPki.Client.RawData));
+            using var collision = await admin.PostAsJsonAsync(
                 grantUrl, new { displayName = "ignored for existing device" });
+            Assert.Equal(HttpStatusCode.Conflict, collision.StatusCode);
+            using var wrongBinding = await admin.PostAsJsonAsync(
+                grantUrl, new
+                {
+                    displayName = "ignored for existing device",
+                    expectedCertificateSha256 = new string('A', 64)
+                });
+            Assert.Equal(HttpStatusCode.Conflict, wrongBinding.StatusCode);
+
+            using var candidate = agentPki.CreateClient(agentPki.UnregisteredClient);
+            var rotationRequest = new
+            {
+                displayName = "ignored for existing device",
+                expectedCertificateSha256 = currentFingerprint
+            };
+            using var expiringGrant = await admin.PostAsJsonAsync(
+                grantUrl, rotationRequest);
             Assert.Equal(HttpStatusCode.OK, expiringGrant.StatusCode);
             var expiringResponse = await expiringGrant.Content
                 .ReadFromJsonAsync<System.Text.Json.JsonElement>();
@@ -388,7 +502,7 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
                 $"{agentBase}/agent/enroll", new { token = expiringToken });
             Assert.Equal(HttpStatusCode.Forbidden, expired.StatusCode);
             using var rotationGrant = await admin.PostAsJsonAsync(
-                grantUrl, new { displayName = "ignored for existing device" });
+                grantUrl, rotationRequest);
             Assert.Equal(HttpStatusCode.OK, rotationGrant.StatusCode);
             var rotationResponse = await rotationGrant.Content
                 .ReadFromJsonAsync<System.Text.Json.JsonElement>();
@@ -804,6 +918,19 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
                              'core.agent_certificate.revoke_completed')
             """, connection);
         command.Parameters.AddWithValue("correlation_id", correlation);
+        return Convert.ToInt32(await command.ExecuteScalarAsync());
+    }
+
+    private async Task<int> CountAuditActionAsync(CorrelationId correlation, string action)
+    {
+        await using var connection = new NpgsqlConnection(fixture.ConnectionString);
+        await connection.OpenAsync();
+        await using var command = new NpgsqlCommand("""
+            SELECT count(*) FROM platform.audit_events
+            WHERE correlation_id = @correlation_id AND action = @action
+            """, connection);
+        command.Parameters.AddWithValue("correlation_id", correlation.Value);
+        command.Parameters.AddWithValue("action", action);
         return Convert.ToInt32(await command.ExecuteScalarAsync());
     }
 

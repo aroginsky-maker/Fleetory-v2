@@ -24,10 +24,13 @@ public sealed class AgentEnrollmentService(
         DeviceId deviceId,
         string displayName,
         CorrelationId correlationId,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? expectedCertificateSha256 = null)
     {
         if (deviceId.Value == Guid.Empty || string.IsNullOrWhiteSpace(displayName) ||
-            displayName.Length > 256)
+            displayName.Length > 256 ||
+            expectedCertificateSha256 is not null &&
+            !AgentCertificateFingerprint.IsValid(expectedCertificateSha256))
         {
             throw new ArgumentException("Agent enrollment target is invalid.");
         }
@@ -46,23 +49,39 @@ public sealed class AgentEnrollmentService(
 
         var token = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         var tokenHash = HashToken(token);
-        await using (var transaction = await database.Database.BeginTransactionAsync(cancellationToken))
+        try
         {
-            await database.AgentEnrollmentGrants
-                .Where(row => row.ExpiresAt <= now)
-                .ExecuteDeleteAsync(cancellationToken);
-            await database.Database.ExecuteSqlInterpolatedAsync(
-                $"""
-                    INSERT INTO core.devices (device_id, display_name, updated_at, revision)
-                    VALUES ({deviceId.Value}, {displayName}, {now}, 1)
-                    ON CONFLICT (device_id) DO NOTHING
-                    """, cancellationToken);
-            database.AgentEnrollmentGrants.Add(AgentEnrollmentGrantRecord.Create(
-                tokenHash, deviceId, now.Add(GrantLifetime)));
-            await database.SaveChangesAsync(cancellationToken);
-            await WriteAuditInTransactionAsync(actor, "core.agent_enrollment.grant_created",
-                deviceId, correlationId, clock.UtcNow, transaction, cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
+            await using (var transaction = await database.Database.BeginTransactionAsync(cancellationToken))
+            {
+                await database.AgentEnrollmentGrants
+                    .Where(row => row.ExpiresAt <= now)
+                    .ExecuteDeleteAsync(cancellationToken);
+                await database.Database.ExecuteSqlInterpolatedAsync(
+                    $"""
+                        INSERT INTO core.devices (device_id, display_name, updated_at, revision)
+                        VALUES ({deviceId.Value}, {displayName}, {now}, 1)
+                        ON CONFLICT (device_id) DO NOTHING
+                        """, cancellationToken);
+                await LockDeviceAsync(deviceId, cancellationToken);
+                if (!await MatchesExpectedBindingAsync(
+                        deviceId, expectedCertificateSha256, cancellationToken))
+                {
+                    throw new AgentEnrollmentConflictException();
+                }
+
+                database.AgentEnrollmentGrants.Add(AgentEnrollmentGrantRecord.Create(
+                    tokenHash, deviceId, now.Add(GrantLifetime), expectedCertificateSha256));
+                await database.SaveChangesAsync(cancellationToken);
+                await WriteAuditInTransactionAsync(actor, "core.agent_enrollment.grant_created",
+                    deviceId, correlationId, clock.UtcNow, transaction, cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+            }
+        }
+        catch (AgentEnrollmentConflictException)
+        {
+            await WriteAuditAsync(actor, "core.agent_enrollment.grant_collision",
+                deviceId, correlationId, clock.UtcNow, cancellationToken);
+            throw;
         }
 
         return token;
@@ -104,6 +123,24 @@ public sealed class AgentEnrollmentService(
             deviceId, correlationId, now, cancellationToken);
         await using (var transaction = await database.Database.BeginTransactionAsync(cancellationToken))
         {
+            await LockDeviceAsync(deviceId, cancellationToken);
+            var grant = await database.AgentEnrollmentGrants.AsNoTracking().SingleOrDefaultAsync(
+                row => row.TokenSha256 == tokenHash && row.DeviceId == deviceId &&
+                    row.ConsumedAt == null && row.ExpiresAt > now, cancellationToken);
+            if (grant is null)
+            {
+                throw new UnauthorizedAccessException("Agent enrollment is denied.");
+            }
+
+            if (!await MatchesExpectedBindingAsync(
+                    deviceId, grant.ExpectedCertificateSha256, cancellationToken))
+            {
+                await WriteAuditInTransactionAsync(actor, "core.agent_enrollment.denied_collision",
+                    deviceId, correlationId, clock.UtcNow, transaction, cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                throw new UnauthorizedAccessException("Agent enrollment is denied.");
+            }
+
             var consumed = await database.AgentEnrollmentGrants
                 .Where(row => row.TokenSha256 == tokenHash && row.DeviceId == deviceId &&
                     row.ConsumedAt == null && row.ExpiresAt > now)
@@ -165,7 +202,36 @@ public sealed class AgentEnrollmentService(
     private static string HashToken(string token) =>
         Convert.ToHexString(SHA256.HashData(System.Text.Encoding.ASCII.GetBytes(token)));
 
+    private async ValueTask LockDeviceAsync(DeviceId deviceId, CancellationToken cancellationToken) =>
+        _ = await database.Devices.FromSqlInterpolated(
+                $"SELECT * FROM core.devices WHERE device_id = {deviceId.Value} FOR UPDATE")
+            .AsNoTracking().SingleAsync(cancellationToken);
+
+    private async ValueTask<bool> MatchesExpectedBindingAsync(
+        DeviceId deviceId,
+        string? expectedCertificateSha256,
+        CancellationToken cancellationToken)
+    {
+        if (expectedCertificateSha256 is not null)
+        {
+            return await database.AgentCertificates.AsNoTracking().AnyAsync(
+                row => row.DeviceId == deviceId &&
+                    row.CertificateSha256 == expectedCertificateSha256, cancellationToken);
+        }
+
+        return !await database.AgentCertificates.AsNoTracking().AnyAsync(
+            row => row.DeviceId == deviceId, cancellationToken);
+    }
+
     private static bool IsToken(string? token) =>
         token is { Length: 64 } &&
         token.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F');
+}
+
+public sealed class AgentEnrollmentConflictException : Exception
+{
+    public AgentEnrollmentConflictException()
+        : base("Agent identity already has a different certificate binding.")
+    {
+    }
 }

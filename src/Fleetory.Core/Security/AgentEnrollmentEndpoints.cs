@@ -34,7 +34,8 @@ internal static class AgentEnrollmentEndpoints
         {
             var token = await service.CreateGrantAsync(
                 actor, new DeviceId(deviceId), request.DisplayName,
-                new CorrelationId(context.TraceIdentifier), context.RequestAborted);
+                new CorrelationId(context.TraceIdentifier), context.RequestAborted,
+                request.ExpectedCertificateSha256);
             context.Response.Headers.CacheControl = "no-store";
             return Results.Json(new GrantResponse(token));
         }
@@ -45,6 +46,10 @@ internal static class AgentEnrollmentEndpoints
         catch (UnauthorizedAccessException)
         {
             return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+        catch (AgentEnrollmentConflictException)
+        {
+            return Results.Conflict();
         }
     }
 
@@ -78,7 +83,7 @@ internal static class AgentEnrollmentEndpoints
         }
     }
 
-    private sealed record CreateGrantRequest(string DisplayName);
+    private sealed record CreateGrantRequest(string DisplayName, string? ExpectedCertificateSha256 = null);
     private sealed record EnrollRequest(string Token);
     private sealed record GrantResponse(string Token);
 }

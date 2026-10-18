@@ -46,8 +46,7 @@ internal sealed class AgentCertificateRecord
         DateTimeOffset notBefore,
         DateTimeOffset notAfter)
     {
-        if (deviceId.Value == Guid.Empty || certificateSha256.Length != 64 ||
-            certificateSha256.Any(character => character is not (>= '0' and <= '9' or >= 'A' and <= 'F')) ||
+        if (deviceId.Value == Guid.Empty || !AgentCertificateFingerprint.IsValid(certificateSha256) ||
             notAfter <= notBefore)
         {
             throw new ArgumentException("Agent certificate binding is invalid.");

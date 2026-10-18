@@ -27,7 +27,7 @@ public sealed class AgentCertificateRevocationService(
         CorrelationId correlationId,
         CancellationToken cancellationToken = default)
     {
-        if (deviceId.Value == Guid.Empty || !IsFingerprint(certificateSha256))
+        if (deviceId.Value == Guid.Empty || !AgentCertificateFingerprint.IsValid(certificateSha256))
         {
             throw new ArgumentException("Agent certificate identity is invalid.");
         }
@@ -75,8 +75,4 @@ public sealed class AgentCertificateRevocationService(
 
         return changed == 1;
     }
-
-    private static bool IsFingerprint(string? value) =>
-        value is { Length: 64 } &&
-        value.All(character => character is >= '0' and <= '9' or >= 'A' and <= 'F');
 }
