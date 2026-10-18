@@ -35,7 +35,7 @@ internal static class AgentEnrollmentEndpoints
             var token = await service.CreateGrantAsync(
                 actor, new DeviceId(deviceId), request.DisplayName,
                 new CorrelationId(context.TraceIdentifier), context.RequestAborted,
-                request.ExpectedCertificateSha256);
+                request.ExpectedCertificateSha256, request.RotationIntentId);
             context.Response.Headers.CacheControl = "no-store";
             return Results.Json(new GrantResponse(token));
         }
@@ -50,6 +50,46 @@ internal static class AgentEnrollmentEndpoints
         catch (AgentEnrollmentConflictException)
         {
             return Results.Conflict();
+        }
+        catch (AgentRotationIntentException)
+        {
+            return Results.Conflict();
+        }
+    }
+
+    public static async Task<IResult> CreateRotationIntentAsync(
+        HttpContext context,
+        AgentEnrollmentService service)
+    {
+        var certificate = await context.Connection.GetClientCertificateAsync(context.RequestAborted);
+        if (certificate is null ||
+            !AgentCertificateIdentity.TryReadDeviceId(certificate, out var deviceId))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        var request = await BoundedJsonRequestReader.ReadAsync<CreateRotationIntentRequest>(
+            context, MaximumBodyBytes);
+        if (request is null)
+        {
+            return Results.BadRequest();
+        }
+
+        try
+        {
+            var intentId = await service.CreateRotationIntentAsync(
+                deviceId, certificate, request.ReplacementCertificateSha256,
+                new CorrelationId(context.TraceIdentifier), context.RequestAborted);
+            context.Response.Headers.CacheControl = "no-store";
+            return Results.Json(new RotationIntentResponse(intentId));
+        }
+        catch (ArgumentException)
+        {
+            return Results.BadRequest();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
         }
     }
 
@@ -83,7 +123,10 @@ internal static class AgentEnrollmentEndpoints
         }
     }
 
-    private sealed record CreateGrantRequest(string DisplayName, string? ExpectedCertificateSha256 = null);
+    private sealed record CreateGrantRequest(string DisplayName,
+        string? ExpectedCertificateSha256 = null, Guid? RotationIntentId = null);
+    private sealed record CreateRotationIntentRequest(string ReplacementCertificateSha256);
     private sealed record EnrollRequest(string Token);
     private sealed record GrantResponse(string Token);
+    private sealed record RotationIntentResponse(Guid IntentId);
 }

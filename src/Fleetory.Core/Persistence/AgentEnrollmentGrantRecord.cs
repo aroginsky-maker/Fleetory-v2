@@ -12,12 +12,14 @@ internal sealed class AgentEnrollmentGrantRecord
     }
 
     private AgentEnrollmentGrantRecord(string tokenSha256, DeviceId deviceId,
-        DateTimeOffset expiresAt, string? expectedCertificateSha256)
+        DateTimeOffset expiresAt, string? expectedCertificateSha256,
+        string? replacementCertificateSha256)
     {
         TokenSha256 = tokenSha256;
         DeviceId = deviceId;
         ExpiresAt = expiresAt.ToUniversalTime();
         ExpectedCertificateSha256 = expectedCertificateSha256;
+        ReplacementCertificateSha256 = replacementCertificateSha256;
     }
 
     [Key]
@@ -38,18 +40,25 @@ internal sealed class AgentEnrollmentGrantRecord
     [Column("expected_certificate_sha256")]
     public string? ExpectedCertificateSha256 { get; private set; }
 
+    [MaxLength(64)]
+    [Column("replacement_certificate_sha256")]
+    public string? ReplacementCertificateSha256 { get; private set; }
+
     public static AgentEnrollmentGrantRecord Create(
         string tokenSha256, DeviceId deviceId, DateTimeOffset expiresAt,
-        string? expectedCertificateSha256)
+        string? expectedCertificateSha256, string? replacementCertificateSha256)
     {
         if (deviceId.Value == Guid.Empty || !AgentCertificateFingerprint.IsValid(tokenSha256) ||
             expectedCertificateSha256 is not null &&
-            !AgentCertificateFingerprint.IsValid(expectedCertificateSha256))
+            !AgentCertificateFingerprint.IsValid(expectedCertificateSha256) ||
+            (expectedCertificateSha256 is null) != (replacementCertificateSha256 is null) ||
+            replacementCertificateSha256 is not null &&
+            !AgentCertificateFingerprint.IsValid(replacementCertificateSha256))
         {
             throw new ArgumentException("Agent enrollment grant is invalid.");
         }
 
         return new AgentEnrollmentGrantRecord(tokenSha256, deviceId, expiresAt,
-            expectedCertificateSha256);
+            expectedCertificateSha256, replacementCertificateSha256);
     }
 }

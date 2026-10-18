@@ -248,6 +248,18 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
 
         await service.EnrollAsync(deviceId, pki.Client, token, CorrelationId.New());
         Assert.True(await database.AgentCertificates.AnyAsync(row => row.DeviceId == deviceId));
+
+        var replacementFingerprint = Convert.ToHexString(
+            SHA256.HashData(pki.UnregisteredClient.RawData));
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await unavailableAudit.CreateRotationIntentAsync(deviceId, pki.Client,
+                replacementFingerprint, CorrelationId.New()));
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await completionAuditFailure.CreateRotationIntentAsync(deviceId, pki.Client,
+                replacementFingerprint, CorrelationId.New()));
+        database.ChangeTracker.Clear();
+        Assert.False(await database.AgentRotationIntents.AnyAsync(
+            row => row.DeviceId == deviceId));
     }
 
     [Fact]
@@ -304,12 +316,76 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             row => row.DeviceId == deviceId));
 
         await GrantAdminPermissionAsync(adminId, AgentEnrollmentService.RotationPermission);
+        var missingIntentCorrelation = CorrelationId.New();
+        await Assert.ThrowsAsync<AgentRotationIntentException>(async () =>
+            await service.CreateGrantAsync(actor, deviceId, "collision device",
+                missingIntentCorrelation, expectedCertificateSha256: fingerprint));
+        Assert.Equal(1, await CountAuditActionAsync(missingIntentCorrelation,
+            "core.agent_enrollment.grant_rotation_intent_denied"));
+
+        var replacementFingerprint = Convert.ToHexString(
+            SHA256.HashData(pki.UnregisteredClient.RawData));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(async () =>
+            await service.CreateRotationIntentAsync(deviceId, pki.UnregisteredClient,
+                replacementFingerprint, CorrelationId.New()));
+        var expiredIntentId = await service.CreateRotationIntentAsync(
+            deviceId, pki.Client, replacementFingerprint, CorrelationId.New());
+        await database.AgentRotationIntents
+            .Where(row => row.IntentId == expiredIntentId)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(row => row.ExpiresAt, DateTimeOffset.UtcNow.AddMinutes(-1)));
+        await Assert.ThrowsAsync<AgentRotationIntentException>(async () =>
+            await service.CreateGrantAsync(actor, deviceId, "collision device",
+                CorrelationId.New(), expectedCertificateSha256: fingerprint,
+                rotationIntentId: expiredIntentId));
+        var intentId = await service.CreateRotationIntentAsync(
+            deviceId, pki.Client, replacementFingerprint, CorrelationId.New());
+        var failedGrantService = new AgentEnrollmentService(
+            services.GetRequiredService<IAuthorizationService>(),
+            new FailingTransactionalAuditWriter(services.GetRequiredService<IAuditWriter>()),
+            services.GetRequiredService<IAgentCertificateBindingVerifier>(), database,
+            services.GetRequiredService<IClock>());
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await failedGrantService.CreateGrantAsync(actor, deviceId, "collision device",
+                CorrelationId.New(), expectedCertificateSha256: fingerprint,
+                rotationIntentId: intentId));
+        database.ChangeTracker.Clear();
+        Assert.True(await database.AgentRotationIntents.AsNoTracking().AnyAsync(
+            row => row.IntentId == intentId && row.ClaimedAt == null));
         var rotationToken = await service.CreateGrantAsync(
             actor, deviceId, "collision device", CorrelationId.New(),
-            expectedCertificateSha256: fingerprint);
+            expectedCertificateSha256: fingerprint, rotationIntentId: intentId);
+        await Assert.ThrowsAsync<AgentRotationIntentException>(async () =>
+            await service.CreateGrantAsync(actor, deviceId, "collision device",
+                CorrelationId.New(), expectedCertificateSha256: fingerprint,
+                rotationIntentId: intentId));
+        var mismatchCorrelation = CorrelationId.New();
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(async () =>
+            await service.EnrollAsync(deviceId, pki.Client,
+                rotationToken, mismatchCorrelation));
+        Assert.Equal(1, await CountAuditActionAsync(mismatchCorrelation,
+            "core.agent_enrollment.denied_replacement_mismatch"));
         await service.EnrollAsync(deviceId, pki.UnregisteredClient,
             rotationToken, CorrelationId.New());
         Assert.Equal(2, await database.AgentCertificates.CountAsync(row => row.DeviceId == deviceId));
+
+        var pendingIntentId = await service.CreateRotationIntentAsync(
+            deviceId, pki.Client, replacementFingerprint, CorrelationId.New());
+        var pendingToken = await service.CreateGrantAsync(
+            actor, deviceId, "collision device", CorrelationId.New(),
+            expectedCertificateSha256: fingerprint, rotationIntentId: pendingIntentId);
+        var revokedIntentId = await service.CreateRotationIntentAsync(
+            deviceId, pki.Client, replacementFingerprint, CorrelationId.New());
+        await GrantAdminPermissionAsync(adminId, AgentCertificateRevocationService.Permission);
+        await services.GetRequiredService<AgentCertificateRevocationService>()
+            .RevokeAsync(actor, deviceId, fingerprint, CorrelationId.New());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(async () =>
+            await service.EnrollAsync(deviceId, pki.UnregisteredClient,
+                pendingToken, CorrelationId.New()));
+        await Assert.ThrowsAsync<AgentEnrollmentConflictException>(async () =>
+            await service.CreateGrantAsync(actor, deviceId, "collision device",
+                CorrelationId.New(), expectedCertificateSha256: fingerprint,
+                rotationIntentId: revokedIntentId));
     }
 
     [Fact]
@@ -485,10 +561,24 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             Assert.Equal(HttpStatusCode.Conflict, wrongBinding.StatusCode);
 
             using var candidate = agentPki.CreateClient(agentPki.UnregisteredClient);
+            var replacementFingerprint = Convert.ToHexString(
+                SHA256.HashData(agentPki.UnregisteredClient.RawData));
+            var intentUrl = $"{agentBase}/agent/rotation-intents";
+            using var unboundIntent = await candidate.PostAsJsonAsync(intentUrl,
+                new { replacementCertificateSha256 = replacementFingerprint });
+            Assert.Equal(HttpStatusCode.Forbidden, unboundIntent.StatusCode);
+            using var intentResponse = await agent.PostAsJsonAsync(intentUrl,
+                new { replacementCertificateSha256 = replacementFingerprint });
+            Assert.Equal(HttpStatusCode.OK, intentResponse.StatusCode);
+            Assert.Equal("no-store", intentResponse.Headers.CacheControl?.ToString());
+            var intentBody = await intentResponse.Content
+                .ReadFromJsonAsync<System.Text.Json.JsonElement>();
+            var intentId = intentBody.GetProperty("intentId").GetGuid();
             var rotationRequest = new
             {
                 displayName = "ignored for existing device",
-                expectedCertificateSha256 = currentFingerprint
+                expectedCertificateSha256 = currentFingerprint,
+                rotationIntentId = intentId
             };
             using var rotationDenied = await admin.PostAsJsonAsync(grantUrl, rotationRequest);
             Assert.Equal(HttpStatusCode.Forbidden, rotationDenied.StatusCode);
@@ -514,8 +604,20 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             using var expired = await candidate.PostAsJsonAsync(
                 $"{agentBase}/agent/enroll", new { token = expiringToken });
             Assert.Equal(HttpStatusCode.Forbidden, expired.StatusCode);
+            using var replayedIntent = await admin.PostAsJsonAsync(grantUrl, rotationRequest);
+            Assert.Equal(HttpStatusCode.Conflict, replayedIntent.StatusCode);
+            using var renewedIntent = await agent.PostAsJsonAsync(intentUrl,
+                new { replacementCertificateSha256 = replacementFingerprint });
+            Assert.Equal(HttpStatusCode.OK, renewedIntent.StatusCode);
+            var renewedIntentBody = await renewedIntent.Content
+                .ReadFromJsonAsync<System.Text.Json.JsonElement>();
             using var rotationGrant = await admin.PostAsJsonAsync(
-                grantUrl, rotationRequest);
+                grantUrl, new
+                {
+                    rotationRequest.displayName,
+                    rotationRequest.expectedCertificateSha256,
+                    rotationIntentId = renewedIntentBody.GetProperty("intentId").GetGuid()
+                });
             Assert.Equal(HttpStatusCode.OK, rotationGrant.StatusCode);
             var rotationResponse = await rotationGrant.Content
                 .ReadFromJsonAsync<System.Text.Json.JsonElement>();

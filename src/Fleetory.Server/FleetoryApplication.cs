@@ -78,7 +78,8 @@ public static class FleetoryApplication
                 if (context.Connection.LocalPort == gateway.AgentPort)
                 {
                     if (context.Request.Path != "/agent/identity" &&
-                        context.Request.Path != "/agent/enroll")
+                        context.Request.Path != "/agent/enroll" &&
+                        context.Request.Path != "/agent/rotation-intents")
                     {
                         context.Response.StatusCode = StatusCodes.Status404NotFound;
                         return;
@@ -93,7 +94,8 @@ public static class FleetoryApplication
                         return;
                     }
 
-                    if (context.Request.Path == "/agent/identity")
+                    if (context.Request.Path == "/agent/identity" ||
+                        context.Request.Path == "/agent/rotation-intents")
                     {
                         var verifier = context.RequestServices
                             .GetRequiredService<IAgentCertificateBindingVerifier>();

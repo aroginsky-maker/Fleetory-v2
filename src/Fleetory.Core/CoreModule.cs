@@ -53,6 +53,8 @@ public sealed class CoreModule : FleetoryModuleBase
         {
             endpoints.MapGet("/agent/identity", static () => Results.NoContent());
             endpoints.MapPost("/agent/enroll", AgentEnrollmentEndpoints.EnrollAsync);
+            endpoints.MapPost("/agent/rotation-intents",
+                AgentEnrollmentEndpoints.CreateRotationIntentAsync);
         }
 
         if (endpoints.ServiceProvider.GetRequiredService<IConfiguration>()

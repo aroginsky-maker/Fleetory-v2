@@ -22,14 +22,15 @@
 - Agent grant creation, certificate binding and certificate revocation now commit their Core state, completion audit event and export-queue entry in one PostgreSQL transaction. A completion-audit failure rolls back the Core change; integration tests cover failure and retry. The Platform audit writer accepts the caller's transaction while retaining ownership of its tables. The architecture guide includes a read-only recovery procedure for a lost commit acknowledgement.
 - Agent identity collision checks now require the Admin to name a previously bound certificate fingerprint when issuing a replacement grant. The expectation is stored with the token digest and checked again under a per-device PostgreSQL row lock at redemption. Missing or foreign fingerprints return 409; a stale initial grant cannot bind a second certificate after another grant succeeds. Collision denials are audited, and integration tests cover both a stale grant and concurrent first enrollments. The physical-device verification and approval process remains an operational requirement.
 - Replacement grants additionally require the global `core.agent_certificate.rotate` permission alongside enrollment permission. Without it, the Admin route returns 403 and writes a denial audit event without issuing a token; real mTLS/PostgreSQL tests cover denial and authorized rotation. Neither permission is seeded by default.
+- An active Agent certificate must now create a five-minute rotation intent over its mTLS port for the exact replacement certificate SHA-256. Admin uses that one-time intent alongside both permissions and the old fingerprint; the grant can be redeemed only by that replacement certificate. The device row lock serializes grant, enrollment and revocation checks. Tests cover unbound Agent denial, expiry, replay, wrong replacement, revocation and audit rollback. Possession of the old key is verified; independent physical-device approval and lost-key recovery remain open.
 
 ## Verification snapshot
 
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local tests after separate rotation permission | 157/157 passed |
-| Local production coverage | 92.44% |
+| Local tests after Agent rotation intent | 157/157 passed |
+| Local production coverage | 92.92% |
 | CI production coverage at `1e25386` | 92.66% |
 | Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
 | Local full audit pipeline | PostgreSQL outbox → Fleetory worker → immudb readback passed |

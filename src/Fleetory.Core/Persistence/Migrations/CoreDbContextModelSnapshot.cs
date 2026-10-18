@@ -77,6 +77,11 @@ namespace Fleetory.Core.Persistence.Migrations
                         .HasColumnType("timestamp with time zone")
                         .HasColumnName("expires_at");
 
+                    b.Property<string>("ReplacementCertificateSha256")
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("replacement_certificate_sha256");
+
                     b.HasKey("TokenSha256");
 
                     b.HasIndex("DeviceId");
@@ -84,6 +89,46 @@ namespace Fleetory.Core.Persistence.Migrations
                     b.HasIndex("ExpiresAt");
 
                     b.ToTable("agent_enrollment_grants", "core");
+                });
+
+            modelBuilder.Entity("Fleetory.Core.Persistence.AgentRotationIntentRecord", b =>
+                {
+                    b.Property<Guid>("IntentId")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("intent_id");
+
+                    b.Property<DateTimeOffset?>("ClaimedAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("claimed_at");
+
+                    b.Property<string>("CurrentCertificateSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("current_certificate_sha256");
+
+                    b.Property<Guid>("DeviceId")
+                        .HasColumnType("uuid")
+                        .HasColumnName("device_id");
+
+                    b.Property<DateTimeOffset>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("expires_at");
+
+                    b.Property<string>("ReplacementCertificateSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("character varying(64)")
+                        .HasColumnName("replacement_certificate_sha256");
+
+                    b.HasKey("IntentId");
+
+                    b.HasIndex("DeviceId");
+
+                    b.HasIndex("ExpiresAt");
+
+                    b.ToTable("agent_rotation_intents", "core");
                 });
 
             modelBuilder.Entity("Fleetory.Core.Persistence.DeviceRecord", b =>
@@ -124,6 +169,15 @@ namespace Fleetory.Core.Persistence.Migrations
                 });
 
             modelBuilder.Entity("Fleetory.Core.Persistence.AgentEnrollmentGrantRecord", b =>
+                {
+                    b.HasOne("Fleetory.Core.Persistence.DeviceRecord", null)
+                        .WithMany()
+                        .HasForeignKey("DeviceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+                });
+
+            modelBuilder.Entity("Fleetory.Core.Persistence.AgentRotationIntentRecord", b =>
                 {
                     b.HasOne("Fleetory.Core.Persistence.DeviceRecord", null)
                         .WithMany()

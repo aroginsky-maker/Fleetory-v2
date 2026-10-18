@@ -52,6 +52,7 @@ public sealed class AgentCertificateRevocationService(
         }
 
         await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
+        _ = await CoreDeviceRowLock.TryLockAsync(database, deviceId, cancellationToken);
         var changed = await database.AgentCertificates
             .Where(row => row.CertificateSha256 == certificateSha256 &&
                 row.DeviceId == deviceId && row.RevokedAt == null)
