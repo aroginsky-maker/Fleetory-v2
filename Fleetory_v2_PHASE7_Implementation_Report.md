@@ -39,7 +39,7 @@
 | Local strict Release build | 0 warnings, 0 errors |
 | Local tests after secret mount checks | 165/165 passed |
 | Local production coverage | 93.63% |
-| CI production coverage at `2497dfa` | 93.85% |
+| CI production coverage at `9885947` | 93.86% |
 | Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
 | Local full audit pipeline | PostgreSQL outbox → Fleetory worker → immudb readback passed |
 | Local live certificate renewal | 4/4 new pairs validated; 4/4 previous pairs archived and matched backup; identity UUIDs retained; OpenBao TLS secrets matched |
@@ -47,13 +47,13 @@
 | Local WebAuthn/OIDC with real Admin mTLS | 401 without token; 403 with WebAuthn token at RBAC |
 | Windows server TLS chain in CI with provisioned OS CA stores | 2 certificates sent; root-only OpenSSL verification code 0 |
 | Linux container server TLS chain | 2 certificates sent; root-only OpenSSL verification code 0 |
-| Sonar PR coverage at `2497dfa` | 90.8% |
-| Sonar new-code coverage at `2497dfa` | 91.16% |
-| Sonar duplication at `2497dfa` | 0.0% |
-| Sonar new-code duplication at `2497dfa` | 0.0% |
-| Sonar Quality Gate at `2497dfa` | PASS |
+| Sonar PR coverage at `9885947` | 90.8% |
+| Sonar new-code coverage at `9885947` | 91.20% |
+| Sonar duplication at `9885947` | 0.0% |
+| Sonar new-code duplication at `9885947` | 0.0% |
+| Sonar Quality Gate at `9885947` | PASS |
 
-The latest completed CI and Sonar numbers come from [run 39161257913](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39161257913). A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The PowerShell provisioning test runs in CI and remains under Sonar static analysis; it is excluded from the .NET coverage denominator because `dotnet-coverage` cannot instrument PowerShell. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
+The latest completed CI and Sonar numbers come from [run 39161625342](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39161625342). A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The PowerShell provisioning test runs in CI and remains under Sonar static analysis; it is excluded from the .NET coverage denominator because `dotnet-coverage` cannot instrument PowerShell. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
 
 ## Required before completion
 
