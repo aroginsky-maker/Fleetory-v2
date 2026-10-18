@@ -123,6 +123,50 @@ internal static class AuthorizationAdministrationEndpoints
         }
     }
 
+    public static async Task<IResult> RetireRoleAsync(
+        HttpContext context,
+        Guid roleId,
+        PostgreSqlAuthorizationAdministration administration) =>
+        await RetireAsync(context, roleId, administration.RetireRoleAsync);
+
+    public static async Task<IResult> RetireScopeAsync(
+        HttpContext context,
+        Guid scopeId,
+        PostgreSqlAuthorizationAdministration administration) =>
+        await RetireAsync(context, scopeId, administration.RetireScopeAsync);
+
+    private static async Task<IResult> RetireAsync(
+        HttpContext context,
+        Guid id,
+        Func<ActorReference, Guid, CorrelationId, CancellationToken, ValueTask<bool>> retire)
+    {
+        var actor = await ReadActorAsync(context);
+        if (actor is null) { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+
+        try
+        {
+            return await retire(actor, id, Correlation(context), context.RequestAborted)
+                ? Results.NoContent() : Results.NotFound();
+        }
+        catch (ArgumentException)
+        {
+            return Results.BadRequest();
+        }
+        catch (InvalidOperationException)
+        {
+            return Results.Conflict();
+        }
+        catch (PostgresException exception) when (exception.SqlState is
+            PostgresErrorCodes.ForeignKeyViolation or PostgresErrorCodes.RestrictViolation)
+        {
+            return Results.Conflict();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+    }
+
     private static async Task<ActorReference?> ReadActorAsync(HttpContext context)
     {
         var certificate = await context.Connection.GetClientCertificateAsync(context.RequestAborted);

@@ -408,9 +408,15 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             var roleBody = new { name = "mTLS managed reader", permissions = new[] { "Core.Device.Read" } };
             using var denied = await admin.PostAsJsonAsync($"{baseUrl}/roles", roleBody);
             Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+            using var deniedRetirement = await admin.DeleteAsync(
+                $"{baseUrl}/roles/{Guid.NewGuid():D}");
+            Assert.Equal(HttpStatusCode.Forbidden, deniedRetirement.StatusCode);
             using var webAttempt = await web.PostAsJsonAsync(
                 $"http://127.0.0.1:{webPort}/admin/authorization/roles", roleBody);
             Assert.Equal(HttpStatusCode.NotFound, webAttempt.StatusCode);
+            using var webRetirement = await web.DeleteAsync(
+                $"http://127.0.0.1:{webPort}/admin/authorization/roles/{Guid.NewGuid():D}");
+            Assert.Equal(HttpStatusCode.NotFound, webRetirement.StatusCode);
 
             await GrantAdminPermissionAsync(adminId, "platform.authorization.manage");
             var correlation = Guid.NewGuid().ToString("N");
@@ -442,10 +448,20 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             var request = new AuthorizationRequest(new ActorReference(target, ActorKind.Person),
                 "Core.Device.Read", new ScopeId(scopeId));
             Assert.True((await authorizer.AuthorizeAsync(request)).IsAllowed);
+            using var blockedRole = await admin.DeleteAsync($"{baseUrl}/roles/{roleId:D}");
+            Assert.Equal(HttpStatusCode.Conflict, blockedRole.StatusCode);
+            using var blockedScope = await admin.DeleteAsync($"{baseUrl}/scopes/{scopeId:D}");
+            Assert.Equal(HttpStatusCode.Conflict, blockedScope.StatusCode);
             using var revoked = await admin.DeleteAsync(
                 $"{baseUrl}/assignments/{assignmentId:D}");
             Assert.Equal(HttpStatusCode.NoContent, revoked.StatusCode);
             Assert.False((await authorizer.AuthorizeAsync(request)).IsAllowed);
+            using var retiredRole = await admin.DeleteAsync($"{baseUrl}/roles/{roleId:D}");
+            Assert.Equal(HttpStatusCode.NoContent, retiredRole.StatusCode);
+            using var retiredScope = await admin.DeleteAsync($"{baseUrl}/scopes/{scopeId:D}");
+            Assert.Equal(HttpStatusCode.NoContent, retiredScope.StatusCode);
+            using var missingRole = await admin.DeleteAsync($"{baseUrl}/roles/{roleId:D}");
+            Assert.Equal(HttpStatusCode.NotFound, missingRole.StatusCode);
 
             await using var connection = new NpgsqlConnection(fixture.ConnectionString);
             await connection.OpenAsync();

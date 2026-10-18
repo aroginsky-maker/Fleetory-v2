@@ -158,6 +158,71 @@ public sealed class PostgreSqlAuthorizationTests(PostgreSqlTestFixture fixture)
     }
 
     [Fact]
+    public async Task Roles_and_scopes_retire_only_after_assignments_and_children_are_removed()
+    {
+        var administratorId = $"person:{Guid.NewGuid():N}";
+        await InsertGrantAsync(administratorId, ActorKind.Person,
+            PostgreSqlAuthorizationAdministration.Permission);
+        var administrator = new ActorReference(administratorId, ActorKind.Person);
+        var target = new ActorReference($"person:{Guid.NewGuid():N}", ActorKind.Person);
+        var correlation = new CorrelationId(Guid.NewGuid().ToString("N"));
+        await using var scope = fixture.Services.CreateAsyncScope();
+        var administration = scope.ServiceProvider.GetRequiredService<PostgreSqlAuthorizationAdministration>();
+
+        var roleId = await administration.CreateRoleAsync(administrator, "Retire test role",
+            [ReadPermission], correlation);
+        var root = await administration.CreateScopeAsync(administrator, "Retire test root",
+            null, correlation);
+        var child = await administration.CreateScopeAsync(administrator, "Retire test child",
+            new ScopeId(root), correlation);
+        var assignmentId = await administration.AssignRoleAsync(administrator, target, roleId,
+            new ScopeId(child), correlation);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await administration.RetireRoleAsync(administrator, roleId, correlation));
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await administration.RetireScopeAsync(administrator, child, correlation));
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await administration.RetireScopeAsync(administrator, root, correlation));
+
+        await using (var connection = new NpgsqlConnection(fixture.ConnectionString))
+        {
+            await connection.OpenAsync();
+            await using var unsafeDelete = new NpgsqlCommand(
+                "DELETE FROM platform.authorization_roles WHERE role_id = @id", connection);
+            unsafeDelete.Parameters.AddWithValue("id", roleId);
+            var foreignKey = await Assert.ThrowsAsync<PostgresException>(async () =>
+                await unsafeDelete.ExecuteNonQueryAsync());
+            Assert.Equal(PostgresErrorCodes.RestrictViolation, foreignKey.SqlState);
+        }
+
+        Assert.True(await administration.RevokeAssignmentAsync(administrator, assignmentId, correlation));
+        Assert.True(await administration.RetireScopeAsync(administrator, child, correlation));
+        Assert.False(await administration.RetireScopeAsync(administrator, child, correlation));
+        Assert.True(await administration.RetireScopeAsync(administrator, root, correlation));
+        Assert.True(await administration.RetireRoleAsync(administrator, roleId, correlation));
+
+        await using var auditConnection = new NpgsqlConnection(fixture.ConnectionString);
+        await auditConnection.OpenAsync();
+        await using var audit = new NpgsqlCommand("""
+            SELECT COUNT(*) FROM platform.audit_events AS event
+            JOIN platform.audit_export_queue AS queue ON queue.audit_event_id = event.event_id
+            WHERE event.correlation_id = @correlation
+            """, auditConnection);
+        audit.Parameters.AddWithValue("correlation", correlation.Value);
+        Assert.Equal(12L, (long)(await audit.ExecuteScalarAsync())!);
+        await using var blocked = new NpgsqlCommand("""
+            SELECT COUNT(*) FROM platform.audit_events
+            WHERE correlation_id = @correlation
+              AND action IN (
+                  'platform.authorization.role_retirement_blocked',
+                  'platform.authorization.scope_retirement_blocked')
+            """, auditConnection);
+        blocked.Parameters.AddWithValue("correlation", correlation.Value);
+        Assert.Equal(3L, (long)(await blocked.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
     public async Task Administration_denial_is_audited_and_failed_audit_rolls_back_role()
     {
         var deniedActor = new ActorReference($"person:{Guid.NewGuid():N}", ActorKind.Person);

@@ -217,6 +217,86 @@ internal sealed class PostgreSqlAuthorizationAdministration(
         return outcome == AssignmentRevocationOutcome.Revoked;
     }
 
+    public ValueTask<bool> RetireRoleAsync(
+        ActorReference actor,
+        Guid roleId,
+        CorrelationId correlationId,
+        CancellationToken cancellationToken = default) =>
+        RetireUnusedAsync(actor, roleId, AuthorizationObject.Role, correlationId, cancellationToken);
+
+    public ValueTask<bool> RetireScopeAsync(
+        ActorReference actor,
+        Guid scopeId,
+        CorrelationId correlationId,
+        CancellationToken cancellationToken = default) =>
+        RetireUnusedAsync(actor, scopeId, AuthorizationObject.Scope, correlationId, cancellationToken);
+
+    private async ValueTask<bool> RetireUnusedAsync(
+        ActorReference actor,
+        Guid id,
+        AuthorizationObject kind,
+        CorrelationId correlationId,
+        CancellationToken cancellationToken)
+    {
+        if (id == Guid.Empty)
+        {
+            throw new ArgumentException("Authorization object ID is invalid.", nameof(id));
+        }
+
+        var isRole = kind == AuthorizationObject.Role;
+        var noun = isRole ? "role" : "scope";
+        var outcome = await ExecuteAuthorizedAsync(actor,
+            $"platform.authorization.{noun}_retired",
+            new AuditTarget(noun, id.ToString("D")), correlationId, null,
+            async (connection, transaction, token) =>
+            {
+                var deleteSql = isRole ? """
+                    DELETE FROM platform.authorization_roles AS object
+                    WHERE object.role_id = @id
+                      AND NOT EXISTS (
+                          SELECT 1 FROM platform.authorization_assignments AS assignment
+                          WHERE assignment.role_id = object.role_id)
+                    """ : """
+                    DELETE FROM platform.authorization_scopes AS object
+                    WHERE object.scope_id = @id
+                      AND NOT EXISTS (
+                          SELECT 1 FROM platform.authorization_assignments AS assignment
+                          WHERE assignment.scope_id = object.scope_id)
+                      AND NOT EXISTS (
+                          SELECT 1 FROM platform.authorization_scopes AS child
+                          WHERE child.parent_scope_id = object.scope_id)
+                    """;
+                await using (var command = new NpgsqlCommand(deleteSql, connection, transaction))
+                {
+                    command.Parameters.AddWithValue("id", NpgsqlDbType.Uuid, id);
+                    if (await command.ExecuteNonQueryAsync(token) == 1)
+                    {
+                        return RetirementOutcome.Retired;
+                    }
+                }
+
+                var existsSql = isRole ?
+                    "SELECT EXISTS (SELECT 1 FROM platform.authorization_roles WHERE role_id = @id)" :
+                    "SELECT EXISTS (SELECT 1 FROM platform.authorization_scopes WHERE scope_id = @id)";
+                await using var exists = new NpgsqlCommand(existsSql, connection, transaction);
+                exists.Parameters.AddWithValue("id", NpgsqlDbType.Uuid, id);
+                return (bool)(await exists.ExecuteScalarAsync(token))!
+                    ? RetirementOutcome.InUse : RetirementOutcome.Missing;
+            }, cancellationToken,
+            result => result switch
+            {
+                RetirementOutcome.Retired => $"platform.authorization.{noun}_retired",
+                RetirementOutcome.InUse => $"platform.authorization.{noun}_retirement_blocked",
+                _ => $"platform.authorization.{noun}_unchanged"
+            });
+        if (outcome == RetirementOutcome.InUse)
+        {
+            throw new InvalidOperationException("Authorization object is still in use.");
+        }
+
+        return outcome == RetirementOutcome.Retired;
+    }
+
     private async ValueTask<T> ExecuteAuthorizedAsync<T>(
         ActorReference actor,
         string action,
@@ -265,4 +345,8 @@ internal sealed class PostgreSqlAuthorizationAdministration(
         Unchanged,
         LastManagerProtected
     }
+
+    private enum AuthorizationObject { Role, Scope }
+
+    private enum RetirementOutcome { Retired, InUse, Missing }
 }

@@ -37,6 +37,12 @@ public sealed class PlatformModule : FleetoryModuleBase
         endpoints.MapPost("/admin/authorization/scopes",
             AuthorizationAdministrationEndpoints.CreateScopeAsync)
             .RequireRateLimiting(AdminSecurityPolicyNames.AdminRateLimit);
+        endpoints.MapDelete("/admin/authorization/roles/{roleId:guid}",
+            AuthorizationAdministrationEndpoints.RetireRoleAsync)
+            .RequireRateLimiting(AdminSecurityPolicyNames.AdminRateLimit);
+        endpoints.MapDelete("/admin/authorization/scopes/{scopeId:guid}",
+            AuthorizationAdministrationEndpoints.RetireScopeAsync)
+            .RequireRateLimiting(AdminSecurityPolicyNames.AdminRateLimit);
         endpoints.MapPost("/admin/authorization/roles/{roleId:guid}/assignments",
             AuthorizationAdministrationEndpoints.AssignRoleAsync)
             .RequireRateLimiting(AdminSecurityPolicyNames.AdminRateLimit);
