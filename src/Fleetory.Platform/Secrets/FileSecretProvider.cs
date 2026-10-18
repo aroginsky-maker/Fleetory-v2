@@ -19,6 +19,20 @@ public sealed class FileSecretProvider : ISecretProvider
         }
 
         this.directory = Path.GetFullPath(directory);
+        if (!Directory.Exists(this.directory) ||
+            (File.GetAttributes(this.directory) & FileAttributes.ReparsePoint) != 0)
+        {
+            throw new InvalidOperationException("Secret directory is missing or is a symbolic link.");
+        }
+
+        if (!OperatingSystem.IsWindows())
+        {
+            const UnixFileMode unsafeBits = UnixFileMode.GroupWrite | UnixFileMode.OtherWrite;
+            if ((File.GetUnixFileMode(this.directory) & unsafeBits) != 0)
+            {
+                throw new InvalidOperationException("Secret directory permissions are too broad.");
+            }
+        }
     }
 
     public string GetRequiredSecret(string name)
@@ -34,6 +48,11 @@ public sealed class FileSecretProvider : ISecretProvider
         var path = Path.Combine(directory, name);
         try
         {
+            if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new InvalidOperationException("Secret file must not be a symbolic link.");
+            }
+
             if (!OperatingSystem.IsWindows())
             {
                 var mode = File.GetUnixFileMode(path);

@@ -234,6 +234,48 @@ public sealed class SecretProviderTests
             provider.GetRequiredSecret(FleetorySecretNames.PostgreSqlConnectionString));
     }
 
+    [Fact]
+    public void Secret_mount_rejects_writable_directory_and_symbolic_links()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        using var directory = new TestSecretDirectory();
+        var originalMode = File.GetUnixFileMode(directory.Path);
+        File.SetUnixFileMode(directory.Path, originalMode | UnixFileMode.GroupWrite);
+        try
+        {
+            Assert.Throws<InvalidOperationException>(() =>
+                new FileSecretProvider(directory.Path));
+        }
+        finally
+        {
+            File.SetUnixFileMode(directory.Path, originalMode);
+        }
+
+        var link = System.IO.Path.Combine(System.IO.Path.GetTempPath(),
+            "fleetory-secret-link-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateSymbolicLink(link, directory.Path);
+        try
+        {
+            Assert.Throws<InvalidOperationException>(() => new FileSecretProvider(link));
+        }
+        finally
+        {
+            Directory.Delete(link);
+        }
+
+        var target = directory.Write("alternate", TestConnectionString);
+        var secret = System.IO.Path.Combine(directory.Path,
+            FleetorySecretNames.PostgreSqlConnectionString);
+        File.CreateSymbolicLink(secret, target);
+        var provider = new FileSecretProvider(directory.Path);
+        Assert.Throws<InvalidOperationException>(() =>
+            provider.GetRequiredSecret(FleetorySecretNames.PostgreSqlConnectionString));
+    }
+
     private sealed class TestSecretDirectory : IDisposable
     {
         public string Path { get; } = System.IO.Path.Combine(

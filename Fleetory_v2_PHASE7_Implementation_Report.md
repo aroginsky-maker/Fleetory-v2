@@ -30,15 +30,16 @@
 - The Admin request limit is now partitioned by client certificate. Public web-port requests and a noisy Admin identity cannot consume another Admin's bucket; the real mTLS test verifies this isolation.
 - A first-enrollment grant now requires the exact new Agent certificate SHA-256, matching the already bound rotation and recovery grants. Redemption by another CA-issued certificate with the same DeviceId returns 403 without consuming the grant. Legacy grants lacking a target fingerprint also fail closed; real mTLS and PostgreSQL tests cover both paths.
 - Gateway rate limits now apply only on their matching mTLS listener. The tests send more than the configured limit to Admin and Agent paths through the public web port and confirm consistent 404 responses without consuming privileged buckets.
+- The file secret provider now refuses symbolic links for the mount and secret files and rejects a Unix mount writable by another group or user. A Linux CI test checks those failure paths; deployment still owns the parent path and service ACL.
 
 ## Verification snapshot
 
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local tests after enrollment rate limit | 164/164 passed |
-| Local production coverage | 93.70% |
-| CI production coverage at `f078c1f` | 93.87% |
+| Local tests after secret mount checks | 165/165 passed |
+| Local production coverage | 93.63% |
+| CI production coverage at `2497dfa` | 93.85% |
 | Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
 | Local full audit pipeline | PostgreSQL outbox → Fleetory worker → immudb readback passed |
 | Local live certificate renewal | 4/4 new pairs validated; 4/4 previous pairs archived and matched backup; identity UUIDs retained; OpenBao TLS secrets matched |
@@ -46,13 +47,13 @@
 | Local WebAuthn/OIDC with real Admin mTLS | 401 without token; 403 with WebAuthn token at RBAC |
 | Windows server TLS chain in CI with provisioned OS CA stores | 2 certificates sent; root-only OpenSSL verification code 0 |
 | Linux container server TLS chain | 2 certificates sent; root-only OpenSSL verification code 0 |
-| Sonar PR coverage at `f078c1f` | 90.8% |
-| Sonar new-code coverage at `f078c1f` | 91.15% |
-| Sonar duplication at `f078c1f` | 0.0% |
-| Sonar new-code duplication at `f078c1f` | 0.0% |
-| Sonar Quality Gate at `f078c1f` | PASS |
+| Sonar PR coverage at `2497dfa` | 90.8% |
+| Sonar new-code coverage at `2497dfa` | 91.16% |
+| Sonar duplication at `2497dfa` | 0.0% |
+| Sonar new-code duplication at `2497dfa` | 0.0% |
+| Sonar Quality Gate at `2497dfa` | PASS |
 
-The latest completed CI and Sonar numbers come from [run 39160956140](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39160956140). A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The PowerShell provisioning test runs in CI and remains under Sonar static analysis; it is excluded from the .NET coverage denominator because `dotnet-coverage` cannot instrument PowerShell. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
+The latest completed CI and Sonar numbers come from [run 39161257913](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39161257913). A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The PowerShell provisioning test runs in CI and remains under Sonar static analysis; it is excluded from the .NET coverage denominator because `dotnet-coverage` cannot instrument PowerShell. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
 
 ## Required before completion
 
