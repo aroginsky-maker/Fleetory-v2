@@ -9,6 +9,29 @@ $composePath = Join-Path $repoRoot 'infra/security-lab/compose.yaml'
 if (-not (Test-Path -LiteralPath $envPath)) { throw 'Start the security lab first.' }
 New-Item -ItemType Directory -Path $certDirectory -Force | Out-Null
 
+function Protect-LabCertificateDirectory {
+    if ($env:OS -eq 'Windows_NT') {
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+        & icacls $certDirectory /inheritance:r /grant:r "${identity}:(OI)(CI)F" | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw 'Could not restrict certificate directory ACL.' }
+        foreach ($file in Get-ChildItem -LiteralPath $certDirectory -File) {
+            & icacls $file.FullName /inheritance:r /grant:r "${identity}:F" | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw 'Could not restrict certificate ACL.' }
+        }
+    }
+    else {
+        & chmod 700 $certDirectory
+        if ($LASTEXITCODE -ne 0) { throw 'Could not restrict certificate directory.' }
+        foreach ($file in Get-ChildItem -LiteralPath $certDirectory -File) {
+            & chmod 600 $file.FullName
+            if ($LASTEXITCODE -ne 0) { throw 'Could not restrict certificate file.' }
+        }
+    }
+}
+
+# Protect the parent before docker cp can create any private key in it.
+Protect-LabCertificateDirectory
+
 function Issue-LabCertificate {
     param(
         [string] $Service,
@@ -27,14 +50,19 @@ function Issue-LabCertificate {
         '--root', '/home/step/certs/root_ca.crt', '--provisioner', $Provisioner,
         '--provisioner-password-file', '/home/step/secrets/password')
     foreach ($entry in $San) { $arguments += @('--san', $entry) }
-    & docker @arguments | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Certificate issuance failed for $Service." }
-
     $container = "fleetory-security-lab-$Service-1"
-    & docker cp "${container}:$remoteCrt" (Join-Path $certDirectory "$Stem.crt") | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Certificate copy failed for $Service." }
-    & docker cp "${container}:$remoteKey" (Join-Path $certDirectory "$Stem.key") | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Key copy failed for $Service." }
+    try {
+        & docker @arguments | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Certificate issuance failed for $Service." }
+        & docker cp "${container}:$remoteCrt" (Join-Path $certDirectory "$Stem.crt") | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Certificate copy failed for $Service." }
+        & docker cp "${container}:$remoteKey" (Join-Path $certDirectory "$Stem.key") | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Key copy failed for $Service." }
+    }
+    finally {
+        & docker exec $container rm -f -- $remoteCrt $remoteKey | Out-Null
+        if ($LASTEXITCODE -ne 0) { throw "Temporary CA container key cleanup failed for $Service." }
+    }
 }
 
 function Get-OrCreate-LabIdentity {
@@ -77,21 +105,7 @@ foreach ($service in @('agent', 'admin')) {
 
 [IO.File]::WriteAllText((Join-Path $certDirectory 'agent-device-id'), $deviceId)
 [IO.File]::WriteAllText((Join-Path $certDirectory 'admin-person-id'), $adminId)
-if ($env:OS -eq 'Windows_NT') {
-    $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-    & icacls $certDirectory /inheritance:r /grant:r "${identity}:(OI)(CI)F" | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw 'Could not restrict certificate directory ACL.' }
-    foreach ($file in Get-ChildItem -LiteralPath $certDirectory -File) {
-        & icacls $file.FullName /inheritance:r /grant:r "${identity}:F" | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw 'Could not restrict certificate ACL.' }
-    }
-}
-else {
-    & chmod 700 $certDirectory
-    foreach ($file in Get-ChildItem -LiteralPath $certDirectory -File) {
-        & chmod 600 $file.FullName
-    }
-}
+Protect-LabCertificateDirectory
 
 $settings = @{}
 foreach ($entry in [IO.File]::ReadAllLines($envPath)) {
