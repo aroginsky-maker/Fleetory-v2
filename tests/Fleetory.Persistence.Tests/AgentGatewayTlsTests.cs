@@ -130,7 +130,7 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
                 displayName = "denied",
                 initialCertificateSha256 = new string('A', 64)
             };
-            for (var attempt = 0; attempt < 3; attempt++)
+            for (var attempt = 0; attempt < 4; attempt++)
             {
                 using var webAttempt = await web.PostAsJsonAsync(
                     $"http://127.0.0.1:{webPort}/admin/devices/{Guid.NewGuid():D}/enrollment-grants",
@@ -725,9 +725,12 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             Assert.NotNull(token);
             Assert.Equal(64, token.Length);
 
-            using var webAttempt = await web.PostAsJsonAsync(
-                $"http://127.0.0.1:{ports[0]}/agent/enroll", new { token });
-            Assert.Equal(HttpStatusCode.NotFound, webAttempt.StatusCode);
+            for (var attempt = 0; attempt < 4; attempt++)
+            {
+                using var webAttempt = await web.PostAsJsonAsync(
+                    $"http://127.0.0.1:{ports[0]}/agent/enroll", new { token });
+                Assert.Equal(HttpStatusCode.NotFound, webAttempt.StatusCode);
+            }
             using var malformedIdentity = agentPki.CreateClient(agentPki.MalformedIdentityClient);
             using var malformed = await malformedIdentity.PostAsJsonAsync(
                 $"{agentBase}/agent/enroll", new { token });

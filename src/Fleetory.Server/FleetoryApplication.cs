@@ -52,11 +52,14 @@ public static class FleetoryApplication
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
             AddCertificateRateLimit(options,
-                AdminSecurityPolicyNames.AdminRateLimit, adminRateLimit);
+                AdminSecurityPolicyNames.AdminRateLimit, adminRateLimit,
+                gateway?.AdminPort);
             AddCertificateRateLimit(options,
-                AgentSecurityPolicyNames.RotationIntentRateLimit, agentRotationRateLimit);
+                AgentSecurityPolicyNames.RotationIntentRateLimit, agentRotationRateLimit,
+                gateway?.AgentPort);
             AddCertificateRateLimit(options,
-                AgentSecurityPolicyNames.EnrollmentRateLimit, agentEnrollmentRateLimit);
+                AgentSecurityPolicyNames.EnrollmentRateLimit, agentEnrollmentRateLimit,
+                gateway?.AgentPort);
         });
 
         var modules = CreateModules();
@@ -194,18 +197,21 @@ public static class FleetoryApplication
     }
 
     private static void AddCertificateRateLimit(RateLimiterOptions options,
-        string policyName, int limit)
+        string policyName, int limit, int? listenerPort)
     {
-        options.AddPolicy(policyName, context => RateLimitPartition.GetFixedWindowLimiter(
-            context.Connection.ClientCertificate?.Thumbprint ??
-            context.Connection.RemoteIpAddress?.ToString() ?? "unknown-client",
-            _ => new FixedWindowRateLimiterOptions
-            {
-                PermitLimit = limit,
-                Window = TimeSpan.FromMinutes(1),
-                QueueLimit = 0,
-                AutoReplenishment = true
-            }));
+        options.AddPolicy(policyName, context =>
+            context.Connection.LocalPort != listenerPort
+                ? RateLimitPartition.GetNoLimiter("wrong-listener")
+                : RateLimitPartition.GetFixedWindowLimiter(
+                    context.Connection.ClientCertificate?.Thumbprint ??
+                    context.Connection.RemoteIpAddress?.ToString() ?? "unknown-client",
+                    _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = limit,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                        AutoReplenishment = true
+                    }));
     }
 
     private static ISecretProvider? ConfigureSecrets(WebApplicationBuilder builder)
