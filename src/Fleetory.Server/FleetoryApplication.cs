@@ -43,35 +43,20 @@ public static class FleetoryApplication
             throw new InvalidOperationException("Fleetory:AdminGateway:RateLimitPerMinute must be between 1 and 300.");
         }
 
-        var agentRotationRateLimit = builder.Configuration.GetValue<int?>(
-            "Fleetory:AgentGateway:RotationIntentRateLimitPerMinute") ?? 30;
-        if (agentRotationRateLimit is < 1 or > 300)
-        {
-            throw new InvalidOperationException(
-                "Fleetory:AgentGateway:RotationIntentRateLimitPerMinute must be between 1 and 300.");
-        }
+        var agentRotationRateLimit = GetAgentRateLimit(builder.Configuration,
+            "Fleetory:AgentGateway:RotationIntentRateLimitPerMinute");
+        var agentEnrollmentRateLimit = GetAgentRateLimit(builder.Configuration,
+            "Fleetory:AgentGateway:EnrollmentRateLimitPerMinute");
 
         builder.Services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-            options.AddFixedWindowLimiter(AdminSecurityPolicyNames.AdminRateLimit, limiter =>
-            {
-                limiter.PermitLimit = adminRateLimit;
-                limiter.Window = TimeSpan.FromMinutes(1);
-                limiter.QueueLimit = 0;
-                limiter.AutoReplenishment = true;
-            });
-            options.AddPolicy(AgentSecurityPolicyNames.RotationIntentRateLimit, context =>
-                RateLimitPartition.GetFixedWindowLimiter(
-                    context.Connection.ClientCertificate?.Thumbprint ??
-                    context.Connection.RemoteIpAddress?.ToString() ?? "unknown-agent",
-                    _ => new FixedWindowRateLimiterOptions
-                    {
-                        PermitLimit = agentRotationRateLimit,
-                        Window = TimeSpan.FromMinutes(1),
-                        QueueLimit = 0,
-                        AutoReplenishment = true
-                    }));
+            AddCertificateRateLimit(options,
+                AdminSecurityPolicyNames.AdminRateLimit, adminRateLimit);
+            AddCertificateRateLimit(options,
+                AgentSecurityPolicyNames.RotationIntentRateLimit, agentRotationRateLimit);
+            AddCertificateRateLimit(options,
+                AgentSecurityPolicyNames.EnrollmentRateLimit, agentEnrollmentRateLimit);
         });
 
         var modules = CreateModules();
@@ -195,6 +180,32 @@ public static class FleetoryApplication
         }
 
         return app;
+    }
+
+    private static int GetAgentRateLimit(IConfiguration configuration, string setting)
+    {
+        var limit = configuration.GetValue<int?>(setting) ?? 30;
+        if (limit is < 1 or > 300)
+        {
+            throw new InvalidOperationException($"{setting} must be between 1 and 300.");
+        }
+
+        return limit;
+    }
+
+    private static void AddCertificateRateLimit(RateLimiterOptions options,
+        string policyName, int limit)
+    {
+        options.AddPolicy(policyName, context => RateLimitPartition.GetFixedWindowLimiter(
+            context.Connection.ClientCertificate?.Thumbprint ??
+            context.Connection.RemoteIpAddress?.ToString() ?? "unknown-client",
+            _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = limit,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0,
+                AutoReplenishment = true
+            }));
     }
 
     private static ISecretProvider? ConfigureSecrets(WebApplicationBuilder builder)

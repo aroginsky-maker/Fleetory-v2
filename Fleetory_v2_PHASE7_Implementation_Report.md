@@ -26,15 +26,17 @@
 - A separate lost-key recovery path now requires two distinct Admin identities with `core.agent_certificate.recover.request` and `.approve` permissions. Both independently name the new certificate SHA-256, incident reference and evidence-bundle SHA-256. Approval atomically revokes all old bindings, invalidates pending grants and rotation intents, issues a five-minute grant bound to the new certificate and writes durable audit. PostgreSQL and real mTLS tests cover separation, denied permissions, evidence mismatch, expiry, replay, old-certificate rejection and audit rollback. Physical evidence validation, secure token delivery and the production incident procedure remain open.
 - The Agent rotation-intent route now has its own per-certificate rate limit, separate from Admin requests and Agent identity checks. The default is 30 per minute per Server replica; configuration accepts 1–300. The real mTLS test confirms 429 after the limit while Admin grant creation and Agent identity continue.
 - OpenBao secret reads and immudb audit export now refuse HTTP redirects at the default transport handler. A real loopback HTTP test sends a redirect to a second listener and confirms neither the OpenBao token nor the immudb login request is forwarded.
+- Agent enrollment now has a separate per-certificate one-minute rate limit, default 30 and configurable from 1–300. The real mTLS test checks HTTP 429 after repeated token attempts while Agent identity and another certificate's enrollment still work.
+- The Admin request limit is now partitioned by client certificate. Public web-port requests and a noisy Admin identity cannot consume another Admin's bucket; the real mTLS test verifies this isolation.
 
 ## Verification snapshot
 
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local tests after redirect protection | 162/162 passed |
-| Local production coverage | 93.60% |
-| CI production coverage at `c54f84f` | 93.06% |
+| Local tests after enrollment rate limit | 164/164 passed |
+| Local production coverage | 93.58% |
+| CI production coverage at `abc430c` | 93.75% |
 | Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
 | Local full audit pipeline | PostgreSQL outbox → Fleetory worker → immudb readback passed |
 | Local live certificate renewal | 4/4 new pairs validated; 4/4 previous pairs archived and matched backup; identity UUIDs retained; OpenBao TLS secrets matched |
@@ -42,13 +44,13 @@
 | Local WebAuthn/OIDC with real Admin mTLS | 401 without token; 403 with WebAuthn token at RBAC |
 | Windows server TLS chain in CI with provisioned OS CA stores | 2 certificates sent; root-only OpenSSL verification code 0 |
 | Linux container server TLS chain | 2 certificates sent; root-only OpenSSL verification code 0 |
-| Sonar PR coverage at `c54f84f` | 90.6% |
-| Sonar new-code coverage at `c54f84f` | 91.02% |
-| Sonar duplication at `c54f84f` | 0.0% |
-| Sonar new-code duplication at `c54f84f` | 0.0% |
-| Sonar Quality Gate at `c54f84f` | PASS |
+| Sonar PR coverage at `abc430c` | 90.6% |
+| Sonar new-code coverage at `abc430c` | 90.96% |
+| Sonar duplication at `abc430c` | 0.0% |
+| Sonar new-code duplication at `abc430c` | 0.0% |
+| Sonar Quality Gate at `abc430c` | PASS |
 
-The latest completed CI and Sonar numbers come from [run 39154974561](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39154974561). A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The PowerShell provisioning test runs in CI and remains under Sonar static analysis; it is excluded from the .NET coverage denominator because `dotnet-coverage` cannot instrument PowerShell. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
+The latest completed CI and Sonar numbers come from [run 39160170704](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39160170704). A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The PowerShell provisioning test runs in CI and remains under Sonar static analysis; it is excluded from the .NET coverage denominator because `dotnet-coverage` cannot instrument PowerShell. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
 
 ## Required before completion
 

@@ -53,7 +53,8 @@ public sealed class CoreModule : FleetoryModuleBase
             .GetValue<bool>("Fleetory:AgentGateway:Enabled"))
         {
             endpoints.MapGet("/agent/identity", static () => Results.NoContent());
-            endpoints.MapPost("/agent/enroll", AgentEnrollmentEndpoints.EnrollAsync);
+            endpoints.MapPost("/agent/enroll", AgentEnrollmentEndpoints.EnrollAsync)
+                .RequireRateLimiting(AgentSecurityPolicyNames.EnrollmentRateLimit);
             endpoints.MapPost("/agent/rotation-intents",
                 AgentEnrollmentEndpoints.CreateRotationIntentAsync)
                 .RequireRateLimiting(AgentSecurityPolicyNames.RotationIntentRateLimit);

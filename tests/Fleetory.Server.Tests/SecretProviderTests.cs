@@ -151,6 +151,8 @@ public sealed class SecretProviderTests
     [InlineData("Fleetory:AdminGateway:RateLimitPerMinute", 301)]
     [InlineData("Fleetory:AgentGateway:RotationIntentRateLimitPerMinute", 0)]
     [InlineData("Fleetory:AgentGateway:RotationIntentRateLimitPerMinute", 301)]
+    [InlineData("Fleetory:AgentGateway:EnrollmentRateLimitPerMinute", 0)]
+    [InlineData("Fleetory:AgentGateway:EnrollmentRateLimitPerMinute", 301)]
     public void Gateway_rate_limits_refuse_values_outside_supported_range(
         string setting, int perMinute)
     {

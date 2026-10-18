@@ -94,7 +94,9 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
     [Fact]
     public async Task Admin_gateway_limits_requests_before_repeated_authorization_work()
     {
-        using var adminPki = new TestPki(new Uri($"urn:fleetory:admin:{Guid.NewGuid():D}"));
+        using var adminPki = new TestPki(
+            new Uri($"urn:fleetory:admin:{Guid.NewGuid():D}"),
+            new Uri($"urn:fleetory:admin:{Guid.NewGuid():D}"));
         using var secrets = new TestSecretDirectory();
         secrets.Write("fleetory-postgresql", fixture.ConnectionString);
         secrets.Write("admin-gateway-root-ca", adminPki.Root.ExportCertificatePem());
@@ -120,7 +122,17 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
         try
         {
             using var admin = adminPki.CreateClient(adminPki.Client);
+            using var otherAdmin = adminPki.CreateClient(adminPki.UnregisteredClient);
+            using var web = new HttpClient();
             var url = $"https://127.0.0.1:{adminPort}/admin/devices/{Guid.NewGuid():D}/enrollment-grants";
+            for (var attempt = 0; attempt < 3; attempt++)
+            {
+                using var webAttempt = await web.PostAsJsonAsync(
+                    $"http://127.0.0.1:{webPort}/admin/devices/{Guid.NewGuid():D}/enrollment-grants",
+                    new { displayName = "denied" });
+                Assert.Equal(HttpStatusCode.NotFound, webAttempt.StatusCode);
+            }
+
             for (var attempt = 0; attempt < 3; attempt++)
             {
                 using var denied = await admin.PostAsJsonAsync(url, new { displayName = "denied" });
@@ -129,6 +141,9 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
 
             using var limited = await admin.PostAsJsonAsync(url, new { displayName = "denied" });
             Assert.Equal(HttpStatusCode.TooManyRequests, limited.StatusCode);
+            using var otherAllowed = await otherAdmin.PostAsJsonAsync(url,
+                new { displayName = "denied" });
+            Assert.Equal(HttpStatusCode.Forbidden, otherAllowed.StatusCode);
         }
         finally
         {
@@ -629,6 +644,7 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             $"--Fleetory:Secrets:Directory={secrets.Path}",
             "--Fleetory:AgentGateway:Enabled=true",
             "--Fleetory:AgentGateway:RotationIntentRateLimitPerMinute=2",
+            "--Fleetory:AgentGateway:EnrollmentRateLimitPerMinute=3",
             "--Fleetory:AdminGateway:Enabled=true",
             $"--Fleetory:Web:Port={ports[0]}",
             $"--Fleetory:AgentGateway:Port={ports[1]}",
@@ -680,6 +696,11 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             Assert.Equal(HttpStatusCode.NoContent, identity.StatusCode);
             using var replay = await agent.PostAsJsonAsync($"{agentBase}/agent/enroll", new { token });
             Assert.Equal(HttpStatusCode.Forbidden, replay.StatusCode);
+            using var limitedEnrollment = await agent.PostAsJsonAsync(
+                $"{agentBase}/agent/enroll", new { token });
+            Assert.Equal(HttpStatusCode.TooManyRequests, limitedEnrollment.StatusCode);
+            using var identityAfterLimit = await agent.GetAsync($"{agentBase}/agent/identity");
+            Assert.Equal(HttpStatusCode.NoContent, identityAfterLimit.StatusCode);
 
             var currentFingerprint = Convert.ToHexString(SHA256.HashData(agentPki.Client.RawData));
             using var collision = await admin.PostAsJsonAsync(
