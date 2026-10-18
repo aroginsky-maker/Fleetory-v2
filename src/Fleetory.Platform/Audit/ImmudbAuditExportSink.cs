@@ -30,7 +30,7 @@ public sealed class ImmudbAuditExportSink : IAuditExportSink, IDisposable
         _address = address;
         _username = username;
         _password = password;
-        _client = handler is null ? new HttpClient() : new HttpClient(handler);
+        _client = HttpOriginPolicy.CreateNonRedirectingClient(handler);
         _client.Timeout = TimeSpan.FromSeconds(20);
     }
 

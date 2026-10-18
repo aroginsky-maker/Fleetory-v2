@@ -2,6 +2,13 @@ namespace Fleetory.Platform.Secrets;
 
 internal static class HttpOriginPolicy
 {
+    public static HttpClient CreateNonRedirectingClient(HttpMessageHandler? handler)
+    {
+        return handler is null
+            ? new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
+            : new HttpClient(handler);
+    }
+
     public static void Validate(Uri address, bool allowInsecureLoopback, string service)
     {
         ArgumentNullException.ThrowIfNull(address);

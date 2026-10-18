@@ -29,7 +29,7 @@ public sealed class OpenBaoSecretProvider : ISecretProvider, IDisposable
         }
         _baseAddress = address;
         _token = token;
-        _client = handler is null ? new HttpClient() : new HttpClient(handler);
+        _client = HttpOriginPolicy.CreateNonRedirectingClient(handler);
         _client.Timeout = TimeSpan.FromSeconds(5);
     }
 
