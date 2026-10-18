@@ -24,14 +24,15 @@
 - Replacement grants additionally require the global `core.agent_certificate.rotate` permission alongside enrollment permission. Without it, the Admin route returns 403 and writes a denial audit event without issuing a token; real mTLS/PostgreSQL tests cover denial and authorized rotation. Neither permission is seeded by default.
 - An active Agent certificate must now create a five-minute rotation intent over its mTLS port for the exact replacement certificate SHA-256. Admin uses that one-time intent alongside both permissions and the old fingerprint; the grant can be redeemed only by that replacement certificate. The device row lock serializes grant, enrollment and revocation checks. Tests cover unbound Agent denial, expiry, replay, wrong replacement, revocation and audit rollback. Possession of the old key is verified; independent physical-device approval remains open.
 - A separate lost-key recovery path now requires two distinct Admin identities with `core.agent_certificate.recover.request` and `.approve` permissions. Both independently name the new certificate SHA-256, incident reference and evidence-bundle SHA-256. Approval atomically revokes all old bindings, invalidates pending grants and rotation intents, issues a five-minute grant bound to the new certificate and writes durable audit. PostgreSQL and real mTLS tests cover separation, denied permissions, evidence mismatch, expiry, replay, old-certificate rejection and audit rollback. Physical evidence validation, secure token delivery and the production incident procedure remain open.
+- The Agent rotation-intent route now has its own per-certificate rate limit, separate from Admin requests and Agent identity checks. The default is 30 per minute per Server replica; configuration accepts 1–300. The real mTLS test confirms 429 after the limit while Admin grant creation and Agent identity continue.
 
 ## Verification snapshot
 
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local tests after two-person Agent recovery | 158/158 passed |
-| Local production coverage | 93.39% |
+| Local tests after Agent rotation rate limit | 160/160 passed |
+| Local production coverage | 93.25% |
 | CI production coverage at `c54f84f` | 93.06% |
 | Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
 | Local full audit pipeline | PostgreSQL outbox → Fleetory worker → immudb readback passed |

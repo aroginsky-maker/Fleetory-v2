@@ -147,15 +147,18 @@ public sealed class SecretProviderTests
     }
 
     [Theory]
-    [InlineData(0)]
-    [InlineData(301)]
-    public void Admin_rate_limit_refuses_values_outside_supported_range(int perMinute)
+    [InlineData("Fleetory:AdminGateway:RateLimitPerMinute", 0)]
+    [InlineData("Fleetory:AdminGateway:RateLimitPerMinute", 301)]
+    [InlineData("Fleetory:AgentGateway:RotationIntentRateLimitPerMinute", 0)]
+    [InlineData("Fleetory:AgentGateway:RotationIntentRateLimitPerMinute", 301)]
+    public void Gateway_rate_limits_refuse_values_outside_supported_range(
+        string setting, int perMinute)
     {
         var exception = Assert.Throws<InvalidOperationException>(() =>
             FleetoryApplication.Build([
                 "--environment=Development",
                 $"--ConnectionStrings:Fleetory={TestConnectionString}",
-                $"--Fleetory:AdminGateway:RateLimitPerMinute={perMinute}"
+                $"--{setting}={perMinute}"
             ]));
         Assert.Contains("must be between 1 and 300", exception.Message,
             StringComparison.Ordinal);

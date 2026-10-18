@@ -43,6 +43,14 @@ public static class FleetoryApplication
             throw new InvalidOperationException("Fleetory:AdminGateway:RateLimitPerMinute must be between 1 and 300.");
         }
 
+        var agentRotationRateLimit = builder.Configuration.GetValue<int?>(
+            "Fleetory:AgentGateway:RotationIntentRateLimitPerMinute") ?? 30;
+        if (agentRotationRateLimit is < 1 or > 300)
+        {
+            throw new InvalidOperationException(
+                "Fleetory:AgentGateway:RotationIntentRateLimitPerMinute must be between 1 and 300.");
+        }
+
         builder.Services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -53,6 +61,17 @@ public static class FleetoryApplication
                 limiter.QueueLimit = 0;
                 limiter.AutoReplenishment = true;
             });
+            options.AddPolicy(AgentSecurityPolicyNames.RotationIntentRateLimit, context =>
+                RateLimitPartition.GetFixedWindowLimiter(
+                    context.Connection.ClientCertificate?.Thumbprint ??
+                    context.Connection.RemoteIpAddress?.ToString() ?? "unknown-agent",
+                    _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = agentRotationRateLimit,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                        AutoReplenishment = true
+                    }));
         });
 
         var modules = CreateModules();

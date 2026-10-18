@@ -628,6 +628,7 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             "--environment=Development",
             $"--Fleetory:Secrets:Directory={secrets.Path}",
             "--Fleetory:AgentGateway:Enabled=true",
+            "--Fleetory:AgentGateway:RotationIntentRateLimitPerMinute=2",
             "--Fleetory:AdminGateway:Enabled=true",
             $"--Fleetory:Web:Port={ports[0]}",
             $"--Fleetory:AgentGateway:Port={ports[1]}",
@@ -743,6 +744,11 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             Assert.Equal(HttpStatusCode.OK, renewedIntent.StatusCode);
             var renewedIntentBody = await renewedIntent.Content
                 .ReadFromJsonAsync<System.Text.Json.JsonElement>();
+            using var limitedIntent = await agent.PostAsJsonAsync(intentUrl,
+                new { replacementCertificateSha256 = replacementFingerprint });
+            Assert.Equal(HttpStatusCode.TooManyRequests, limitedIntent.StatusCode);
+            using var unaffectedIdentity = await agent.GetAsync($"{agentBase}/agent/identity");
+            Assert.Equal(HttpStatusCode.NoContent, unaffectedIdentity.StatusCode);
             using var rotationGrant = await admin.PostAsJsonAsync(
                 grantUrl, new
                 {
