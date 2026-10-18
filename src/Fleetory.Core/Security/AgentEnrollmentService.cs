@@ -17,6 +17,7 @@ public sealed class AgentEnrollmentService(
     IClock clock)
 {
     public const string Permission = "core.agent_certificate.enroll";
+    public const string RotationPermission = "core.agent_certificate.rotate";
     private static readonly TimeSpan GrantLifetime = TimeSpan.FromMinutes(5);
 
     public async ValueTask<string> CreateGrantAsync(
@@ -69,6 +70,14 @@ public sealed class AgentEnrollmentService(
                     throw new AgentEnrollmentConflictException();
                 }
 
+                if (expectedCertificateSha256 is not null &&
+                    !(await authorization.AuthorizeAsync(
+                        new AuthorizationRequest(actor, RotationPermission), cancellationToken)).IsAllowed)
+                {
+                    throw new UnauthorizedAccessException(
+                        "Agent certificate rotation is not authorized.");
+                }
+
                 database.AgentEnrollmentGrants.Add(AgentEnrollmentGrantRecord.Create(
                     tokenHash, deviceId, now.Add(GrantLifetime), expectedCertificateSha256));
                 await database.SaveChangesAsync(cancellationToken);
@@ -80,6 +89,12 @@ public sealed class AgentEnrollmentService(
         catch (AgentEnrollmentConflictException)
         {
             await WriteAuditAsync(actor, "core.agent_enrollment.grant_collision",
+                deviceId, correlationId, clock.UtcNow, cancellationToken);
+            throw;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            await WriteAuditAsync(actor, "core.agent_enrollment.grant_rotation_denied",
                 deviceId, correlationId, clock.UtcNow, cancellationToken);
             throw;
         }

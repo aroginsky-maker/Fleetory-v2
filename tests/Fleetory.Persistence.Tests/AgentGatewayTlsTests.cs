@@ -294,6 +294,16 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             grantCollisionCorrelation, "core.agent_enrollment.grant_collision"));
 
         var fingerprint = Convert.ToHexString(SHA256.HashData(pki.Client.RawData));
+        var deniedRotationCorrelation = CorrelationId.New();
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(async () =>
+            await service.CreateGrantAsync(actor, deviceId, "collision device",
+                deniedRotationCorrelation, expectedCertificateSha256: fingerprint));
+        Assert.Equal(1, await CountAuditActionAsync(
+            deniedRotationCorrelation, "core.agent_enrollment.grant_rotation_denied"));
+        Assert.Equal(2, await database.AgentEnrollmentGrants.CountAsync(
+            row => row.DeviceId == deviceId));
+
+        await GrantAdminPermissionAsync(adminId, AgentEnrollmentService.RotationPermission);
         var rotationToken = await service.CreateGrantAsync(
             actor, deviceId, "collision device", CorrelationId.New(),
             expectedCertificateSha256: fingerprint);
@@ -480,6 +490,9 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
                 displayName = "ignored for existing device",
                 expectedCertificateSha256 = currentFingerprint
             };
+            using var rotationDenied = await admin.PostAsJsonAsync(grantUrl, rotationRequest);
+            Assert.Equal(HttpStatusCode.Forbidden, rotationDenied.StatusCode);
+            await GrantAdminPermissionAsync(adminId, AgentEnrollmentService.RotationPermission);
             using var expiringGrant = await admin.PostAsJsonAsync(
                 grantUrl, rotationRequest);
             Assert.Equal(HttpStatusCode.OK, expiringGrant.StatusCode);
