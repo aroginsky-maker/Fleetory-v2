@@ -16,7 +16,7 @@
 - Reproducible local browser S256 PKCE and virtual WebAuthn check: the signed token carries `amr=webauthn` and the certificate-bound subject; the Admin route returns 401 without it and 403 at RBAC with it.
 - Admin Gateway startup rejects wildcard bind addresses, keeping its listener on loopback or an explicitly selected management IP.
 - Windows CI provisions an ephemeral root and intermediate in the runner certificate stores, then confirms the actual Admin listener sends two certificates and passes root-only OpenSSL verification. Windows hosts require equivalent approved CA-store provisioning.
-- Lab certificate provisioning now restricts the local key directory before copying new keys and removes temporary leaf keys from CA containers after issuance.
+- Lab certificate provisioning restricts the local key directory before copying new keys, validates each leaf certificate/key pair, archives the previous pair for rotation recovery and removes temporary leaf keys from CA containers. An isolated crypto-backed test verifies successful rotation and failed-copy rollback without touching the live lab.
 
 ## Verification snapshot
 
@@ -27,16 +27,18 @@
 | Local coverage | 89.79% |
 | Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
 | Local full audit pipeline | PostgreSQL outbox → Fleetory worker → immudb readback passed |
+| Local live certificate renewal | 4/4 new pairs validated; 4/4 previous pairs archived and matched backup; identity UUIDs retained; OpenBao TLS secrets matched |
+| Isolated certificate provisioning checks | Rotation archive, failed-copy rollback and mismatched-key rejection passed |
 | Local WebAuthn/OIDC with real Admin mTLS | 401 without token; 403 with WebAuthn token at RBAC |
 | Windows server TLS chain in CI with provisioned OS CA stores | 2 certificates sent; root-only OpenSSL verification code 0 |
 | Linux container server TLS chain | 2 certificates sent; root-only OpenSSL verification code 0 |
-| CI coverage at `e9b95f1` | 90.03% |
-| Sonar PR coverage at `e9b95f1` | 88.8% |
-| Sonar new-code coverage at `e9b95f1` | 88.93% |
-| Sonar duplication at `e9b95f1` | 0.0% |
-| Sonar Quality Gate at `e9b95f1` | PASS |
+| CI coverage at `53db6dc` | 90.03% |
+| Sonar PR coverage at `53db6dc` | 88.8% |
+| Sonar new-code coverage at `53db6dc` | 88.93% |
+| Sonar duplication at `53db6dc` | 0.0% |
+| Sonar Quality Gate at `53db6dc` | PASS |
 
-The latest completed CI and Sonar numbers come from [run 39075300878](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39075300878). The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
+The latest completed CI and Sonar numbers come from [run 39112377996](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39112377996). A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
 
 ## Required before completion
 

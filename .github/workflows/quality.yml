@@ -79,6 +79,10 @@ jobs:
           java -version
           docker info --format '{{.ServerVersion}}'
 
+      - name: Verify lab certificate rotation and rollback
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/CertificateProvisioning.Tests.ps1
+
       - name: Run Fleetory quality verification
         shell: pwsh
         run: |

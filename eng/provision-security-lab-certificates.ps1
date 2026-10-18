@@ -1,5 +1,8 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    throw 'PowerShell 7 or later is required to validate certificate/private-key pairs.'
+}
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $labDirectory = Join-Path (Split-Path -Parent $repoRoot) 'work/security-lab'
@@ -9,20 +12,20 @@ $composePath = Join-Path $repoRoot 'infra/security-lab/compose.yaml'
 if (-not (Test-Path -LiteralPath $envPath)) { throw 'Start the security lab first.' }
 New-Item -ItemType Directory -Path $certDirectory -Force | Out-Null
 
-function Protect-LabCertificateDirectory {
+function Protect-LabCertificateDirectory([string] $Directory) {
     if ($env:OS -eq 'Windows_NT') {
         $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-        & icacls $certDirectory /inheritance:r /grant:r "${identity}:(OI)(CI)F" | Out-Null
+        & icacls $Directory /inheritance:r /grant:r "${identity}:(OI)(CI)F" | Out-Null
         if ($LASTEXITCODE -ne 0) { throw 'Could not restrict certificate directory ACL.' }
-        foreach ($file in Get-ChildItem -LiteralPath $certDirectory -File) {
+        foreach ($file in Get-ChildItem -LiteralPath $Directory -File) {
             & icacls $file.FullName /inheritance:r /grant:r "${identity}:F" | Out-Null
             if ($LASTEXITCODE -ne 0) { throw 'Could not restrict certificate ACL.' }
         }
     }
     else {
-        & chmod 700 $certDirectory
+        & chmod 700 $Directory
         if ($LASTEXITCODE -ne 0) { throw 'Could not restrict certificate directory.' }
-        foreach ($file in Get-ChildItem -LiteralPath $certDirectory -File) {
+        foreach ($file in Get-ChildItem -LiteralPath $Directory -File) {
             & chmod 600 $file.FullName
             if ($LASTEXITCODE -ne 0) { throw 'Could not restrict certificate file.' }
         }
@@ -30,7 +33,7 @@ function Protect-LabCertificateDirectory {
 }
 
 # Protect the parent before docker cp can create any private key in it.
-Protect-LabCertificateDirectory
+Protect-LabCertificateDirectory $certDirectory
 
 function Issue-LabCertificate {
     param(
@@ -44,6 +47,10 @@ function Issue-LabCertificate {
     $suffix = [Guid]::NewGuid().ToString('N')
     $remoteCrt = "/tmp/fleetory-$suffix.crt"
     $remoteKey = "/tmp/fleetory-$suffix.key"
+    $stagedCrt = Join-Path $certDirectory "$Stem.$suffix.crt.pending"
+    $stagedKey = Join-Path $certDirectory "$Stem.$suffix.key.pending"
+    $activeCrt = Join-Path $certDirectory "$Stem.crt"
+    $activeKey = Join-Path $certDirectory "$Stem.key"
     $arguments = @('compose', '--env-file', $envPath, '-f', $composePath,
         'exec', '-T', $Service, 'step', 'ca', 'certificate', $Subject,
         $remoteCrt, $remoteKey, '--ca-url', 'https://localhost:9000',
@@ -52,16 +59,65 @@ function Issue-LabCertificate {
     foreach ($entry in $San) { $arguments += @('--san', $entry) }
     $container = "fleetory-security-lab-$Service-1"
     try {
-        & docker @arguments | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "Certificate issuance failed for $Service." }
-        & docker cp "${container}:$remoteCrt" (Join-Path $certDirectory "$Stem.crt") | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "Certificate copy failed for $Service." }
-        & docker cp "${container}:$remoteKey" (Join-Path $certDirectory "$Stem.key") | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "Key copy failed for $Service." }
+        try {
+            & docker @arguments | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Certificate issuance failed for $Service." }
+            & docker cp "${container}:$remoteCrt" $stagedCrt | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Certificate copy failed for $Service." }
+            & docker cp "${container}:$remoteKey" $stagedKey | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Key copy failed for $Service." }
+        }
+        finally {
+            & docker exec $container rm -f -- $remoteCrt $remoteKey | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Temporary CA container key cleanup failed for $Service." }
+        }
+
+        $pair = [Security.Cryptography.X509Certificates.X509Certificate2]::CreateFromPemFile(
+            $stagedCrt, $stagedKey)
+        $pair.Dispose()
+
+        $oldCertificateExists = Test-Path -LiteralPath $activeCrt -PathType Leaf
+        $oldKeyExists = Test-Path -LiteralPath $activeKey -PathType Leaf
+        if ($oldCertificateExists -ne $oldKeyExists) {
+            throw "Existing $Stem certificate pair is incomplete."
+        }
+
+        $archiveCrt = $null
+        $archiveKey = $null
+        if ($oldCertificateExists) {
+            $history = Join-Path $certDirectory 'history'
+            New-Item -ItemType Directory -Path $history -Force | Out-Null
+            Protect-LabCertificateDirectory $history
+            $timestamp = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ',
+                [Globalization.CultureInfo]::InvariantCulture)
+            $archive = Join-Path $history "$Stem-$timestamp-$suffix"
+            New-Item -ItemType Directory -Path $archive | Out-Null
+            Protect-LabCertificateDirectory $archive
+            $archiveCrt = Join-Path $archive "$Stem.crt"
+            $archiveKey = Join-Path $archive "$Stem.key"
+            Copy-Item -LiteralPath $activeCrt -Destination $archiveCrt
+            Copy-Item -LiteralPath $activeKey -Destination $archiveKey
+            Protect-LabCertificateDirectory $archive
+        }
+
+        try {
+            Move-Item -LiteralPath $stagedCrt -Destination $activeCrt -Force
+            Move-Item -LiteralPath $stagedKey -Destination $activeKey -Force
+            Protect-LabCertificateDirectory $certDirectory
+        }
+        catch {
+            if ($archiveCrt -and $archiveKey) {
+                Copy-Item -LiteralPath $archiveCrt -Destination $activeCrt -Force
+                Copy-Item -LiteralPath $archiveKey -Destination $activeKey -Force
+            }
+            else {
+                Remove-Item -LiteralPath $activeCrt, $activeKey -Force -ErrorAction SilentlyContinue
+            }
+            throw
+        }
     }
     finally {
-        & docker exec $container rm -f -- $remoteCrt $remoteKey | Out-Null
-        if ($LASTEXITCODE -ne 0) { throw "Temporary CA container key cleanup failed for $Service." }
+        Remove-Item -LiteralPath $stagedCrt, $stagedKey -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -105,7 +161,7 @@ foreach ($service in @('agent', 'admin')) {
 
 [IO.File]::WriteAllText((Join-Path $certDirectory 'agent-device-id'), $deviceId)
 [IO.File]::WriteAllText((Join-Path $certDirectory 'admin-person-id'), $adminId)
-Protect-LabCertificateDirectory
+Protect-LabCertificateDirectory $certDirectory
 
 $settings = @{}
 foreach ($entry in [IO.File]::ReadAllLines($envPath)) {
