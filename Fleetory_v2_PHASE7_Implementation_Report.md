@@ -53,6 +53,7 @@
 | Last directly retrieved CI production coverage, `a6373cb` | 93.87% |
 | Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
 | Local full audit pipeline | PostgreSQL outbox → Fleetory worker → immudb readback with dedicated account passed |
+| Local command-signing lab after Windows ACL hardening | OpenBao Transit v2 signature accepted once; replay rejected; Server token denied (403) |
 | Local live certificate renewal | 4/4 new pairs validated; 4/4 previous pairs archived and matched backup; identity UUIDs retained; OpenBao TLS secrets matched |
 | Isolated certificate provisioning checks | Rotation archive, failed-copy rollback and mismatched-key rejection passed |
 | Local WebAuthn/OIDC with real Admin mTLS | 401 without token; 403 with WebAuthn token at RBAC |
