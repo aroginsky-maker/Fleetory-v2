@@ -16,5 +16,6 @@
     <ProjectReference Include="../../src/Fleetory.Core/Fleetory.Core.csproj" />
     <ProjectReference Include="../../src/Fleetory.Core.Contracts/Fleetory.Core.Contracts.csproj" />
     <ProjectReference Include="../../src/Fleetory.SharedKernel/Fleetory.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\src\Fleetory.CommandSigning\Fleetory.CommandSigning.csproj" />
   </ItemGroup>
 </Project>

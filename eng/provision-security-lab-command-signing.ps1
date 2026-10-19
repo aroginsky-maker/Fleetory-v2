@@ -1,3 +1,5 @@
+param([switch]$ResetEphemeralTrust)
+
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
@@ -58,7 +60,16 @@ New-Item -ItemType Directory -Path $trustDirectory -Force | Out-Null
 if (Test-Path -LiteralPath $trustPath) {
     if (-not [Linq.Enumerable]::SequenceEqual(
         [byte[]][IO.File]::ReadAllBytes($trustPath), [byte[]]$publicKey)) {
-        throw 'The existing Agent trust key differs from OpenBao.'
+        if (-not $ResetEphemeralTrust) {
+            throw 'The existing Agent trust key differs from OpenBao. Use -ResetEphemeralTrust only after a lab OpenBao dev-mode restart.'
+        }
+        $retiredDirectory = Join-Path $signerDirectory 'retired-trust'
+        New-Item -ItemType Directory -Path $retiredDirectory -Force | Out-Null
+        $retiredPath = Join-Path $retiredDirectory ("{0:yyyyMMddHHmmss}-{1}.spki" -f `
+            [DateTimeOffset]::UtcNow, [Guid]::NewGuid().ToString('N'))
+        Move-Item -LiteralPath $trustPath -Destination $retiredPath
+        [IO.File]::WriteAllBytes($trustPath, $publicKey)
+        Write-Host "Archived stale ephemeral lab trust key: $retiredPath"
     }
 }
 else { [IO.File]::WriteAllBytes($trustPath, $publicKey) }
@@ -102,8 +113,15 @@ if ($previousToken) {
 [IO.File]::WriteAllText($tokenPath, $signerToken, [Text.UTF8Encoding]::new($false))
 if ($env:OS -eq 'Windows_NT') {
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-    foreach ($path in @($trustDirectory, $trustPath, $signerDirectory, $tokenPath)) {
-        $grant = if ($path -in @($trustDirectory, $signerDirectory)) {
+    $protectedPaths = @($trustDirectory, $trustPath, $signerDirectory, $tokenPath)
+    $retiredDirectory = Join-Path $signerDirectory 'retired-trust'
+    if (Test-Path -LiteralPath $retiredDirectory) {
+        $protectedPaths += $retiredDirectory
+        $protectedPaths += @(Get-ChildItem -LiteralPath $retiredDirectory -File |
+            Select-Object -ExpandProperty FullName)
+    }
+    foreach ($path in $protectedPaths) {
+        $grant = if ($path -in @($trustDirectory, $signerDirectory, $retiredDirectory)) {
             "${identity}:(OI)(CI)F"
         } else { "${identity}:F" }
         & icacls $path /inheritance:r /grant:r $grant | Out-Null
@@ -113,6 +131,13 @@ if ($env:OS -eq 'Windows_NT') {
 else {
     & chmod 700 $trustDirectory $signerDirectory
     & chmod 600 $trustPath $tokenPath
+    $retiredDirectory = Join-Path $signerDirectory 'retired-trust'
+    if (Test-Path -LiteralPath $retiredDirectory) {
+        & chmod 700 $retiredDirectory
+        Get-ChildItem -LiteralPath $retiredDirectory -File | ForEach-Object {
+            & chmod 600 $_.FullName
+        }
+    }
 }
 
 Write-Host "Lab Transit key $keyId is non-exportable; Agent trust file: $trustPath"

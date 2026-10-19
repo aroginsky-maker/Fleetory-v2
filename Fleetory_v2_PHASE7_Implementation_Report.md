@@ -14,6 +14,7 @@
 - PostgreSQL audit event and outbox transaction, lease-based background export and retry. Optional immudb sink uses conditional EventId writes, readback and revision checks. The lab supplies its password through OpenBao.
 - File and OpenBao secret providers; Agent-local ECDSA command verification, deny-by-default policy, durable SQLite replay store and per-device public-key trust files. No Agent command execution endpoint is exposed.
 - Lab-only OpenBao Transit signing key with a separate sign-only token and DeviceId-bound public trust file. The Server token is read-only for its KV secrets.
+- Separate `Fleetory.CommandSigning` component signs only empty, one-minute `Inventory.Refresh` commands, pins the Transit key version and verifies the returned signature against a trusted public key. The Server cannot reference that project. A repeatable live lab check passed Transit signing, Agent verification, durable replay rejection and 403 for the Server token. After an OpenBao development-mode restart, stale Agent trust requires an explicit lab-only reset that archives the prior key.
 - Reproducible local browser S256 PKCE and virtual WebAuthn check: the signed token carries `amr=webauthn` and the certificate-bound subject; the Admin route returns 401 without it and 403 at RBAC with it.
 - Admin Gateway startup rejects wildcard bind addresses, keeping its listener on loopback or an explicitly selected management IP.
 - Windows CI provisions an ephemeral root and intermediate in the runner certificate stores, then confirms the actual Admin listener sends two certificates and passes root-only OpenSSL verification. Windows hosts require equivalent approved CA-store provisioning.
@@ -41,8 +42,8 @@
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local tests after scope revisions | 177/177 passed |
-| Local production coverage after scope revisions | 93.76% |
+| Local tests after command signer and scope revisions | 184/184 passed |
+| Local production coverage after command signer and scope revisions | 93.83% |
 | Last directly retrieved CI production coverage, `a6373cb` | 93.87% |
 | Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
 | Local full audit pipeline | PostgreSQL outbox → Fleetory worker → immudb readback passed |
@@ -52,13 +53,13 @@
 | Windows server TLS chain in CI with provisioned OS CA stores | 2 certificates sent; root-only OpenSSL verification code 0 |
 | Linux container server TLS chain | 2 certificates sent; root-only OpenSSL verification code 0 |
 | Last directly retrieved Sonar PR coverage, `a6373cb` | 90.8% |
-| Sonar new-code coverage at `442f800` | 91.3% |
+| Sonar new-code coverage at `245d899` | 91.6% |
 | Last directly retrieved Sonar overall duplication, `a6373cb` | 0.0% |
-| Sonar new-code duplication at `442f800` | 0.0% |
-| Sonar new issues at `442f800` | 0 |
-| Sonar Quality Gate at `442f800` | PASS |
+| Sonar new-code duplication at `245d899` | 0.0% |
+| Sonar new issues at `245d899` | 0 |
+| Sonar Quality Gate at `245d899` | PASS |
 
-The latest completed CI at `442f800` is [run 39206389306](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39206389306); all jobs passed. Its Sonar check summary exposes the current new-code percentages above, while the private repository's detailed Actions logs and Sonar measures are unavailable to the connected read tool. The older overall CI and Sonar values are labeled with their verified commit rather than projected onto the latest one. A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The PowerShell provisioning test runs in CI and remains under Sonar static analysis; it is excluded from the .NET coverage denominator because `dotnet-coverage` cannot instrument PowerShell. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
+The latest completed CI at `245d899` passed all jobs. Its Sonar check summary exposes the current new-code percentages above, while the private repository's detailed Actions logs and Sonar measures are unavailable to the connected read tool. The older overall CI and Sonar values are labeled with their verified commit rather than projected onto the latest one. A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The PowerShell provisioning test runs in CI and remains under Sonar static analysis; it is excluded from the .NET coverage denominator because `dotnet-coverage` cannot instrument PowerShell. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
 
 ## Required before completion
 

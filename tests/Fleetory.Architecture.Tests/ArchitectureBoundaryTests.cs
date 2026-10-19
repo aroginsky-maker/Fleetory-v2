@@ -703,6 +703,25 @@ public sealed partial class ArchitectureBoundaryTests
     }
 
     [Fact]
+    public void Command_signer_must_remain_outside_server_dependency_graph()
+    {
+        var root = FindSolutionRoot();
+        AssertProjectReferencesEqual("Fleetory.CommandSigning",
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "Fleetory.Core.Contracts"
+            }, GetProjectReferences(ProjectPath(root, "Fleetory.CommandSigning")));
+
+        foreach (var projectName in ImplementationProjects.Concat(ContractProjects)
+                     .Append("Fleetory.Server").Append("Fleetory.Agent.Security")
+                     .Append("Fleetory.SharedKernel").Append("Fleetory.ModuleAbstractions"))
+        {
+            Assert.DoesNotContain("Fleetory.CommandSigning",
+                GetProjectReferences(ProjectPath(root, projectName)));
+        }
+    }
+
+    [Fact]
     public void Server_side_runtime_must_remain_os_neutral()
     {
         var root = FindSolutionRoot();
