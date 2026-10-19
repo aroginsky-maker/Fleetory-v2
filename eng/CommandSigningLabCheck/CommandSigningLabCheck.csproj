@@ -3,6 +3,9 @@
     <OutputType>Exe</OutputType>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../AgentTestSupport/WindowsAgentAclTestHelper.cs" Link="WindowsAgentAclTestHelper.cs" />
+  </ItemGroup>
+  <ItemGroup>
     <ProjectReference Include="../../src/Fleetory.CommandSigning/Fleetory.CommandSigning.csproj" />
     <ProjectReference Include="../../src/Fleetory.Agent.Security/Fleetory.Agent.Security.csproj" />
     <ProjectReference Include="../../src/Fleetory.SharedKernel/Fleetory.SharedKernel.csproj" />

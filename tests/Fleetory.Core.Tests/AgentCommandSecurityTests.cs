@@ -1,6 +1,7 @@
 using Fleetory.Agent.Security;
 using Fleetory.Core.Contracts;
 using System.Security.Cryptography;
+using Fleetory.AgentTestSupport;
 
 namespace Fleetory.Core.Tests;
 
@@ -74,9 +75,43 @@ public sealed class AgentCommandSecurityTests
                 File.SetUnixFileMode(directory,
                     UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute |
                     UnixFileMode.OtherRead);
+                await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+                    await store.TryConsumeAsync(Device, Guid.NewGuid(), "fresh-nonce-123456", DateTimeOffset.UtcNow));
                 Assert.Throws<InvalidOperationException>(() =>
                     new SqliteCommandReplayStore(Path.Combine(directory, "other.db")));
             }
+            else
+            {
+                WindowsAgentAclTestHelper.GrantEveryoneWrite(directory, directory: true);
+                await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+                    await store.TryConsumeAsync(Device, Guid.NewGuid(), "fresh-nonce-123456", DateTimeOffset.UtcNow));
+                Assert.Throws<InvalidOperationException>(() =>
+                    new SqliteCommandReplayStore(Path.Combine(directory, "other.db")));
+            }
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Windows_replay_storage_rejects_exposed_existing_database()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            var path = Path.Combine(directory, "replay.db");
+            var store = new SqliteCommandReplayStore(path);
+            WindowsAgentAclTestHelper.GrantEveryoneWrite(path, directory: false);
+            Assert.Throws<InvalidOperationException>(() => new SqliteCommandReplayStore(path));
+            await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+                await store.TryConsumeAsync(Device, Guid.NewGuid(), "new-nonce-12345678", DateTimeOffset.UtcNow));
         }
         finally
         {
@@ -140,6 +175,37 @@ public sealed class AgentCommandSecurityTests
                 await Assert.ThrowsAsync<InvalidOperationException>(async () =>
                     await trust.FindPublicKeyAsync(Device, "key-1"));
             }
+            else
+            {
+                await File.WriteAllBytesAsync(path, [1, 2, 3]);
+                WindowsAgentAclTestHelper.GrantEveryoneWrite(path, directory: false);
+                await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+                    await trust.FindPublicKeyAsync(Device, "key-1"));
+            }
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Windows_trust_directory_rejects_broad_access()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            var trust = new DirectoryCommandVerificationKeys(Device, directory);
+            WindowsAgentAclTestHelper.GrantEveryoneWrite(directory, directory: true);
+            Assert.Throws<InvalidOperationException>(() =>
+                new DirectoryCommandVerificationKeys(Device, directory));
+            await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+                await trust.FindPublicKeyAsync(Device, "key-1"));
         }
         finally
         {
@@ -151,7 +217,11 @@ public sealed class AgentCommandSecurityTests
     {
         var directory = Path.Combine(Path.GetTempPath(), "fleetory-agent-replay-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
-        if (!OperatingSystem.IsWindows())
+        if (OperatingSystem.IsWindows())
+        {
+            WindowsAgentAclTestHelper.ProtectDirectory(directory);
+        }
+        else
         {
             File.SetUnixFileMode(directory,
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);

@@ -18,12 +18,21 @@ public sealed class DirectoryCommandVerificationKeys : ICommandVerificationKeys
 
         _localDeviceId = localDeviceId;
         _directory = Path.GetFullPath(directory);
+        ValidateDirectory();
+    }
+
+    private void ValidateDirectory()
+    {
         if ((File.GetAttributes(_directory) & FileAttributes.ReparsePoint) != 0)
         {
             throw new InvalidOperationException("Command trust directory must not be a symbolic link.");
         }
 
-        if (!OperatingSystem.IsWindows())
+        if (OperatingSystem.IsWindows())
+        {
+            WindowsAgentStorageAcl.ValidateDirectory(_directory, "Command trust directory");
+        }
+        else
         {
             const UnixFileMode unsafeBits = UnixFileMode.GroupWrite | UnixFileMode.OtherWrite;
             if ((File.GetUnixFileMode(_directory) & unsafeBits) != 0)
@@ -44,6 +53,7 @@ public sealed class DirectoryCommandVerificationKeys : ICommandVerificationKeys
             return null;
         }
 
+        ValidateDirectory();
         var path = Path.Combine(_directory, $"{targetDeviceId.Value:N}-{keyId}.spki");
         try
         {
@@ -58,7 +68,11 @@ public sealed class DirectoryCommandVerificationKeys : ICommandVerificationKeys
                 throw new InvalidOperationException("Command trust file is invalid.");
             }
 
-            if (!OperatingSystem.IsWindows())
+            if (OperatingSystem.IsWindows())
+            {
+                WindowsAgentStorageAcl.ValidateFile(path, "Command trust file");
+            }
+            else
             {
                 const UnixFileMode unsafeBits = UnixFileMode.GroupWrite | UnixFileMode.OtherWrite;
                 if ((File.GetUnixFileMode(path) & unsafeBits) != 0)

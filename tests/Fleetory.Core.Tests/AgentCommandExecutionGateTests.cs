@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using Fleetory.Agent.Security;
+using Fleetory.AgentTestSupport;
 using Fleetory.Core.Contracts;
 using Fleetory.SharedKernel;
 
@@ -73,7 +74,12 @@ public sealed class AgentCommandExecutionGateTests
             _trustDirectory = Path.Combine(_directory, "trust");
             _replayPath = Path.Combine(_directory, "replay.db");
             Directory.CreateDirectory(_trustDirectory);
-            if (!OperatingSystem.IsWindows())
+            if (OperatingSystem.IsWindows())
+            {
+                WindowsAgentAclTestHelper.ProtectDirectory(_directory);
+                WindowsAgentAclTestHelper.ProtectDirectory(_trustDirectory);
+            }
+            else
             {
                 File.SetUnixFileMode(_directory,
                     UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);

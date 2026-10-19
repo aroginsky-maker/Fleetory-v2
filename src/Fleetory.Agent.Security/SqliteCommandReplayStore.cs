@@ -6,6 +6,8 @@ namespace Fleetory.Agent.Security;
 /// <summary>Agent-local, durable, atomic command and nonce consumption.</summary>
 public sealed class SqliteCommandReplayStore : ICommandReplayStore
 {
+    private readonly string _databasePath;
+    private readonly string _directory;
     private readonly string _connectionString;
 
     public SqliteCommandReplayStore(string databasePath)
@@ -16,27 +18,14 @@ public sealed class SqliteCommandReplayStore : ICommandReplayStore
             throw new ArgumentException("Replay database requires an absolute path in an existing directory.", nameof(databasePath));
         }
 
-        var directory = Path.GetDirectoryName(databasePath)!;
-        if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0 ||
-            File.Exists(databasePath) && (File.GetAttributes(databasePath) & FileAttributes.ReparsePoint) != 0)
-        {
-            throw new InvalidOperationException("Replay storage must not use a symbolic link.");
-        }
-
-        if (!OperatingSystem.IsWindows())
-        {
-            const UnixFileMode unsafeBits = UnixFileMode.GroupRead | UnixFileMode.GroupWrite |
-                UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherWrite |
-                UnixFileMode.OtherExecute;
-            if ((File.GetUnixFileMode(directory) & unsafeBits) != 0)
-            {
-                throw new InvalidOperationException("Replay storage directory permissions are too broad.");
-            }
-        }
+        _databasePath = Path.GetFullPath(databasePath);
+        _directory = Path.GetDirectoryName(_databasePath)!;
+        ValidateDirectory();
+        ValidateExistingFiles(_databasePath);
 
         _connectionString = new SqliteConnectionStringBuilder
         {
-            DataSource = databasePath,
+            DataSource = _databasePath,
             Mode = SqliteOpenMode.ReadWriteCreate,
             Pooling = false,
             DefaultTimeout = 10
@@ -55,6 +44,7 @@ public sealed class SqliteCommandReplayStore : ICommandReplayStore
             );
             """;
         command.ExecuteNonQuery();
+        ValidateExistingFiles(_databasePath);
     }
 
     public async ValueTask<bool> TryConsumeAsync(
@@ -69,6 +59,9 @@ public sealed class SqliteCommandReplayStore : ICommandReplayStore
         {
             throw new ArgumentException("Replay identity is invalid.");
         }
+
+        ValidateDirectory();
+        ValidateExistingFiles(_databasePath);
 
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
@@ -91,6 +84,29 @@ public sealed class SqliteCommandReplayStore : ICommandReplayStore
         return inserted == 1;
     }
 
+    private void ValidateDirectory()
+    {
+        if ((File.GetAttributes(_directory) & FileAttributes.ReparsePoint) != 0)
+        {
+            throw new InvalidOperationException("Replay storage must not use a symbolic link.");
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            WindowsAgentStorageAcl.ValidateDirectory(_directory, "Replay storage directory");
+        }
+        else
+        {
+            const UnixFileMode unsafeBits = UnixFileMode.GroupRead | UnixFileMode.GroupWrite |
+                UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherWrite |
+                UnixFileMode.OtherExecute;
+            if ((File.GetUnixFileMode(_directory) & unsafeBits) != 0)
+            {
+                throw new InvalidOperationException("Replay storage directory permissions are too broad.");
+            }
+        }
+    }
+
     private SqliteConnection OpenConnection()
     {
         var connection = new SqliteConnection(_connectionString);
@@ -104,6 +120,27 @@ public sealed class SqliteCommandReplayStore : ICommandReplayStore
         {
             connection.Dispose();
             throw;
+        }
+    }
+
+    private static void ValidateExistingFiles(string databasePath)
+    {
+        foreach (var path in new[] { databasePath, databasePath + "-wal", databasePath + "-shm" })
+        {
+            if (!File.Exists(path))
+            {
+                continue;
+            }
+
+            if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+            {
+                throw new InvalidOperationException("Replay storage must not use a symbolic link.");
+            }
+
+            if (OperatingSystem.IsWindows())
+            {
+                WindowsAgentStorageAcl.ValidateFile(path, "Replay storage file");
+            }
         }
     }
 

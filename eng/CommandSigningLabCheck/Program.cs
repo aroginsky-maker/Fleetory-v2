@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Json;
+using Fleetory.AgentTestSupport;
 using Fleetory.Agent.Security;
 using Fleetory.CommandSigning;
 using Fleetory.Core.Contracts;
@@ -40,7 +41,11 @@ var envelope = await signer.SignInventoryRefreshAsync(deviceId);
 
 var replayDirectory = Path.Combine(Path.GetTempPath(), $"fleetory-command-lab-{Guid.NewGuid():N}");
 Directory.CreateDirectory(replayDirectory);
-if (!OperatingSystem.IsWindows())
+if (OperatingSystem.IsWindows())
+{
+    WindowsAgentAclTestHelper.ProtectDirectory(replayDirectory);
+}
+else
 {
     File.SetUnixFileMode(replayDirectory, UnixFileMode.UserRead |
         UnixFileMode.UserWrite | UnixFileMode.UserExecute);
