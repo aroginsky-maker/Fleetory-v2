@@ -71,8 +71,8 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
         secrets.Write("fleetory-postgresql", fixture.ConnectionString);
         secrets.Write("agent-gateway-root-ca",
             oldPki.Root.ExportCertificatePem() + "\n" + newPki.Root.ExportCertificatePem());
-        secrets.Write("agent-gateway-server-cert", oldPki.Server.ExportCertificatePem());
-        secrets.Write("agent-gateway-server-key", oldPki.ServerKey.ExportPkcs8PrivateKeyPem());
+        secrets.Write("agent-gateway-server-cert", newPki.Server.ExportCertificatePem());
+        secrets.Write("agent-gateway-server-key", newPki.ServerKey.ExportPkcs8PrivateKeyPem());
 
         await using (var scope = fixture.Services.CreateAsyncScope())
         {
@@ -104,9 +104,9 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             await overlap.StartAsync();
             try
             {
-                using var oldClient = oldPki.CreateClient(oldPki.Client);
-                using var newClient = oldPki.CreateClient(newPki.Client);
-                using var foreignClient = oldPki.CreateClient(foreignPki.Client);
+                using var oldClient = newPki.CreateClient(oldPki.Client);
+                using var newClient = newPki.CreateClient(newPki.Client);
+                using var foreignClient = newPki.CreateClient(foreignPki.Client);
                 using var oldResponse = await oldClient.GetAsync(identityUrl);
                 using var newResponse = await newClient.GetAsync(identityUrl);
                 Assert.Equal(HttpStatusCode.NoContent, oldResponse.StatusCode);
@@ -118,8 +118,6 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
         }
 
         secrets.Write("agent-gateway-root-ca", newPki.Root.ExportCertificatePem());
-        secrets.Write("agent-gateway-server-cert", newPki.Server.ExportCertificatePem());
-        secrets.Write("agent-gateway-server-key", newPki.ServerKey.ExportPkcs8PrivateKeyPem());
         await using var retired = FleetoryApplication.Build(settings);
         await retired.StartAsync();
         try
