@@ -1,4 +1,4 @@
-﻿# Fleetory PHASE 7 Security Foundation
+# Fleetory PHASE 7 Security Foundation
 
 **Status:** IN PROGRESS — Command Plane verification, local audit persistence/export transport, RBAC evaluation, Agent mTLS enrollment and Admin OIDC gate, 18 October 2026.
 
@@ -167,6 +167,10 @@ The requester needs global `core.agent_certificate.recover.request` and calls `P
 A different Admin identity needs global `core.agent_certificate.recover.approve` and calls `POST /admin/devices/{deviceId}/certificate-recoveries/{recoveryId}/approve`, independently supplying the exact replacement fingerprint, evidence hash and incident reference. The endpoint returns 403 for the original requester, 409 for mismatched or expired state, and 429 under the Admin rate limit. On approval, Core locks the device, revokes **all** unrevoked Agent certificate bindings for it, invalidates its outstanding unconsumed enrollment grants and rotation intents, marks the recovery approved, creates a five-minute grant for the exact replacement certificate, and writes the completion audit plus export entry in one PostgreSQL transaction. Audit failure rolls all of those changes back. The token is returned once with `Cache-Control: no-store` and must be delivered through the approved secure channel. The new Agent certificate still has to pass the Agent CA mTLS handshake, SAN and key checks at `/agent/enroll`; another certificate cannot consume the grant. Existing Agent certificates lose access immediately after approval, before new enrollment.
 
 Both Admin endpoints use the Admin mTLS listener and the mandatory OIDC/WebAuthn gate outside Development. The test suite checks separate actors and permissions, evidence mismatch, expiry and replay, audit rollback, old-certificate revocation and the full mTLS route. If the approval response is lost, inspect the completion audit and database state by correlation ID; an approved token cannot be recovered. Wait for the five-minute grant to expire, then start a new two-person request. The local flow provides an enforceable two-person gate and an audit link to the incident evidence; production physical-device verification, evidence retention, CA issuance and secure token delivery still require a deployment procedure.
+
+## Scope hierarchy change preflight
+
+The read-only [scope reparenting preflight](ScopeReparenting.md) reports candidate grants gained or lost when a subtree changes parent and rejects missing scopes, missing parents, cycles and no-op moves. Its PostgreSQL test verifies the output and confirms the hierarchy is unchanged. A candidate report needs independent impact review; no parent mutation route is enabled.
 
 ## Remaining PHASE 7 work
 

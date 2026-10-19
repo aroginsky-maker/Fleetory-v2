@@ -27,6 +27,9 @@
     <None Include="../../eng/bootstrap-first-admin.sql"
           Link="bootstrap-first-admin.sql"
           CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../eng/preview-scope-reparent.sql"
+          Link="preview-scope-reparent.sql"
+          CopyToOutputDirectory="PreserveNewest" />
     <None Include="../../eng/recover-admin-access.sql"
           Link="recover-admin-access.sql"
           CopyToOutputDirectory="PreserveNewest" />

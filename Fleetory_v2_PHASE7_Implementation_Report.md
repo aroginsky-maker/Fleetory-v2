@@ -36,14 +36,15 @@
 - With export enabled, readiness now reports a degraded audit-export state when the oldest pending outbox entry exceeds five minutes, without synchronously calling immudb or blocking local audit writes. A PostgreSQL integration test covers empty, fresh, stale and drained queue states.
 - Admin RBAC roles can now be replaced atomically through the Admin mTLS route. The operation moves existing assignment IDs and scopes to a newly identified role, preserves a snapshot of both permission sets, deletes the old active role and appends the audit/outbox event in one serializable transaction. Removing the last global management permission is blocked and audited. The migration backfills existing roles; bootstrap and recovery SQL also record snapshots. An Admin mTLS GET route reads and audits the version lineage, including retired IDs. PostgreSQL and real mTLS tests cover success, history, missing and malformed input, denied access, last-manager protection and audit rollback. Scope reparenting remains open.
 - Scope name changes now require an expected revision on the Admin mTLS route. The `ScopeId`, parent, children and assignment references stay fixed; the active name, version snapshot and audit/outbox entry commit together. Stale edits return 409 and are audited. A protected GET route reads the revision history. PostgreSQL and mTLS tests cover successful and stale revisions, legacy scope snapshotting, audit rollback and unchanged descendant access. Reparenting needs a separate impact and approval process.
+- A read-only scope reparenting preflight now lists candidate ancestor grants that would be gained or lost across a moved subtree. It reports missing scopes, missing parents, cycles and no-op requests without mutating authorization state. A PostgreSQL integration test verifies impact and unchanged hierarchy. Effective-permission review and a separately approved mutation procedure remain open.
 
 ## Verification snapshot
 
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local tests after command signer and scope revisions | 185/185 passed |
-| Local production coverage after command signer and scope revisions | 93.83% |
+| Local tests after command signer and scope preview | 186/186 passed |
+| Local production coverage after command signer and scope preview | 93.81% |
 | Last directly retrieved CI production coverage, `a6373cb` | 93.87% |
 | Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
 | Local full audit pipeline | PostgreSQL outbox → Fleetory worker → immudb readback passed |
