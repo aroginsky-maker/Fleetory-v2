@@ -1,6 +1,6 @@
-﻿# Fleetory v2 — PHASE 7 Security Foundation progress report
+# Fleetory v2 — PHASE 7 Security Foundation progress report
 
-**Status:** IN PROGRESS, 18 October 2026. PHASE 6 is complete; PHASE 8 has not started. Draft [PR #2](https://github.com/aroginsky-maker/Fleetory-v2/pull/2) contains the current implementation. The detailed controls and limits are maintained in [SecurityFoundation](docs/architecture/SecurityFoundation.md) and the [local lab guide](docs/architecture/SecurityLab.md).
+**Status:** IN PROGRESS, 19 October 2026. PHASE 6 is complete; PHASE 8 has not started. Draft [PR #2](https://github.com/aroginsky-maker/Fleetory-v2/pull/2) contains the current implementation. The detailed controls and limits are maintained in [SecurityFoundation](docs/architecture/SecurityFoundation.md) and the [local lab guide](docs/architecture/SecurityLab.md).
 
 ## Implemented
 
@@ -15,6 +15,7 @@
 - File and OpenBao secret providers; Agent-local ECDSA command verification, deny-by-default policy, durable SQLite replay store and per-device public-key trust files. No Agent command execution endpoint is exposed.
 - Lab-only OpenBao Transit signing key with a separate sign-only token and DeviceId-bound public trust file. The Server token is read-only for its KV secrets.
 - Separate `Fleetory.CommandSigning` component signs only empty, one-minute `Inventory.Refresh` commands, pins the Transit key version and verifies the returned signature against a trusted public key. The Server cannot reference that project. A repeatable live lab check passed Transit signing, Agent verification, durable replay rejection and 403 for the Server token. After an OpenBao development-mode restart, stale Agent trust requires an explicit lab-only reset that archives the prior key.
+- A repeatable lab-only Transit key rotation check provisions the next DeviceId-bound public key, verifies old/new overlap, archives the previous trust file and proves that Agent rejects fresh old-version signatures while accepting new-version signatures. It does not establish production trust distribution or signer isolation.
 - Reproducible local browser S256 PKCE and virtual WebAuthn check: the signed token carries `amr=webauthn` and the certificate-bound subject; the Admin route returns 401 without it and 403 at RBAC with it.
 - Admin Gateway startup rejects wildcard bind addresses, keeping its listener on loopback or an explicitly selected management IP.
 - Windows CI provisions an ephemeral root and intermediate in the runner certificate stores, then confirms the actual Admin listener sends two certificates and passes root-only OpenSSL verification. Windows hosts require equivalent approved CA-store provisioning.
@@ -36,7 +37,7 @@
 - With export enabled, readiness now reports a degraded audit-export state when the oldest pending outbox entry exceeds five minutes, without synchronously calling immudb or blocking local audit writes. A PostgreSQL integration test covers empty, fresh, stale and drained queue states.
 - Admin RBAC roles can now be replaced atomically through the Admin mTLS route. The operation moves existing assignment IDs and scopes to a newly identified role, preserves a snapshot of both permission sets, deletes the old active role and appends the audit/outbox event in one serializable transaction. Removing the last global management permission is blocked and audited. The migration backfills existing roles; bootstrap and recovery SQL also record snapshots. An Admin mTLS GET route reads and audits the version lineage, including retired IDs. PostgreSQL and real mTLS tests cover success, history, missing and malformed input, denied access, last-manager protection and audit rollback. Scope reparenting remains open.
 - Scope name changes now require an expected revision on the Admin mTLS route. The `ScopeId`, parent, children and assignment references stay fixed; the active name, version snapshot and audit/outbox entry commit together. Stale edits return 409 and are audited. A protected GET route reads the revision history. PostgreSQL and mTLS tests cover successful and stale revisions, legacy scope snapshotting, audit rollback and unchanged descendant access. Reparenting needs a separate impact and approval process.
-- A read-only scope reparenting preflight now lists candidate ancestor grants that would be gained or lost across a moved subtree. It reports missing scopes, missing parents, existing hierarchy cycles and no-op requests without mutating authorization state. A PostgreSQL integration test verifies impact and unchanged hierarchy. Effective-permission review and a separately approved mutation procedure remain open.
+- A read-only scope reparenting preflight lists candidate ancestor grants and the exact actor, permission and descendant-scope decisions that would change. It rejects missing scopes, missing parents, existing hierarchy cycles and no-op requests. A PostgreSQL test compares its output with real authorization decisions before and after a temporary move in a rolled-back transaction. A separately approved mutation procedure remains open.
 
 ## Verification snapshot
 
@@ -54,13 +55,13 @@
 | Windows server TLS chain in CI with provisioned OS CA stores | 2 certificates sent; root-only OpenSSL verification code 0 |
 | Linux container server TLS chain | 2 certificates sent; root-only OpenSSL verification code 0 |
 | Last directly retrieved Sonar PR coverage, `a6373cb` | 90.8% |
-| Sonar new-code coverage at `9cbccb2` | 91.7% |
+| Sonar new-code coverage at `e99ec03` | 91.7% |
 | Last directly retrieved Sonar overall duplication, `a6373cb` | 0.0% |
-| Sonar new-code duplication at `9cbccb2` | 0.0% |
-| Sonar new issues at `9cbccb2` | 0 |
-| Sonar Quality Gate at `9cbccb2` | PASS |
+| Sonar new-code duplication at `e99ec03` | 0.0% |
+| Sonar new issues at `e99ec03` | 0 |
+| Sonar Quality Gate at `e99ec03` | PASS |
 
-The latest completed CI at `9cbccb2` is [run 39237680843](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39237680843); all jobs passed. Its Sonar check summary exposes the current new-code percentages above, while the private repository's detailed Actions logs and Sonar measures are unavailable to the connected read tool. The older overall CI and Sonar values are labeled with their verified commit rather than projected onto the latest one. A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The PowerShell provisioning test runs in CI and remains under Sonar static analysis; it is excluded from the .NET coverage denominator because `dotnet-coverage` cannot instrument PowerShell. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
+The latest completed CI at `e99ec03` is [run 39253172213](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39253172213); all jobs passed. Its Sonar check summary exposes the current new-code percentages above, while the private repository's detailed Actions logs and Sonar measures are unavailable to the connected read tool. The older overall CI and Sonar values are labeled with their verified commit rather than projected onto the latest one. A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The PowerShell provisioning test runs in CI and remains under Sonar static analysis; it is excluded from the .NET coverage denominator because `dotnet-coverage` cannot instrument PowerShell. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
 
 ## Required before completion
 

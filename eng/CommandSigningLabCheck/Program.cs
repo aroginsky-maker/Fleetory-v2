@@ -5,9 +5,9 @@ using Fleetory.CommandSigning;
 using Fleetory.Core.Contracts;
 using Fleetory.SharedKernel;
 
-if (args.Length != 3)
+if (args.Length is not (3 or 6))
 {
-    throw new ArgumentException("Expected lab directory, signer directory and DeviceId.");
+    throw new ArgumentException("Expected lab directory, signer directory, DeviceId and optional old version, old SPKI path, expected old-key status.");
 }
 
 var labDirectory = Path.GetFullPath(args[0]);
@@ -61,6 +61,29 @@ try
             $"Agent verification failed: first={first.Status}, second={second.Status}.");
     }
 
+    if (args.Length == 6)
+    {
+        var oldVersion = int.Parse(args[3], System.Globalization.CultureInfo.InvariantCulture);
+        if (oldVersion < 1 || oldVersion >= version)
+        {
+            throw new ArgumentException("The prior Transit version must precede the active version.");
+        }
+
+        var oldPublicKey = await File.ReadAllBytesAsync(Path.GetFullPath(args[4]));
+        using var oldSigner = new OpenBaoCommandSigner(
+            new Uri("http://127.0.0.1:8200/"), signerToken, keyName, oldVersion,
+            oldPublicKey, allowHttpLoopback: true);
+        var oldEnvelope = await oldSigner.SignInventoryRefreshAsync(deviceId);
+        var oldResult = await verifier.VerifyAsync(oldEnvelope, deviceId);
+        var expected = Enum.Parse<CommandVerificationStatus>(args[5]);
+        if (oldResult.Status != expected)
+        {
+            throw new InvalidOperationException(
+                $"Prior key v{oldVersion}: expected {expected}, got {oldResult.Status}.");
+        }
+
+        Console.WriteLine($"PASS: prior Transit v{oldVersion} Agent status {oldResult.Status}.");
+    }
     using var deniedRequest = new HttpRequestMessage(HttpMethod.Post,
         $"http://127.0.0.1:8200/v1/transit/sign/{keyName}/sha2-256");
     deniedRequest.Headers.Add("X-Vault-Token", serverToken);
