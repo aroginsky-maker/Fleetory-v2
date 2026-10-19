@@ -83,6 +83,10 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/CertificateProvisioning.Tests.ps1
 
+      - name: Verify command trust reconciliation
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/CommandTrustReconciliation.Tests.ps1
+
       - name: Run Fleetory quality verification
         shell: pwsh
         run: |
