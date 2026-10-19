@@ -102,11 +102,19 @@ Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8200/v1/secret/data/fleeto
 & (Join-Path $PSScriptRoot 'provision-security-lab-audit-user.ps1')
 
 $rootHeaders = @{ 'X-Vault-Token' = $settings['FLEETORY_LAB_OPENBAO_TOKEN'] }
-$serverPolicy = @'
-path "secret/data/fleetory/*" {
-  capabilities = ["read"]
-}
-'@
+$serverSecretNames = @(
+    'fleetory-postgresql',
+    'agent-gateway-root-ca',
+    'agent-gateway-server-cert',
+    'agent-gateway-server-key',
+    'admin-gateway-root-ca',
+    'admin-gateway-server-cert',
+    'admin-gateway-server-key',
+    'audit-immudb-password'
+)
+$serverPolicy = ($serverSecretNames | ForEach-Object {
+    "path `"secret/data/fleetory/$_`" {`n  capabilities = [`"read`"]`n}"
+}) -join "`n"
 $policyBody = @{ policy = $serverPolicy } | ConvertTo-Json -Compress
 Invoke-RestMethod -Method Put -Uri 'http://127.0.0.1:8200/v1/sys/policies/acl/fleetory-server' `
     -Headers $rootHeaders -ContentType 'application/json' -Body $policyBody -TimeoutSec 10 | Out-Null
