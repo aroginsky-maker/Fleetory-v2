@@ -55,6 +55,11 @@ BEGIN
     VALUES (recovery_role_id, 'Fleetory Recovery Administrator ' || person_id::text);
     INSERT INTO platform.authorization_role_permissions (role_id, permission)
     VALUES (recovery_role_id, 'platform.authorization.manage');
+    INSERT INTO platform.authorization_role_versions
+        (role_id, predecessor_role_id, name, permissions, recorded_at)
+    VALUES (recovery_role_id, NULL,
+            'Fleetory Recovery Administrator ' || person_id::text,
+            ARRAY['platform.authorization.manage'], timestamp_utc);
     INSERT INTO platform.authorization_assignments
         (assignment_id, actor_subject_id, actor_kind, role_id, scope_id)
     VALUES (recovery_assignment_id, replacement_subject, 1, recovery_role_id, NULL);

@@ -36,6 +36,10 @@ BEGIN
     VALUES (bootstrap_role_id, 'Fleetory Bootstrap Administrator');
     INSERT INTO platform.authorization_role_permissions (role_id, permission)
     VALUES (bootstrap_role_id, 'platform.authorization.manage');
+    INSERT INTO platform.authorization_role_versions
+        (role_id, predecessor_role_id, name, permissions, recorded_at)
+    VALUES (bootstrap_role_id, NULL, 'Fleetory Bootstrap Administrator',
+            ARRAY['platform.authorization.manage'], timestamp_utc);
     INSERT INTO platform.authorization_assignments
         (assignment_id, actor_subject_id, actor_kind, role_id, scope_id)
     VALUES (bootstrap_assignment_id, 'person:' || replace(person_id::text, '-', ''), 1,

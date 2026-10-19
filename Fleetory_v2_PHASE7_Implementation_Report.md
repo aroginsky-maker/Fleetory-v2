@@ -33,15 +33,16 @@
 - The file secret provider now refuses symbolic links for the mount and secret files and rejects a Unix mount writable by another group or user. A Linux CI test checks those failure paths; deployment still owns the parent path and service ACL.
 - Production immudb export now refuses the default administrator username or password and plain HTTP when the sink is constructed. Development retains its loopback lab configuration. The deployment guide calls for a dedicated read/write account and trusted HTTPS transport; production provisioning, backup and independent state verification remain open.
 - With export enabled, readiness now reports a degraded audit-export state when the oldest pending outbox entry exceeds five minutes, without synchronously calling immudb or blocking local audit writes. A PostgreSQL integration test covers empty, fresh, stale and drained queue states.
+- Admin RBAC roles can now be replaced atomically through the Admin mTLS route. The operation moves existing assignment IDs and scopes to a newly identified role, preserves a snapshot of both permission sets, deletes the old active role and appends the audit/outbox event in one serializable transaction. Removing the last global management permission is blocked and audited. The migration backfills existing roles; bootstrap and recovery SQL also record snapshots. PostgreSQL and real mTLS tests cover success, missing and malformed input, denied access, last-manager protection and audit rollback. Scope replacement and an Admin history read API remain open.
 
 ## Verification snapshot
 
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local tests after secret mount checks | 165/165 passed |
-| Local production coverage | 93.63% |
-| CI production coverage at `9885947` | 93.86% |
+| Local tests after role-version snapshots | 175/175 passed |
+| Local production coverage after role-version snapshots | 93.81% |
+| Last directly retrieved CI production coverage, `a6373cb` | 93.87% |
 | Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
 | Local full audit pipeline | PostgreSQL outbox → Fleetory worker → immudb readback passed |
 | Local live certificate renewal | 4/4 new pairs validated; 4/4 previous pairs archived and matched backup; identity UUIDs retained; OpenBao TLS secrets matched |
@@ -49,13 +50,14 @@
 | Local WebAuthn/OIDC with real Admin mTLS | 401 without token; 403 with WebAuthn token at RBAC |
 | Windows server TLS chain in CI with provisioned OS CA stores | 2 certificates sent; root-only OpenSSL verification code 0 |
 | Linux container server TLS chain | 2 certificates sent; root-only OpenSSL verification code 0 |
-| Sonar PR coverage at `9885947` | 90.8% |
-| Sonar new-code coverage at `9885947` | 91.20% |
-| Sonar duplication at `9885947` | 0.0% |
-| Sonar new-code duplication at `9885947` | 0.0% |
-| Sonar Quality Gate at `9885947` | PASS |
+| Last directly retrieved Sonar PR coverage, `a6373cb` | 90.8% |
+| Sonar new-code coverage at `bb417e7` | 91.3% |
+| Last directly retrieved Sonar overall duplication, `a6373cb` | 0.0% |
+| Sonar new-code duplication at `bb417e7` | 0.0% |
+| Sonar new issues at `bb417e7` | 0 |
+| Sonar Quality Gate at `bb417e7` | PASS |
 
-The latest completed CI and Sonar numbers come from [run 39161625342](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39161625342). A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The PowerShell provisioning test runs in CI and remains under Sonar static analysis; it is excluded from the .NET coverage denominator because `dotnet-coverage` cannot instrument PowerShell. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
+The latest completed CI at `bb417e7` is [run 39205070601](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39205070601); all jobs passed. Its Sonar check summary exposes the current new-code percentages above, while the private repository's detailed Actions logs and Sonar measures are unavailable to the connected read tool. The older overall CI and Sonar values are labeled with their verified commit rather than projected onto the latest one. A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The PowerShell provisioning test runs in CI and remains under Sonar static analysis; it is excluded from the .NET coverage denominator because `dotnet-coverage` cannot instrument PowerShell. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
 
 ## Required before completion
 

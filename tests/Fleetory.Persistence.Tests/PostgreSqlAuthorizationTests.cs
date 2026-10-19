@@ -183,6 +183,16 @@ public sealed class PostgreSqlAuthorizationTests(PostgreSqlTestFixture fixture)
             await administration.ReplaceRoleAsync(administrator, oldRoleId,
                 "Writer version", [WritePermission], new CorrelationId(string.Empty)));
         Assert.True((await authorizer.AuthorizeAsync(read)).IsAllowed);
+        await using (var rollbackConnection = new NpgsqlConnection(fixture.ConnectionString))
+        {
+            await rollbackConnection.OpenAsync();
+            await using var rollback = new NpgsqlCommand("""
+                SELECT COUNT(*) FROM platform.authorization_role_versions
+                WHERE predecessor_role_id = @old_role_id
+                """, rollbackConnection);
+            rollback.Parameters.AddWithValue("old_role_id", oldRoleId);
+            Assert.Equal(0L, (long)(await rollback.ExecuteScalarAsync())!);
+        }
 
         var newRoleId = await administration.ReplaceRoleAsync(administrator, oldRoleId,
             "Writer version", [WritePermission], correlation);
@@ -209,6 +219,28 @@ public sealed class PostgreSqlAuthorizationTests(PostgreSqlTestFixture fixture)
             """, connection);
         retired.Parameters.AddWithValue("old_role_id", oldRoleId);
         Assert.Equal(0L, (long)(await retired.ExecuteScalarAsync())!);
+        await using var oldVersion = new NpgsqlCommand("""
+            SELECT predecessor_role_id, permissions
+            FROM platform.authorization_role_versions WHERE role_id = @role_id
+            """, connection);
+        oldVersion.Parameters.AddWithValue("role_id", oldRoleId);
+        await using (var oldReader = await oldVersion.ExecuteReaderAsync())
+        {
+            Assert.True(await oldReader.ReadAsync());
+            Assert.True(await oldReader.IsDBNullAsync(0));
+            Assert.Equal([ReadPermission], oldReader.GetFieldValue<string[]>(1));
+        }
+        await using var newVersion = new NpgsqlCommand("""
+            SELECT predecessor_role_id, permissions
+            FROM platform.authorization_role_versions WHERE role_id = @role_id
+            """, connection);
+        newVersion.Parameters.AddWithValue("role_id", newRoleId.Value);
+        await using (var newReader = await newVersion.ExecuteReaderAsync())
+        {
+            Assert.True(await newReader.ReadAsync());
+            Assert.Equal(oldRoleId, newReader.GetGuid(0));
+            Assert.Equal([WritePermission], newReader.GetFieldValue<string[]>(1));
+        }
         await using var audits = new NpgsqlCommand("""
             SELECT COUNT(*) FROM platform.audit_events AS event
             JOIN platform.audit_export_queue AS queue ON queue.audit_event_id = event.event_id
@@ -265,6 +297,14 @@ public sealed class PostgreSqlAuthorizationTests(PostgreSqlTestFixture fixture)
         Assert.NotNull(newRoleId);
         Assert.True((await authorizer.AuthorizeAsync(new AuthorizationRequest(
             administrator, PostgreSqlAuthorizationAdministration.Permission))).IsAllowed);
+        await using var history = new NpgsqlCommand("""
+            SELECT COUNT(*) FROM platform.authorization_role_versions
+            WHERE role_id = @old_role_id OR
+                  (role_id = @new_role_id AND predecessor_role_id = @old_role_id)
+            """, connection);
+        history.Parameters.AddWithValue("old_role_id", oldRoleId);
+        history.Parameters.AddWithValue("new_role_id", newRoleId.Value);
+        Assert.Equal(2L, (long)(await history.ExecuteScalarAsync())!);
         await using var blockedAudit = new NpgsqlCommand("""
             SELECT COUNT(*) FROM platform.audit_events
             WHERE correlation_id = @correlation

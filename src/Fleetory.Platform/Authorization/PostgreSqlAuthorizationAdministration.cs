@@ -36,7 +36,8 @@ internal sealed class PostgreSqlAuthorizationAdministration(
             },
             async (connection, transaction, token) =>
             {
-                await InsertRoleAsync(connection, transaction, roleId, name, permissionSet, token);
+                await InsertRoleAsync(connection, transaction, roleId, null,
+                    name, permissionSet, token);
                 return roleId;
             }, cancellationToken);
     }
@@ -106,7 +107,9 @@ internal sealed class PostgreSqlAuthorizationAdministration(
                     }
                 }
 
-                await InsertRoleAsync(connection, transaction, newRoleId, name, permissionSet, token);
+                await SnapshotExistingRoleAsync(connection, transaction, oldRoleId, token);
+                await InsertRoleAsync(connection, transaction, newRoleId, oldRoleId,
+                    name, permissionSet, token);
                 await using (var moveAssignments = new NpgsqlCommand("""
                     UPDATE platform.authorization_assignments
                     SET role_id = @new_role_id WHERE role_id = @old_role_id
@@ -406,10 +409,11 @@ internal sealed class PostgreSqlAuthorizationAdministration(
         return result;
     }
 
-    private static async Task InsertRoleAsync(
+    private async Task InsertRoleAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
         Guid roleId,
+        Guid? predecessorRoleId,
         string name,
         IReadOnlyCollection<string> permissions,
         CancellationToken cancellationToken)
@@ -434,6 +438,46 @@ internal sealed class PostgreSqlAuthorizationAdministration(
             grant.Parameters.AddWithValue("permission", NpgsqlDbType.Varchar, permission);
             await grant.ExecuteNonQueryAsync(cancellationToken);
         }
+
+        await using var version = new NpgsqlCommand("""
+            INSERT INTO platform.authorization_role_versions
+                (role_id, predecessor_role_id, name, permissions, recorded_at)
+            VALUES (@role_id, @predecessor_role_id, @name, @permissions, @recorded_at)
+            """, connection, transaction);
+        version.Parameters.AddWithValue("role_id", NpgsqlDbType.Uuid, roleId);
+        version.Parameters.AddWithValue("predecessor_role_id", NpgsqlDbType.Uuid,
+            (object?)predecessorRoleId ?? DBNull.Value);
+        version.Parameters.AddWithValue("name", NpgsqlDbType.Varchar, name);
+        version.Parameters.AddWithValue("permissions", NpgsqlDbType.Array | NpgsqlDbType.Text,
+            permissions.Order(StringComparer.Ordinal).ToArray());
+        version.Parameters.AddWithValue("recorded_at", NpgsqlDbType.TimestampTz,
+            clock.UtcNow.ToUniversalTime());
+        await version.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private async Task SnapshotExistingRoleAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Guid roleId,
+        CancellationToken cancellationToken)
+    {
+        await using var version = new NpgsqlCommand("""
+            INSERT INTO platform.authorization_role_versions
+                (role_id, predecessor_role_id, name, permissions, recorded_at)
+            SELECT role.role_id, NULL, role.name,
+                   ARRAY(SELECT permission.permission
+                         FROM platform.authorization_role_permissions AS permission
+                         WHERE permission.role_id = role.role_id
+                         ORDER BY permission.permission),
+                   @recorded_at
+            FROM platform.authorization_roles AS role
+            WHERE role.role_id = @role_id
+            ON CONFLICT (role_id) DO NOTHING
+            """, connection, transaction);
+        version.Parameters.AddWithValue("role_id", NpgsqlDbType.Uuid, roleId);
+        version.Parameters.AddWithValue("recorded_at", NpgsqlDbType.TimestampTz,
+            clock.UtcNow.ToUniversalTime());
+        await version.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static void ValidateRole(string name, IReadOnlyCollection<string> permissions)

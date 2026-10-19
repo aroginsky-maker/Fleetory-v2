@@ -68,6 +68,19 @@ public sealed class BootstrapFirstAdminTests(PostgreSqlTestFixture fixture)
             Assert.Equal(1L, (long)(await verifyAudit.ExecuteScalarAsync())!);
         }
 
+        await using (var version = new NpgsqlCommand("""
+            SELECT COUNT(*) FROM platform.authorization_assignments AS assignment
+            JOIN platform.authorization_role_versions AS version
+              ON version.role_id = assignment.role_id
+            WHERE assignment.actor_subject_id = @subject
+              AND version.permissions = ARRAY['platform.authorization.manage']
+              AND version.predecessor_role_id IS NULL
+            """, connection, transaction))
+        {
+            version.Parameters.AddWithValue("subject", expectedSubject);
+            Assert.Equal(1L, (long)(await version.ExecuteScalarAsync())!);
+        }
+
         await using (var repeat = new NpgsqlCommand(bootstrapSql, connection, transaction))
         {
             var error = await Assert.ThrowsAsync<PostgresException>(
