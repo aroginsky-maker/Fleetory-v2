@@ -21,8 +21,19 @@ public sealed class OpenBaoCommandSigner : IDisposable
         string keyName,
         int keyVersion,
         ReadOnlySpan<byte> publicKey,
-        bool allowHttpLoopback = false,
-        HttpMessageHandler? handler = null)
+        bool allowHttpLoopback = false)
+        : this(address, token, keyName, keyVersion, publicKey, allowHttpLoopback, null)
+    {
+    }
+
+    internal OpenBaoCommandSigner(
+        Uri address,
+        string token,
+        string keyName,
+        int keyVersion,
+        ReadOnlySpan<byte> publicKey,
+        bool allowHttpLoopback,
+        HttpMessageHandler? handler)
     {
         ArgumentNullException.ThrowIfNull(address);
         if (!address.IsAbsoluteUri || !string.IsNullOrEmpty(address.UserInfo) ||
