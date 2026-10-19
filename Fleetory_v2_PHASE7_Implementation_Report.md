@@ -11,7 +11,7 @@
 - Controlled break-glass recovery grants a replacement Admin identity under an approved incident reference, records the database operator in audit/outbox, and refuses duplicate or missing-manager recovery. It leaves the old assignment for verified, audited revocation after the replacement can authenticate.
 - Assignment revocation refuses to remove the last global `platform.authorization.manage` grant. The refusal is audited in the same transaction and returns HTTP 409; no access is lost.
 - Roles and scopes can be retired through audited Admin routes only after their assignments or child scopes are removed. In-use objects return 409; the database also rejects direct cascading deletion of an assigned role.
-- PostgreSQL audit event and outbox transaction, lease-based background export and retry. Optional immudb sink uses conditional EventId writes, readback and revision checks. The lab supplies its password through OpenBao.
+- PostgreSQL audit event and outbox transaction, lease-based background export and retry. The immudb sink uses conditional EventId writes, readback and revision checks. Non-Development Agent/Admin gateways now refuse startup unless export is enabled with the supported sink; a later sink outage leaves events in the durable local outbox. The lab supplies its password through OpenBao.
 - File and OpenBao secret providers; Agent-local ECDSA command verification, deny-by-default policy, durable SQLite replay store and per-device public-key trust files. A new execution gate creates the verifier with these concrete dependencies and invokes only the inventory-refresh handler after acceptance. Cryptographic and SQLite tests cover invalid commands, replay after restart and handler failure. No Agent command execution endpoint is exposed.
 - Lab-only OpenBao Transit signing key with a separate sign-only token and DeviceId-bound public trust file. The Server token is read-only for its KV secrets.
 - Separate `Fleetory.CommandSigning` component signs only empty, one-minute `Inventory.Refresh` commands, pins the Transit key version and verifies the returned signature against a trusted public key. The Server cannot reference that project. A repeatable live lab check passed Transit signing, Agent verification, durable replay rejection and 403 for the Server token. After an OpenBao development-mode restart, every DeviceId-bound trust version is compared with the current key ring; mismatches fail closed and an explicit lab-only reset archives all stale versions. An isolated test covers this regression in CI.
@@ -44,8 +44,8 @@
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local tests after Agent execution gate | 189/189 passed |
-| Local production coverage after Agent execution gate | 93.78% |
+| Local tests after privileged audit-export requirement | 192/192 passed |
+| Local production coverage after privileged audit-export requirement | 93.77% |
 | Last directly retrieved CI production coverage, `a6373cb` | 93.87% |
 | Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
 | Local full audit pipeline | PostgreSQL outbox → Fleetory worker → immudb readback passed |

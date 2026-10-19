@@ -99,6 +99,43 @@ public sealed class SecretProviderTests
     }
 
     [Theory]
+    [InlineData("AgentGateway")]
+    [InlineData("AdminGateway")]
+    public void Privileged_production_gateway_requires_audit_export(string gateway)
+    {
+        using var directory = new TestSecretDirectory();
+        directory.Write(FleetorySecretNames.PostgreSqlConnectionString, TestConnectionString);
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            FleetoryApplication.Build([
+                "--environment=Production",
+                $"--Fleetory:Secrets:Directory={directory.Path}",
+                $"--Fleetory:{gateway}:Enabled=true"
+            ]));
+
+        Assert.Contains("AuditExport:Enabled=true", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(TestConnectionString, exception.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Privileged_production_gateway_requires_supported_audit_sink()
+    {
+        using var directory = new TestSecretDirectory();
+        directory.Write(FleetorySecretNames.PostgreSqlConnectionString, TestConnectionString);
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            FleetoryApplication.Build([
+                "--environment=Production",
+                $"--Fleetory:Secrets:Directory={directory.Path}",
+                "--Fleetory:AdminGateway:Enabled=true",
+                "--Fleetory:AuditExport:Enabled=true",
+                "--Fleetory:AuditExport:Sink=Unknown"
+            ]));
+
+        Assert.Contains("Sink=Immudb", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData("immudb", "https://audit.example/", "secret-value-739")]
     [InlineData("audit-writer", "https://audit.example/", "immudb")]
     [InlineData("audit-writer", "http://127.0.0.1:8090/", "secret-value-739")]

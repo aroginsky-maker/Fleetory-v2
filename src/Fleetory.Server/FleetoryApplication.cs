@@ -30,6 +30,7 @@ public static class FleetoryApplication
         builder.Configuration.AddEnvironmentVariables(prefix: "FLEETORY_");
 
         var secrets = ConfigureSecrets(builder);
+        ValidatePrivilegedAuditExport(builder);
         var gateway = GatewayStartup.Configure(builder, secrets);
         var adminOidcEnabled = AdminOidcAuthentication.Configure(builder);
 
@@ -285,6 +286,23 @@ public static class FleetoryApplication
         new MonitoringModule(),
         new IntegrationsModule()
     ];
+
+    private static void ValidatePrivilegedAuditExport(WebApplicationBuilder builder)
+    {
+        if (builder.Environment.IsDevelopment() ||
+            !(builder.Configuration.GetValue<bool>("Fleetory:AgentGateway:Enabled") ||
+              builder.Configuration.GetValue<bool>("Fleetory:AdminGateway:Enabled")))
+        {
+            return;
+        }
+
+        if (!builder.Configuration.GetValue<bool>("Fleetory:AuditExport:Enabled") ||
+            builder.Configuration["Fleetory:AuditExport:Sink"] != "Immudb")
+        {
+            throw new InvalidOperationException(
+                "Non-development Agent/Admin gateways require Fleetory:AuditExport:Enabled=true and Sink=Immudb.");
+        }
+    }
 
     private static void ValidateModules(IReadOnlyCollection<IFleetoryModule> modules)
     {
