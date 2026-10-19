@@ -61,6 +61,80 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
     }
 
     [Fact]
+    public async Task Agent_ca_rotation_accepts_both_roots_only_during_the_overlap()
+    {
+        var deviceId = new DeviceId(Guid.NewGuid());
+        using var oldPki = new TestPki(deviceId);
+        using var newPki = new TestPki(deviceId);
+        using var foreignPki = new TestPki(deviceId);
+        using var secrets = new TestSecretDirectory();
+        secrets.Write("fleetory-postgresql", fixture.ConnectionString);
+        secrets.Write("agent-gateway-root-ca",
+            oldPki.Root.ExportCertificatePem() + "\n" + newPki.Root.ExportCertificatePem());
+        secrets.Write("agent-gateway-server-cert", oldPki.Server.ExportCertificatePem());
+        secrets.Write("agent-gateway-server-key", oldPki.ServerKey.ExportPkcs8PrivateKeyPem());
+
+        await using (var scope = fixture.Services.CreateAsyncScope())
+        {
+            var database = scope.ServiceProvider.GetRequiredService<CoreDbContext>();
+            database.Devices.Add(DeviceRecord.Create(deviceId, "CA rotation device", DateTimeOffset.UtcNow));
+            foreach (var certificate in new[] { oldPki.Client, newPki.Client })
+            {
+                database.AgentCertificates.Add(AgentCertificateRecord.Create(deviceId,
+                    CertificateSha256(certificate), certificate.NotBefore.ToUniversalTime(),
+                    certificate.NotAfter.ToUniversalTime()));
+            }
+            await database.SaveChangesAsync();
+        }
+
+        var webPort = GetFreePort();
+        var agentPort = GetFreePort();
+        while (webPort == agentPort) { agentPort = GetFreePort(); }
+        string[] settings = [
+            "--environment=Development",
+            $"--Fleetory:Secrets:Directory={secrets.Path}",
+            "--Fleetory:AgentGateway:Enabled=true",
+            $"--Fleetory:Web:Port={webPort}",
+            $"--Fleetory:AgentGateway:Port={agentPort}"
+        ];
+        var identityUrl = $"https://127.0.0.1:{agentPort}/agent/identity";
+
+        await using (var overlap = FleetoryApplication.Build(settings))
+        {
+            await overlap.StartAsync();
+            try
+            {
+                using var oldClient = oldPki.CreateClient(oldPki.Client);
+                using var newClient = oldPki.CreateClient(newPki.Client);
+                using var foreignClient = oldPki.CreateClient(foreignPki.Client);
+                using var oldResponse = await oldClient.GetAsync(identityUrl);
+                using var newResponse = await newClient.GetAsync(identityUrl);
+                Assert.Equal(HttpStatusCode.NoContent, oldResponse.StatusCode);
+                Assert.Equal(HttpStatusCode.NoContent, newResponse.StatusCode);
+                await Assert.ThrowsAsync<HttpRequestException>(async () =>
+                    await foreignClient.GetAsync(identityUrl));
+            }
+            finally { await overlap.StopAsync(); }
+        }
+
+        secrets.Write("agent-gateway-root-ca", newPki.Root.ExportCertificatePem());
+        secrets.Write("agent-gateway-server-cert", newPki.Server.ExportCertificatePem());
+        secrets.Write("agent-gateway-server-key", newPki.ServerKey.ExportPkcs8PrivateKeyPem());
+        await using var retired = FleetoryApplication.Build(settings);
+        await retired.StartAsync();
+        try
+        {
+            using var newClient = newPki.CreateClient(newPki.Client);
+            using var oldClient = newPki.CreateClient(oldPki.Client);
+            using var newResponse = await newClient.GetAsync(identityUrl);
+            Assert.Equal(HttpStatusCode.NoContent, newResponse.StatusCode);
+            await Assert.ThrowsAsync<HttpRequestException>(async () =>
+                await oldClient.GetAsync(identityUrl));
+        }
+        finally { await retired.StopAsync(); }
+    }
+
+    [Fact]
     public void Gateway_rejects_wrong_key_root_and_malformed_certificate_chain()
     {
         using var pki = new TestPki(new DeviceId(Guid.NewGuid()));
@@ -94,6 +168,9 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
         AssertRejected(rootPem, serverPem + pki.Client.ExportCertificatePem(), serverKeyPem);
         AssertRejected(rootPem, string.Concat(Enumerable.Repeat(serverPem, 5)), serverKeyPem);
         AssertRejected("not a certificate", serverPem, serverKeyPem);
+        AssertRejected(rootPem + "\n" + rootPem, serverPem, serverKeyPem);
+        AssertRejected(rootPem + "\n" + foreignPki.Root.ExportCertificatePem() + "\n" + rootPem,
+            serverPem, serverKeyPem);
     }
 
     [Fact]
@@ -945,6 +1022,23 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             "--Fleetory:AdminGateway:Port=45103"
         ]));
         Assert.Contains("separate root CAs", exception.Message, StringComparison.Ordinal);
+
+        using var replacementPki = new TestPki(new DeviceId(Guid.NewGuid()));
+        secrets.Write("agent-gateway-root-ca",
+            pki.Root.ExportCertificatePem() + "\n" + replacementPki.Root.ExportCertificatePem());
+        secrets.Write("admin-gateway-root-ca", replacementPki.Root.ExportCertificatePem());
+        secrets.Write("admin-gateway-server-cert", replacementPki.Server.ExportCertificatePem());
+        secrets.Write("admin-gateway-server-key", replacementPki.ServerKey.ExportPkcs8PrivateKeyPem());
+        var overlap = Assert.Throws<InvalidOperationException>(() => FleetoryApplication.Build([
+            "--environment=Development",
+            $"--Fleetory:Secrets:Directory={secrets.Path}",
+            "--Fleetory:AgentGateway:Enabled=true",
+            "--Fleetory:AdminGateway:Enabled=true",
+            "--Fleetory:Web:Port=45101",
+            "--Fleetory:AgentGateway:Port=45102",
+            "--Fleetory:AdminGateway:Port=45103"
+        ]));
+        Assert.Contains("separate root CAs", overlap.Message, StringComparison.Ordinal);
     }
 
     [Fact]

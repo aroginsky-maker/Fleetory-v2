@@ -11,20 +11,23 @@ internal sealed class MutualTlsMaterial : IDisposable
     private const string ClientAuthenticationOid = "1.3.6.1.5.5.7.3.2";
     private const string ServerAuthenticationOid = "1.3.6.1.5.5.7.3.1";
 
-    private readonly X509Certificate2 rootCa;
+    private readonly X509Certificate2Collection trustedRoots;
     private readonly X509Certificate2Collection serverChain;
 
-    private MutualTlsMaterial(X509Certificate2 rootCa, X509Certificate2 serverCertificate,
+    private MutualTlsMaterial(X509Certificate2Collection trustedRoots, X509Certificate2 serverCertificate,
         X509Certificate2Collection serverChain)
     {
-        this.rootCa = rootCa;
+        this.trustedRoots = trustedRoots;
         ServerCertificate = serverCertificate;
         this.serverChain = serverChain;
     }
 
     public X509Certificate2 ServerCertificate { get; }
     public X509Certificate2Collection ServerCertificateChain => serverChain;
-    public X509Certificate2 RootCa => rootCa;
+    public bool SharesRootWith(MutualTlsMaterial other) =>
+        trustedRoots.Cast<X509Certificate2>().Any(root =>
+            other.trustedRoots.Cast<X509Certificate2>().Any(candidate =>
+                root.RawData.AsSpan().SequenceEqual(candidate.RawData)));
 
     public static MutualTlsMaterial Load(
         ISecretProvider secrets,
@@ -33,14 +36,19 @@ internal sealed class MutualTlsMaterial : IDisposable
         string serverPrivateKeySecret)
     {
         ArgumentNullException.ThrowIfNull(secrets);
-        X509Certificate2? root = null;
+        var roots = new X509Certificate2Collection();
         X509Certificate2? server = null;
         var intermediates = new X509Certificate2Collection();
         var pemCertificates = new X509Certificate2Collection();
         try
         {
-            root = X509Certificate2.CreateFromPem(
-                secrets.GetRequiredSecret(rootCaSecret));
+            roots.ImportFromPem(secrets.GetRequiredSecret(rootCaSecret));
+            if (roots.Count is < 1 or > 2 || roots.Cast<X509Certificate2>().Any(root =>
+                    !IsCertificateAuthority(root)) ||
+                roots.Count == 2 && roots[0].RawData.AsSpan().SequenceEqual(roots[1].RawData))
+            {
+                throw new InvalidOperationException("Gateway TLS material is invalid.");
+            }
             var serverPem = secrets.GetRequiredSecret(serverCertificateSecret);
             var keyPem = secrets.GetRequiredSecret(serverPrivateKeySecret);
             pemCertificates.ImportFromPem(serverPem);
@@ -78,25 +86,26 @@ internal sealed class MutualTlsMaterial : IDisposable
                 CryptographicOperations.ZeroMemory(pkcs12);
             }
 
-            if (!IsCertificateAuthority(root) || !X509EndEntityPolicy.HasDigitalSignatureUsage(server) || !server.HasPrivateKey ||
-                !BuildChain(server, root, ServerAuthenticationOid, intermediates))
+            if (!X509EndEntityPolicy.HasDigitalSignatureUsage(server) || !server.HasPrivateKey ||
+                !roots.Cast<X509Certificate2>().Any(root =>
+                    BuildChain(server, root, ServerAuthenticationOid, intermediates)))
             {
                 throw new InvalidOperationException("Gateway TLS material is invalid.");
             }
 
             pemCertificates[0].Dispose();
-            return new MutualTlsMaterial(root, server, intermediates);
+            return new MutualTlsMaterial(roots, server, intermediates);
         }
         catch (Exception exception) when (exception is CryptographicException or ArgumentException)
         {
-            root?.Dispose();
+            DisposeAll(roots);
             server?.Dispose();
             DisposeAll(pemCertificates);
             throw new InvalidOperationException("Gateway TLS material is invalid.");
         }
         catch
         {
-            root?.Dispose();
+            DisposeAll(roots);
             server?.Dispose();
             DisposeAll(pemCertificates);
             throw;
@@ -108,14 +117,15 @@ internal sealed class MutualTlsMaterial : IDisposable
         X509Chain? peerChain,
         SslPolicyErrors __) =>
         certificate is not null && X509EndEntityPolicy.HasDigitalSignatureUsage(certificate) &&
-        BuildChain(certificate, rootCa, ClientAuthenticationOid,
-            peerChain?.ChainElements.Cast<X509ChainElement>()
-                .Skip(1).Select(element => element.Certificate));
+        trustedRoots.Cast<X509Certificate2>().Any(root =>
+            BuildChain(certificate, root, ClientAuthenticationOid,
+                peerChain?.ChainElements.Cast<X509ChainElement>()
+                    .Skip(1).Select(element => element.Certificate)));
 
     public void Dispose()
     {
         ServerCertificate.Dispose();
-        rootCa.Dispose();
+        DisposeAll(trustedRoots);
         DisposeAll(serverChain);
     }
 

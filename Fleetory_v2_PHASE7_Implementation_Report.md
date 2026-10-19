@@ -5,6 +5,7 @@
 ## Implemented
 
 - Separate Agent and Admin mTLS gateways, pinned CA roots, intermediate chains, device/person SAN validation, certificate binding, one-time Agent enrollment grants, rotation overlap and revocation.
+- Both gateways now accept an explicitly bounded two-root CA rollover window. Duplicate or third roots and any Agent/Admin root overlap fail startup. A real Agent mTLS/PostgreSQL test checks both roots during migration and denies the retired CA after the server switches to its replacement.
 - Local PostgreSQL RBAC with exact permissions and scoped grants; Admin OIDC gate validates signed tokens, WebAuthn AMR, client ID and certificate subject matching. Keycloak lab realm enforces WebAuthn and S256 PKCE.
 - Platform-owned Admin routes create immutable roles and scopes, assign scoped roles and revoke assignments. Every write requires the global `platform.authorization.manage` permission; authorization, state change and audit/outbox entry share a serializable PostgreSQL transaction. No management grant is seeded.
 - Offline first-admin bootstrap requires the Admin certificate SAN UUID, refuses a second global manager bootstrap and writes the initial grant with audit/outbox atomically. Integration tests exercise the real SQL procedure.
@@ -44,8 +45,8 @@
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local tests after privileged audit-export requirement | 192/192 passed |
-| Local production coverage after privileged audit-export requirement | 93.77% |
+| Local tests after CA rollover support | 193/193 passed |
+| Local production coverage after CA rollover support | 93.72% |
 | Last directly retrieved CI production coverage, `a6373cb` | 93.87% |
 | Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
 | Local full audit pipeline | PostgreSQL outbox → Fleetory worker → immudb readback with dedicated account passed |
@@ -67,7 +68,7 @@ The last completed CI at `70e3088` is [run 39269827339](https://github.com/arogi
 
 - Production Windows PKI provisioning and renewal must install the approved root and intermediate in the host certificate stores. The automated root-only wire test passes on an ephemeral runner; the earlier local machine without those store entries still needs its own provisioning before that probe can pass.
 - Validate the controlled Admin recovery runbook with production incident approval and credential custody; define a reviewed scope-reparenting and impact procedure before allowing hierarchy changes.
-- CA issuance and renewal policy, secure grant delivery, Admin certificate lifecycle and verified physical-device approval for certificate replacement or lost-key recovery; production custody and retention of recovery evidence.
+- CA issuance and renewal policy, secure root distribution, grant delivery, Admin certificate lifecycle and verified physical-device approval for certificate replacement or lost-key recovery; production custody and retention of recovery evidence. The two-root rollover mechanism is implemented, but operator validation remains.
 - Deploy the isolated signer behind authenticated requests and an auditable approval path, distribute Agent trust files securely, define an approval protocol for high-risk and bulk commands, and wire Agent runtime enforcement before execution is enabled.
 - Production immudb TLS, retention/backups and independently anchored verification; complete coverage of critical security call sites. A dedicated account is now verified in the local lab, but production account provisioning still requires its own deployment process.
 - Negative and recovery security tests, then final strict build, full test suite and current Sonar Quality Gate.

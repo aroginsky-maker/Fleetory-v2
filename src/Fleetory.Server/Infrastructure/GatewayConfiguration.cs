@@ -60,8 +60,7 @@ internal static class GatewayStartup
                     FleetorySecretNames.AdminGatewayServerPrivateKey);
             }
 
-            if (agentTls is not null && adminTls is not null &&
-                agentTls.RootCa.RawData.AsSpan().SequenceEqual(adminTls.RootCa.RawData))
+            if (agentTls is not null && adminTls is not null && agentTls.SharesRootWith(adminTls))
             {
                 throw new InvalidOperationException("Agent and Admin gateways require separate root CAs.");
             }
