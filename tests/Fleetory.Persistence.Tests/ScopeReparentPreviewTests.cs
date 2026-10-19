@@ -1,4 +1,6 @@
 using System.Text.Json;
+using Fleetory.Platform.Authorization;
+using Fleetory.Platform.Contracts;
 using Npgsql;
 
 namespace Fleetory.Persistence.Tests;
@@ -34,6 +36,9 @@ public sealed class ScopeReparentPreviewTests(PostgreSqlTestFixture fixture)
                 (assignment_id, actor_subject_id, actor_kind, role_id, scope_id)
             VALUES (gen_random_uuid(), 'person:old', 1, @old_role, @old),
                    (gen_random_uuid(), 'person:new', 1, @new_role, @new),
+                   (gen_random_uuid(), 'person:old', 1, @old_role, @child),
+                   (gen_random_uuid(), 'person:mask', 1, @old_role, @old),
+                   (gen_random_uuid(), 'person:mask', 1, @old_role, @new),
                    (gen_random_uuid(), 'person:global', 1, @global_role, NULL);
             """, connection, transaction))
         {
@@ -58,22 +63,61 @@ public sealed class ScopeReparentPreviewTests(PostgreSqlTestFixture fixture)
             .ToArray();
         Assert.Contains(("lost", "person:old", "assets.read"), grants);
         Assert.Contains(("gained", "person:new", "assets.write"), grants);
-        Assert.Equal(2, grants.Length);
+        Assert.Equal(4, grants.Length);
+        var effective = report.GetProperty("effective_access_changes").EnumerateArray()
+            .Select(item => (item.GetProperty("effect").GetString(),
+                item.GetProperty("target_scope_id").GetGuid(),
+                item.GetProperty("actor_subject_id").GetString(),
+                item.GetProperty("permission").GetString()))
+            .ToArray();
+        Assert.Contains(("lost", moved, "person:old", "assets.read"), effective);
+        Assert.Contains(("gained", moved, "person:new", "assets.write"), effective);
+        Assert.Contains(("gained", child, "person:new", "assets.write"), effective);
+        Assert.Equal(3, effective.Length);
+
+        await AssertAccessAsync(connection, transaction, "person:old", "assets.read", moved, true);
+        await AssertAccessAsync(connection, transaction, "person:old", "assets.read", child, true);
+        await AssertAccessAsync(connection, transaction, "person:new", "assets.write", moved, false);
+        await AssertAccessAsync(connection, transaction, "person:mask", "assets.read", child, true);
+        await using (var move = new NpgsqlCommand(
+            "UPDATE platform.authorization_scopes SET parent_scope_id = @new WHERE scope_id = @moved",
+            connection, transaction))
+        {
+            move.Parameters.AddWithValue("new", newRoot);
+            move.Parameters.AddWithValue("moved", moved);
+            await move.ExecuteNonQueryAsync();
+        }
+        await AssertAccessAsync(connection, transaction, "person:old", "assets.read", moved, false);
+        await AssertAccessAsync(connection, transaction, "person:old", "assets.read", child, true);
+        await AssertAccessAsync(connection, transaction, "person:new", "assets.write", moved, true);
+        await AssertAccessAsync(connection, transaction, "person:new", "assets.write", child, true);
+        await AssertAccessAsync(connection, transaction, "person:mask", "assets.read", child, true);
+        await using (var restore = new NpgsqlCommand(
+            "UPDATE platform.authorization_scopes SET parent_scope_id = @old WHERE scope_id = @moved",
+            connection, transaction))
+        {
+            restore.Parameters.AddWithValue("old", oldRoot);
+            restore.Parameters.AddWithValue("moved", moved);
+            await restore.ExecuteNonQueryAsync();
+        }
 
         using var cycle = await PreviewAsync(connection, transaction, moved, child);
         Assert.Equal("cycle", cycle.RootElement.GetProperty("status").GetString());
         Assert.Empty(cycle.RootElement.GetProperty("candidate_access_changes").EnumerateArray());
+        Assert.Empty(cycle.RootElement.GetProperty("effective_access_changes").EnumerateArray());
 
         using var missing = await PreviewAsync(connection, transaction, moved, Guid.NewGuid());
         Assert.Equal("missing_parent", missing.RootElement.GetProperty("status").GetString());
         Assert.Empty(missing.RootElement.GetProperty("candidate_access_changes").EnumerateArray());
+        Assert.Empty(missing.RootElement.GetProperty("effective_access_changes").EnumerateArray());
 
         using var unchanged = await PreviewAsync(connection, transaction, moved, oldRoot);
         Assert.Equal("no_change", unchanged.RootElement.GetProperty("status").GetString());
 
         using var toRoot = await PreviewAsync(connection, transaction, moved, null);
         Assert.Equal("valid", toRoot.RootElement.GetProperty("status").GetString());
-        Assert.Single(toRoot.RootElement.GetProperty("candidate_access_changes").EnumerateArray());
+        Assert.Equal(2, toRoot.RootElement.GetProperty("candidate_access_changes").GetArrayLength());
+        Assert.Equal(3, toRoot.RootElement.GetProperty("effective_access_changes").GetArrayLength());
 
         using var missingScope = await PreviewAsync(connection, transaction, Guid.NewGuid(), newRoot);
         Assert.Equal("missing_scope", missingScope.RootElement.GetProperty("status").GetString());
@@ -95,9 +139,20 @@ public sealed class ScopeReparentPreviewTests(PostgreSqlTestFixture fixture)
         Assert.Equal("invalid_hierarchy",
             corruptPreview.RootElement.GetProperty("status").GetString());
         Assert.Empty(corruptPreview.RootElement.GetProperty("candidate_access_changes").EnumerateArray());
+        Assert.Empty(corruptPreview.RootElement.GetProperty("effective_access_changes").EnumerateArray());
         await transaction.RollbackAsync();
     }
 
+    private static async Task AssertAccessAsync(
+        NpgsqlConnection connection, NpgsqlTransaction transaction, string subject,
+        string permission, Guid scopeId, bool expected)
+    {
+        var request = new AuthorizationRequest(
+            new ActorReference(subject, ActorKind.Person), permission, new ScopeId(scopeId));
+        var decision = await PostgreSqlAuthorizationService.AuthorizeInTransactionAsync(
+            request, connection, transaction);
+        Assert.Equal(expected, decision.IsAllowed);
+    }
     private static async Task<JsonDocument> PreviewAsync(
         NpgsqlConnection connection, NpgsqlTransaction transaction,
         Guid scopeId, Guid? newParent)

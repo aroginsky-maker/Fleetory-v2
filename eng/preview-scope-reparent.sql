@@ -86,6 +86,65 @@ candidate_grants AS (
       ON assignment.scope_id = changed.scope_id
     JOIN platform.authorization_role_permissions AS permission
       ON permission.role_id = assignment.role_id
+),
+subtree_ancestors AS (
+    SELECT subtree.scope_id AS target_scope_id,
+           scope.scope_id AS ancestor_scope_id,
+           scope.parent_scope_id, ARRAY[scope.scope_id] AS path
+    FROM subtree
+    JOIN platform.authorization_scopes AS scope ON scope.scope_id = subtree.scope_id
+    UNION ALL
+    SELECT ancestor.target_scope_id, parent.scope_id,
+           parent.parent_scope_id, ancestor.path || parent.scope_id
+    FROM subtree_ancestors AS ancestor
+    JOIN platform.authorization_scopes AS parent
+      ON parent.scope_id = ancestor.parent_scope_id
+    WHERE NOT parent.scope_id = ANY(ancestor.path)
+),
+candidate_decisions AS (
+    SELECT DISTINCT subtree.scope_id AS target_scope_id,
+           candidate_grant.actor_subject_id, candidate_grant.actor_kind, candidate_grant.permission
+    FROM candidate_grants AS candidate_grant
+    CROSS JOIN subtree
+),
+decision_comparison AS (
+    SELECT candidate.*,
+           EXISTS (
+               SELECT 1
+               FROM platform.authorization_assignments AS assignment
+               JOIN platform.authorization_role_permissions AS permission
+                 ON permission.role_id = assignment.role_id
+               WHERE assignment.actor_subject_id = candidate.actor_subject_id
+                 AND assignment.actor_kind = candidate.actor_kind
+                 AND permission.permission = candidate.permission
+                 AND (assignment.scope_id IS NULL OR assignment.scope_id IN (
+                     SELECT ancestor_scope_id FROM subtree_ancestors
+                     WHERE target_scope_id = candidate.target_scope_id
+                 ))
+           ) AS allowed_before,
+           EXISTS (
+               SELECT 1
+               FROM platform.authorization_assignments AS assignment
+               JOIN platform.authorization_role_permissions AS permission
+                 ON permission.role_id = assignment.role_id
+               WHERE assignment.actor_subject_id = candidate.actor_subject_id
+                 AND assignment.actor_kind = candidate.actor_kind
+                 AND permission.permission = candidate.permission
+                 AND (assignment.scope_id IS NULL OR assignment.scope_id IN (
+                     SELECT ancestor_scope_id FROM subtree_ancestors
+                     WHERE target_scope_id = candidate.target_scope_id
+                       AND ancestor_scope_id IN (SELECT scope_id FROM subtree)
+                     UNION
+                     SELECT scope_id FROM new_ancestors
+                 ))
+           ) AS allowed_after
+    FROM candidate_decisions AS candidate
+),
+effective_changes AS (
+    SELECT CASE WHEN allowed_after THEN 'gained' ELSE 'lost' END AS effect,
+           target_scope_id, actor_subject_id, actor_kind, permission
+    FROM decision_comparison
+    WHERE allowed_before <> allowed_after
 )
 SELECT jsonb_build_object(
     'status', (SELECT status FROM validation),
@@ -98,5 +157,11 @@ SELECT jsonb_build_object(
             THEN COALESCE((SELECT jsonb_agg(to_jsonb(candidate_grants)
                 ORDER BY effect, actor_subject_id, permission, assignment_id)
                 FROM candidate_grants), '[]'::jsonb)
+            ELSE '[]'::jsonb END,
+    'effective_access_changes',
+       CASE WHEN (SELECT status FROM validation) = 'valid'
+            THEN COALESCE((SELECT jsonb_agg(to_jsonb(effective_changes)
+                ORDER BY effect, actor_subject_id, actor_kind, permission, target_scope_id)
+                FROM effective_changes), '[]'::jsonb)
             ELSE '[]'::jsonb END
 ) AS scope_reparent_preview;
