@@ -158,6 +158,123 @@ public sealed class PostgreSqlAuthorizationTests(PostgreSqlTestFixture fixture)
     }
 
     [Fact]
+    public async Task Role_replacement_moves_assignments_atomically_and_preserves_scope()
+    {
+        var administratorId = $"person:{Guid.NewGuid():N}";
+        await InsertGrantAsync(administratorId, ActorKind.Person,
+            PostgreSqlAuthorizationAdministration.Permission);
+        var administrator = new ActorReference(administratorId, ActorKind.Person);
+        var target = new ActorReference($"person:{Guid.NewGuid():N}", ActorKind.Person);
+        var correlation = CorrelationId.New();
+        await using var scope = fixture.Services.CreateAsyncScope();
+        var administration = scope.ServiceProvider.GetRequiredService<PostgreSqlAuthorizationAdministration>();
+        var authorizer = scope.ServiceProvider.GetRequiredService<IAuthorizationService>();
+        var scopeId = await administration.CreateScopeAsync(administrator, "Replacement scope",
+            null, correlation);
+        var oldRoleId = await administration.CreateRoleAsync(administrator,
+            "Reader version", [ReadPermission], correlation);
+        var assignmentId = await administration.AssignRoleAsync(administrator, target,
+            oldRoleId, new ScopeId(scopeId), correlation);
+        var read = new AuthorizationRequest(target, ReadPermission, new ScopeId(scopeId));
+        var write = new AuthorizationRequest(target, WritePermission, new ScopeId(scopeId));
+        Assert.True((await authorizer.AuthorizeAsync(read)).IsAllowed);
+
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await administration.ReplaceRoleAsync(administrator, oldRoleId,
+                "Writer version", [WritePermission], new CorrelationId(string.Empty)));
+        Assert.True((await authorizer.AuthorizeAsync(read)).IsAllowed);
+
+        var newRoleId = await administration.ReplaceRoleAsync(administrator, oldRoleId,
+            "Writer version", [WritePermission], correlation);
+        Assert.NotNull(newRoleId);
+        Assert.NotEqual(oldRoleId, newRoleId.Value);
+        Assert.False((await authorizer.AuthorizeAsync(read)).IsAllowed);
+        Assert.True((await authorizer.AuthorizeAsync(write)).IsAllowed);
+        Assert.False((await authorizer.AuthorizeAsync(
+            new AuthorizationRequest(target, WritePermission))).IsAllowed);
+        Assert.Null(await administration.ReplaceRoleAsync(administrator, oldRoleId,
+            "Missing version", [ReadPermission], correlation));
+
+        await using var connection = new NpgsqlConnection(fixture.ConnectionString);
+        await connection.OpenAsync();
+        await using var moved = new NpgsqlCommand("""
+            SELECT COUNT(*) FROM platform.authorization_assignments
+            WHERE assignment_id = @assignment_id AND role_id = @new_role_id
+            """, connection);
+        moved.Parameters.AddWithValue("assignment_id", assignmentId);
+        moved.Parameters.AddWithValue("new_role_id", newRoleId.Value);
+        Assert.Equal(1L, (long)(await moved.ExecuteScalarAsync())!);
+        await using var retired = new NpgsqlCommand("""
+            SELECT COUNT(*) FROM platform.authorization_roles WHERE role_id = @old_role_id
+            """, connection);
+        retired.Parameters.AddWithValue("old_role_id", oldRoleId);
+        Assert.Equal(0L, (long)(await retired.ExecuteScalarAsync())!);
+        await using var audits = new NpgsqlCommand("""
+            SELECT COUNT(*) FROM platform.audit_events AS event
+            JOIN platform.audit_export_queue AS queue ON queue.audit_event_id = event.event_id
+            WHERE event.correlation_id = @correlation
+              AND event.action IN ('platform.authorization.role_replaced',
+                                   'platform.authorization.role_unchanged')
+            """, connection);
+        audits.Parameters.AddWithValue("correlation", correlation.Value);
+        Assert.Equal(2L, (long)(await audits.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
+    public async Task Role_replacement_cannot_remove_last_global_manager_permission()
+    {
+        await using (var resetConnection = new NpgsqlConnection(fixture.ConnectionString))
+        {
+            await resetConnection.OpenAsync();
+            await using var clear = new NpgsqlCommand("""
+                DELETE FROM platform.authorization_assignments AS assignment
+                USING platform.authorization_role_permissions AS permission
+                WHERE permission.role_id = assignment.role_id
+                  AND permission.permission = 'platform.authorization.manage'
+                  AND assignment.scope_id IS NULL
+                """, resetConnection);
+            await clear.ExecuteNonQueryAsync();
+        }
+
+        var administratorId = $"person:{Guid.NewGuid():N}";
+        var assignmentId = await InsertGrantAsync(administratorId, ActorKind.Person,
+            PostgreSqlAuthorizationAdministration.Permission);
+        var administrator = new ActorReference(administratorId, ActorKind.Person);
+        var correlation = CorrelationId.New();
+        await using var scope = fixture.Services.CreateAsyncScope();
+        var administration = scope.ServiceProvider.GetRequiredService<PostgreSqlAuthorizationAdministration>();
+        var authorizer = scope.ServiceProvider.GetRequiredService<IAuthorizationService>();
+        await using var connection = new NpgsqlConnection(fixture.ConnectionString);
+        await connection.OpenAsync();
+        await using var role = new NpgsqlCommand("""
+            SELECT role_id FROM platform.authorization_assignments
+            WHERE assignment_id = @assignment_id
+            """, connection);
+        role.Parameters.AddWithValue("assignment_id", assignmentId);
+        var oldRoleId = (Guid)(await role.ExecuteScalarAsync())!;
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await administration.ReplaceRoleAsync(administrator, oldRoleId,
+                "Reader without management", [ReadPermission], correlation));
+        Assert.True((await authorizer.AuthorizeAsync(new AuthorizationRequest(
+            administrator, PostgreSqlAuthorizationAdministration.Permission))).IsAllowed);
+
+        var newRoleId = await administration.ReplaceRoleAsync(administrator, oldRoleId,
+            "Manager and reader", [PostgreSqlAuthorizationAdministration.Permission,
+                ReadPermission], correlation);
+        Assert.NotNull(newRoleId);
+        Assert.True((await authorizer.AuthorizeAsync(new AuthorizationRequest(
+            administrator, PostgreSqlAuthorizationAdministration.Permission))).IsAllowed);
+        await using var blockedAudit = new NpgsqlCommand("""
+            SELECT COUNT(*) FROM platform.audit_events
+            WHERE correlation_id = @correlation
+              AND action = 'platform.authorization.role_replacement_blocked'
+            """, connection);
+        blockedAudit.Parameters.AddWithValue("correlation", correlation.Value);
+        Assert.Equal(1L, (long)(await blockedAudit.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
     public async Task Roles_and_scopes_retire_only_after_assignments_and_children_are_removed()
     {
         var administratorId = $"person:{Guid.NewGuid():N}";

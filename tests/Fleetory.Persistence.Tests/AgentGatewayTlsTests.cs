@@ -21,6 +21,7 @@ namespace Fleetory.Persistence.Tests;
 public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
 {
     private static readonly string[] ReadPermissions = ["Core.Device.Read"];
+    private static readonly string[] WritePermissions = ["Core.Device.Write"];
     private static readonly string[] DuplicateReadPermissions =
         ["Core.Device.Read", "Core.Device.Read"];
 
@@ -976,12 +977,19 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             var roleBody = new { name = "mTLS managed reader", permissions = ReadPermissions };
             using var denied = await admin.PostAsJsonAsync($"{baseUrl}/roles", roleBody);
             Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+            using var deniedReplacement = await admin.PostAsJsonAsync(
+                $"{baseUrl}/roles/{Guid.NewGuid():D}/replacements", roleBody);
+            Assert.Equal(HttpStatusCode.Forbidden, deniedReplacement.StatusCode);
             using var deniedRetirement = await admin.DeleteAsync(
                 $"{baseUrl}/roles/{Guid.NewGuid():D}");
             Assert.Equal(HttpStatusCode.Forbidden, deniedRetirement.StatusCode);
             using var webAttempt = await web.PostAsJsonAsync(
                 $"http://127.0.0.1:{webPort}/admin/authorization/roles", roleBody);
             Assert.Equal(HttpStatusCode.NotFound, webAttempt.StatusCode);
+            using var webReplacement = await web.PostAsJsonAsync(
+                $"http://127.0.0.1:{webPort}/admin/authorization/roles/{Guid.NewGuid():D}/replacements",
+                roleBody);
+            Assert.Equal(HttpStatusCode.NotFound, webReplacement.StatusCode);
             using var webRetirement = await web.DeleteAsync(
                 $"http://127.0.0.1:{webPort}/admin/authorization/roles/{Guid.NewGuid():D}");
             Assert.Equal(HttpStatusCode.NotFound, webRetirement.StatusCode);
@@ -1053,6 +1061,23 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             Assert.Equal(HttpStatusCode.Conflict, blockedRole.StatusCode);
             using var blockedScope = await admin.DeleteAsync($"{baseUrl}/scopes/{scopeId:D}");
             Assert.Equal(HttpStatusCode.Conflict, blockedScope.StatusCode);
+            using var invalidReplacement = await admin.PostAsJsonAsync(
+                $"{baseUrl}/roles/{roleId:D}/replacements",
+                new { name = "Duplicate replacement", permissions = DuplicateReadPermissions });
+            Assert.Equal(HttpStatusCode.BadRequest, invalidReplacement.StatusCode);
+            using var missingReplacement = await admin.PostAsJsonAsync(
+                $"{baseUrl}/roles/{Guid.NewGuid():D}/replacements", roleBody);
+            Assert.Equal(HttpStatusCode.NotFound, missingReplacement.StatusCode);
+            using var replacement = await admin.PostAsJsonAsync(
+                $"{baseUrl}/roles/{roleId:D}/replacements",
+                new { name = "mTLS managed writer", permissions = WritePermissions });
+            Assert.Equal(HttpStatusCode.Created, replacement.StatusCode);
+            roleId = (await replacement.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>())
+                .GetProperty("id").GetGuid();
+            Assert.False((await authorizer.AuthorizeAsync(request)).IsAllowed);
+            Assert.True((await authorizer.AuthorizeAsync(new AuthorizationRequest(
+                new ActorReference(target, ActorKind.Person), "Core.Device.Write",
+                new ScopeId(scopeId)))).IsAllowed);
             using var revoked = await admin.DeleteAsync(
                 $"{baseUrl}/assignments/{assignmentId:D}");
             Assert.Equal(HttpStatusCode.NoContent, revoked.StatusCode);

@@ -65,6 +65,39 @@ internal static class AuthorizationAdministrationEndpoints
         }
     }
 
+    public static async Task<IResult> ReplaceRoleAsync(
+        HttpContext context,
+        Guid roleId,
+        PostgreSqlAuthorizationAdministration administration)
+    {
+        var actor = await ReadActorAsync(context);
+        if (actor is null) { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+        var request = await BoundedJsonRequestReader.ReadAsync<CreateRoleRequest>(
+            context, MaximumBodyBytes);
+        if (request is null) { return Results.BadRequest(); }
+
+        try
+        {
+            var replacementId = await administration.ReplaceRoleAsync(actor, roleId,
+                request.Name, request.Permissions, Correlation(context), context.RequestAborted);
+            return replacementId is { } id
+                ? Results.Json(new IdResponse(id), statusCode: StatusCodes.Status201Created)
+                : Results.NotFound();
+        }
+        catch (ArgumentException)
+        {
+            return Results.BadRequest();
+        }
+        catch (InvalidOperationException)
+        {
+            return Results.Conflict();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+    }
+
     public static async Task<IResult> AssignRoleAsync(
         HttpContext context,
         Guid roleId,

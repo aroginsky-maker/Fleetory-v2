@@ -23,13 +23,8 @@ internal sealed class PostgreSqlAuthorizationAdministration(
         CorrelationId correlationId,
         CancellationToken cancellationToken = default)
     {
-        ValidateName(name);
-        if (permissions is null || permissions.Count is < 1 or > 32 ||
-            permissions.Any(permission => !PostgreSqlAuthorizationService.IsValidPermission(permission)) ||
-            permissions.Count != permissions.Distinct(StringComparer.Ordinal).Count())
-        {
-            throw new ArgumentException("Role permissions are invalid.", nameof(permissions));
-        }
+        ValidateRole(name, permissions);
+        var permissionSet = permissions.ToArray();
 
         var roleId = Guid.CreateVersion7();
         return ExecuteAuthorizedAsync(actor, "platform.authorization.role_created",
@@ -37,33 +32,113 @@ internal sealed class PostgreSqlAuthorizationAdministration(
             new Dictionary<string, string>
             {
                 ["name"] = name,
-                ["permission_count"] = permissions.Count.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                ["permission_count"] = permissionSet.Length.ToString(System.Globalization.CultureInfo.InvariantCulture)
             },
             async (connection, transaction, token) =>
             {
-                await using (var role = new NpgsqlCommand("""
-                    INSERT INTO platform.authorization_roles (role_id, name)
-                    VALUES (@role_id, @name)
-                    """, connection, transaction))
-                {
-                    role.Parameters.AddWithValue("role_id", NpgsqlDbType.Uuid, roleId);
-                    role.Parameters.AddWithValue("name", NpgsqlDbType.Varchar, name);
-                    await role.ExecuteNonQueryAsync(token);
-                }
-
-                foreach (var permission in permissions)
-                {
-                    await using var grant = new NpgsqlCommand("""
-                        INSERT INTO platform.authorization_role_permissions (role_id, permission)
-                        VALUES (@role_id, @permission)
-                        """, connection, transaction);
-                    grant.Parameters.AddWithValue("role_id", NpgsqlDbType.Uuid, roleId);
-                    grant.Parameters.AddWithValue("permission", NpgsqlDbType.Varchar, permission);
-                    await grant.ExecuteNonQueryAsync(token);
-                }
-
+                await InsertRoleAsync(connection, transaction, roleId, name, permissionSet, token);
                 return roleId;
             }, cancellationToken);
+    }
+
+    public async ValueTask<Guid?> ReplaceRoleAsync(
+        ActorReference actor,
+        Guid oldRoleId,
+        string name,
+        IReadOnlyCollection<string> permissions,
+        CorrelationId correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        if (oldRoleId == Guid.Empty)
+        {
+            throw new ArgumentException("Role ID is invalid.", nameof(oldRoleId));
+        }
+
+        ValidateRole(name, permissions);
+        var permissionSet = permissions.ToArray();
+        var newRoleId = Guid.CreateVersion7();
+        var outcome = await ExecuteAuthorizedAsync(actor,
+            "platform.authorization.role_replaced",
+            new AuditTarget("role", oldRoleId.ToString("D")), correlationId,
+            new Dictionary<string, string>
+            {
+                ["replacement_role_id"] = newRoleId.ToString("D"),
+                ["name"] = name,
+                ["permission_count"] = permissionSet.Length.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            },
+            async (connection, transaction, token) =>
+            {
+                await using (var oldRole = new NpgsqlCommand("""
+                    SELECT role_id FROM platform.authorization_roles
+                    WHERE role_id = @old_role_id FOR UPDATE
+                    """, connection, transaction))
+                {
+                    oldRole.Parameters.AddWithValue("old_role_id", NpgsqlDbType.Uuid, oldRoleId);
+                    if (await oldRole.ExecuteScalarAsync(token) is null)
+                    {
+                        return RoleReplacementOutcome.Missing;
+                    }
+                }
+
+                if (!permissionSet.Contains(Permission, StringComparer.Ordinal))
+                {
+                    await using var lastManager = new NpgsqlCommand("""
+                        SELECT EXISTS (
+                            SELECT 1 FROM platform.authorization_role_permissions
+                            WHERE role_id = @old_role_id AND permission = @permission
+                        ) AND EXISTS (
+                            SELECT 1 FROM platform.authorization_assignments
+                            WHERE role_id = @old_role_id AND scope_id IS NULL
+                        ) AND NOT EXISTS (
+                            SELECT 1 FROM platform.authorization_assignments AS assignment
+                            JOIN platform.authorization_role_permissions AS permission
+                              ON permission.role_id = assignment.role_id
+                            WHERE assignment.role_id <> @old_role_id
+                              AND assignment.scope_id IS NULL
+                              AND permission.permission = @permission
+                        )
+                        """, connection, transaction);
+                    lastManager.Parameters.AddWithValue("old_role_id", NpgsqlDbType.Uuid, oldRoleId);
+                    lastManager.Parameters.AddWithValue("permission", NpgsqlDbType.Varchar, Permission);
+                    if ((bool)(await lastManager.ExecuteScalarAsync(token))!)
+                    {
+                        return RoleReplacementOutcome.LastManagerProtected;
+                    }
+                }
+
+                await InsertRoleAsync(connection, transaction, newRoleId, name, permissionSet, token);
+                await using (var moveAssignments = new NpgsqlCommand("""
+                    UPDATE platform.authorization_assignments
+                    SET role_id = @new_role_id WHERE role_id = @old_role_id
+                    """, connection, transaction))
+                {
+                    moveAssignments.Parameters.AddWithValue("new_role_id", NpgsqlDbType.Uuid, newRoleId);
+                    moveAssignments.Parameters.AddWithValue("old_role_id", NpgsqlDbType.Uuid, oldRoleId);
+                    await moveAssignments.ExecuteNonQueryAsync(token);
+                }
+
+                await using var retireOld = new NpgsqlCommand("""
+                    DELETE FROM platform.authorization_roles WHERE role_id = @old_role_id
+                    """, connection, transaction);
+                retireOld.Parameters.AddWithValue("old_role_id", NpgsqlDbType.Uuid, oldRoleId);
+                await retireOld.ExecuteNonQueryAsync(token);
+                return RoleReplacementOutcome.Replaced;
+            }, cancellationToken,
+            result => result switch
+            {
+                RoleReplacementOutcome.Missing => "platform.authorization.role_unchanged",
+                RoleReplacementOutcome.LastManagerProtected =>
+                    "platform.authorization.role_replacement_blocked",
+                _ => "platform.authorization.role_replaced"
+            });
+
+        if (outcome == RoleReplacementOutcome.LastManagerProtected)
+        {
+            throw new InvalidOperationException(
+                "The last global authorization administrator cannot be removed.");
+        }
+
+        return outcome == RoleReplacementOutcome.Replaced ? newRoleId : null;
     }
 
     public ValueTask<Guid> CreateScopeAsync(
@@ -331,6 +406,47 @@ internal sealed class PostgreSqlAuthorizationAdministration(
         return result;
     }
 
+    private static async Task InsertRoleAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Guid roleId,
+        string name,
+        IReadOnlyCollection<string> permissions,
+        CancellationToken cancellationToken)
+    {
+        await using (var role = new NpgsqlCommand("""
+            INSERT INTO platform.authorization_roles (role_id, name)
+            VALUES (@role_id, @name)
+            """, connection, transaction))
+        {
+            role.Parameters.AddWithValue("role_id", NpgsqlDbType.Uuid, roleId);
+            role.Parameters.AddWithValue("name", NpgsqlDbType.Varchar, name);
+            await role.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        foreach (var permission in permissions)
+        {
+            await using var grant = new NpgsqlCommand("""
+                INSERT INTO platform.authorization_role_permissions (role_id, permission)
+                VALUES (@role_id, @permission)
+                """, connection, transaction);
+            grant.Parameters.AddWithValue("role_id", NpgsqlDbType.Uuid, roleId);
+            grant.Parameters.AddWithValue("permission", NpgsqlDbType.Varchar, permission);
+            await grant.ExecuteNonQueryAsync(cancellationToken);
+        }
+    }
+
+    private static void ValidateRole(string name, IReadOnlyCollection<string> permissions)
+    {
+        ValidateName(name);
+        if (permissions is null || permissions.Count is < 1 or > 32 ||
+            permissions.Any(permission => !PostgreSqlAuthorizationService.IsValidPermission(permission)) ||
+            permissions.Count != permissions.Distinct(StringComparer.Ordinal).Count())
+        {
+            throw new ArgumentException("Role permissions are invalid.", nameof(permissions));
+        }
+    }
+
     private static void ValidateName(string? name)
     {
         if (string.IsNullOrWhiteSpace(name) || name.Length > 128 || name != name.Trim())
@@ -349,4 +465,6 @@ internal sealed class PostgreSqlAuthorizationAdministration(
     private enum AuthorizationObject { Role, Scope }
 
     private enum RetirementOutcome { Retired, InUse, Missing }
+
+    private enum RoleReplacementOutcome { Replaced, Missing, LastManagerProtected }
 }
