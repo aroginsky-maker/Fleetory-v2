@@ -22,6 +22,7 @@ if (-not (Test-Path -LiteralPath $envPath)) {
         "FLEETORY_LAB_KEYCLOAK_ADMIN_PASSWORD=$(New-LabSecret)",
         "FLEETORY_LAB_OPENBAO_TOKEN=$(New-LabSecret)",
         "FLEETORY_LAB_IMMUDB_PASSWORD=$(New-LabSecret)",
+        "FLEETORY_LAB_AUDIT_WRITER_PASSWORD=A1!$((New-LabSecret).Substring(0, 20))",
         "FLEETORY_LAB_POSTGRES_PASSWORD=$(New-LabSecret)"
     )
     [System.IO.File]::WriteAllLines($envPath, $entries, [System.Text.UTF8Encoding]::new($false))
@@ -41,6 +42,12 @@ if ($legacyPassword) {
 if (-not ($entries | Where-Object { $_.StartsWith('FLEETORY_LAB_POSTGRES_PASSWORD=') })) {
     [System.IO.File]::AppendAllText($envPath,
         "FLEETORY_LAB_POSTGRES_PASSWORD=$(New-LabSecret)`n", [System.Text.UTF8Encoding]::new($false))
+    $entries = [System.IO.File]::ReadAllLines($envPath)
+}
+if (-not ($entries | Where-Object { $_.StartsWith('FLEETORY_LAB_AUDIT_WRITER_PASSWORD=') })) {
+    [System.IO.File]::AppendAllText($envPath,
+        "FLEETORY_LAB_AUDIT_WRITER_PASSWORD=A1!$((New-LabSecret).Substring(0, 20))`n",
+        [System.Text.UTF8Encoding]::new($false))
     $entries = [System.IO.File]::ReadAllLines($envPath)
 }
 
@@ -92,11 +99,7 @@ Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8200/v1/secret/data/fleeto
     -Headers @{ 'X-Vault-Token' = $settings['FLEETORY_LAB_OPENBAO_TOKEN'] } `
     -ContentType 'application/json' -Body $body -TimeoutSec 10 | Out-Null
 
-$auditBody = @{ data = @{ value = $settings['FLEETORY_LAB_IMMUDB_PASSWORD'] } } |
-    ConvertTo-Json -Compress -Depth 4
-Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8200/v1/secret/data/fleetory/audit-immudb-password' `
-    -Headers @{ 'X-Vault-Token' = $settings['FLEETORY_LAB_OPENBAO_TOKEN'] } `
-    -ContentType 'application/json' -Body $auditBody -TimeoutSec 10 | Out-Null
+& (Join-Path $PSScriptRoot 'provision-security-lab-audit-user.ps1')
 
 $rootHeaders = @{ 'X-Vault-Token' = $settings['FLEETORY_LAB_OPENBAO_TOKEN'] }
 $serverPolicy = @'

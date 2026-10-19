@@ -22,7 +22,7 @@ if ($AuditPipeline) {
     $env:FLEETORY_Fleetory__AuditExport__Enabled = 'true'
     $env:FLEETORY_Fleetory__AuditExport__Sink = 'Immudb'
     $env:FLEETORY_Fleetory__AuditExport__Address = 'http://127.0.0.1:8090/'
-    $env:FLEETORY_Fleetory__AuditExport__Username = 'immudb'
+    $env:FLEETORY_Fleetory__AuditExport__Username = 'fleetory_audit_writer'
 }
 
 $server = $null
@@ -65,10 +65,10 @@ try {
 
         $envPath = Join-Path $labDirectory 'lab.env'
         $password = (Get-Content -LiteralPath $envPath |
-            Where-Object { $_.StartsWith('FLEETORY_LAB_IMMUDB_PASSWORD=') } |
+            Where-Object { $_.StartsWith('FLEETORY_LAB_AUDIT_WRITER_PASSWORD=') } |
             Select-Object -First 1).Split('=', 2)[1]
         $login = @{
-            user = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('immudb'))
+            user = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes('fleetory_audit_writer'))
             password = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($password))
         } | ConvertTo-Json -Compress
         $auth = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8090/api/login' `

@@ -178,7 +178,7 @@ The read-only [scope reparenting preflight](ScopeReparenting.md) reports both ca
 - A separately deployed protected signing service with authenticated requests, auditable approvals and secure trust-file distribution, plus integration of the execution gate into the future Agent host before any command transport is enabled. High-risk and bulk command types require an approval protocol before they can be enabled. The current isolated signer component supports only `Inventory.Refresh` and has no service endpoint or command dispatch.
 - A controlled scope reparenting procedure and enforcement at future privileged routes. The first-admin bootstrap, controlled recovery and last-global-grant safeguard are tested; actual recovery depends on the deployment's approved incident procedure and replacement credential custody.
 - Maintain Windows host CA-store provisioning and root-only wire-chain regression checks alongside the existing Linux result; verify the production certificate-management procedure during deployment.
-- Production immudb hardening: dedicated audit credentials, TLS, retention/backup and independently anchored verification; wiring audited security call sites as those flows are implemented.
+- Production immudb hardening: the local lab now uses dedicated read/write credentials limited to `defaultdb`; production still needs TLS, retention/backup and independently anchored verification. Wire audited security call sites as those flows are implemented.
 - Abuse, negative authorization, recovery and cross-platform security tests, then the full Sonar Quality Gate.
 
 PHASE 7 remains open until these controls are integrated and independently verified. No Agent execution endpoint or privileged command route is exposed by this slice.
