@@ -30,6 +30,7 @@ public sealed class OpenBaoSecretProviderTests
     [InlineData("http://example.com/")]
     [InlineData("http://127.0.0.1:8200/other")]
     [InlineData("https://example.com/path")]
+    [InlineData("https://user:password@example.com/")]
     public void Rejects_insecure_or_non_origin_address(string address)
     {
         Assert.Throws<ArgumentException>(() => new OpenBaoSecretProvider(new Uri(address),

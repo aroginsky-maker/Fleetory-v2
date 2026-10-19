@@ -72,6 +72,7 @@ public sealed class ImmudbAuditExportSinkTests
     [InlineData("http://audit.example/")]
     [InlineData("http://127.0.0.1:8090/other")]
     [InlineData("https://audit.example/path")]
+    [InlineData("https://user:password@audit.example/")]
     public void Rejects_insecure_or_non_origin_address(string address)
     {
         Assert.Throws<ArgumentException>(() => new ImmudbAuditExportSink(

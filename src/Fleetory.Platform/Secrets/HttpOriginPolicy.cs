@@ -13,6 +13,7 @@ internal static class HttpOriginPolicy
     {
         ArgumentNullException.ThrowIfNull(address);
         if (!address.IsAbsoluteUri || address.AbsolutePath != "/" ||
+            address.UserInfo.Length != 0 ||
             address.Query.Length != 0 || address.Fragment.Length != 0 ||
             address.Scheme != Uri.UriSchemeHttps &&
             !(allowInsecureLoopback && address.Scheme == Uri.UriSchemeHttp && address.IsLoopback))

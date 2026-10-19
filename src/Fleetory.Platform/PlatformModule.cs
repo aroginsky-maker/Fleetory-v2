@@ -64,7 +64,8 @@ public sealed class PlatformModule : FleetoryModuleBase
         services.AddScoped<IAuditWriter>(provider => provider.GetRequiredService<PostgreSqlAuditWriter>());
         services.AddScoped<IAuthorizationService, PostgreSqlAuthorizationService>();
         services.AddScoped<PostgreSqlAuthorizationAdministration>();
-        if (configuration.GetValue<bool>("Fleetory:AuditExport:Enabled"))
+        var auditExportEnabled = configuration.GetValue<bool>("Fleetory:AuditExport:Enabled");
+        if (auditExportEnabled)
         {
             if (configuration["Fleetory:AuditExport:Sink"] == "Immudb")
             {
@@ -94,10 +95,17 @@ public sealed class PlatformModule : FleetoryModuleBase
         services.AddDbContext<PlatformDbContext>((serviceProvider, options) =>
             PlatformDbContextOptions.Configure(options,
                 PostgreSqlPersistenceConfiguration.GetRequiredConnectionString(configuration, serviceProvider)));
-        services.AddHealthChecks()
+        var healthChecks = services.AddHealthChecks()
             .AddCheck<PostgreSqlReadinessHealthCheck>(
                 "postgresql",
                 failureStatus: HealthStatus.Unhealthy,
                 tags: ["ready"]);
+        if (auditExportEnabled)
+        {
+            healthChecks.AddCheck<AuditExportBacklogHealthCheck>(
+                "audit_export_backlog",
+                failureStatus: HealthStatus.Degraded,
+                tags: ["ready"]);
+        }
     }
 }

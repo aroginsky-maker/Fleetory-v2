@@ -8,6 +8,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Npgsql;
 
 namespace Fleetory.Persistence.Tests;
@@ -15,6 +16,30 @@ namespace Fleetory.Persistence.Tests;
 [Collection(PostgreSqlTestCollection.Name)]
 public sealed class PostgreSqlAuditExportTests(PostgreSqlTestFixture fixture)
 {
+    [Fact]
+    public async Task Audit_export_health_degrades_for_stale_pending_events_and_recovers_after_delivery()
+    {
+        await ClearQueueAsync();
+        var clock = new AdjustableClock(DateTimeOffset.UtcNow);
+        var check = new AuditExportBacklogHealthCheck(
+            new PostgreSqlConnectionSettings(fixture.ConnectionString), clock);
+        var context = new HealthCheckContext();
+        Assert.Equal(HealthStatus.Healthy,
+            (await check.CheckHealthAsync(context)).Status);
+
+        await WriteAuditAsync();
+        Assert.Equal(HealthStatus.Healthy,
+            (await check.CheckHealthAsync(context)).Status);
+
+        clock.UtcNow = clock.UtcNow.AddMinutes(6);
+        Assert.Equal(HealthStatus.Degraded,
+            (await check.CheckHealthAsync(context)).Status);
+
+        Assert.Equal(1, await CreatePump(new CapturingSink(), clock).ExportNextBatchAsync());
+        Assert.Equal(HealthStatus.Healthy,
+            (await check.CheckHealthAsync(context)).Status);
+    }
+
     [Fact]
     public async Task Delivery_preserves_event_identity_and_dequeues_only_after_sink_accepts()
     {

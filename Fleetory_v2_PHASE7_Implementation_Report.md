@@ -32,6 +32,7 @@
 - Gateway rate limits now apply only on their matching mTLS listener. The tests send more than the configured limit to Admin and Agent paths through the public web port and confirm consistent 404 responses without consuming privileged buckets.
 - The file secret provider now refuses symbolic links for the mount and secret files and rejects a Unix mount writable by another group or user. A Linux CI test checks those failure paths; deployment still owns the parent path and service ACL.
 - Production immudb export now refuses the default administrator username or password and plain HTTP when the sink is constructed. Development retains its loopback lab configuration. The deployment guide calls for a dedicated read/write account and trusted HTTPS transport; production provisioning, backup and independent state verification remain open.
+- With export enabled, readiness now reports a degraded audit-export state when the oldest pending outbox entry exceeds five minutes, without synchronously calling immudb or blocking local audit writes. A PostgreSQL integration test covers empty, fresh, stale and drained queue states.
 
 ## Verification snapshot
 
