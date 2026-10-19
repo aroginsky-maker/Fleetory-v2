@@ -20,6 +20,10 @@ namespace Fleetory.Persistence.Tests;
 [Collection(PostgreSqlTestCollection.Name)]
 public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
 {
+    private static readonly string[] ReadPermissions = ["Core.Device.Read"];
+    private static readonly string[] DuplicateReadPermissions =
+        ["Core.Device.Read", "Core.Device.Read"];
+
     [Fact]
     public async Task Gateway_accepts_pinned_root_with_intermediate_server_chain()
     {
@@ -969,7 +973,7 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             using var admin = pki.CreateClient(pki.Client);
             using var web = new HttpClient();
             var baseUrl = $"https://127.0.0.1:{adminPort}/admin/authorization";
-            var roleBody = new { name = "mTLS managed reader", permissions = new[] { "Core.Device.Read" } };
+            var roleBody = new { name = "mTLS managed reader", permissions = ReadPermissions };
             using var denied = await admin.PostAsJsonAsync($"{baseUrl}/roles", roleBody);
             Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
             using var deniedRetirement = await admin.DeleteAsync(
@@ -984,11 +988,10 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
 
             await GrantAdminPermissionAsync(adminId, "platform.authorization.manage");
             using var emptyRoleName = await admin.PostAsJsonAsync($"{baseUrl}/roles",
-                new { name = "", permissions = new[] { "Core.Device.Read" } });
+                new { name = "", permissions = ReadPermissions });
             Assert.Equal(HttpStatusCode.BadRequest, emptyRoleName.StatusCode);
             using var duplicatePermissions = await admin.PostAsJsonAsync($"{baseUrl}/roles",
-                new { name = "Duplicate permissions", permissions = new[]
-                    { "Core.Device.Read", "Core.Device.Read" } });
+                new { name = "Duplicate permissions", permissions = DuplicateReadPermissions });
             Assert.Equal(HttpStatusCode.BadRequest, duplicatePermissions.StatusCode);
             using var malformedRole = await admin.PostAsync($"{baseUrl}/roles",
                 new StringContent("{", System.Text.Encoding.UTF8, "application/json"));

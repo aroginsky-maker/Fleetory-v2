@@ -84,10 +84,10 @@ public sealed class AgentEnrollmentService(
         DeviceId deviceId,
         string displayName,
         CorrelationId correlationId,
-        CancellationToken cancellationToken = default,
         string? expectedCertificateSha256 = null,
         Guid? rotationIntentId = null,
-        string? initialCertificateSha256 = null)
+        string? initialCertificateSha256 = null,
+        CancellationToken cancellationToken = default)
     {
         if (deviceId.Value == Guid.Empty || string.IsNullOrWhiteSpace(displayName) ||
             displayName.Length > 256 ||

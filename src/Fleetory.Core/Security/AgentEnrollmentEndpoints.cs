@@ -34,9 +34,9 @@ internal static class AgentEnrollmentEndpoints
         {
             var token = await service.CreateGrantAsync(
                 actor, new DeviceId(deviceId), request.DisplayName,
-                new CorrelationId(context.TraceIdentifier), context.RequestAborted,
+                new CorrelationId(context.TraceIdentifier),
                 request.ExpectedCertificateSha256, request.RotationIntentId,
-                request.InitialCertificateSha256);
+                request.InitialCertificateSha256, context.RequestAborted);
             context.Response.Headers.CacheControl = "no-store";
             return Results.Json(new GrantResponse(token));
         }
