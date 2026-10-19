@@ -83,6 +83,18 @@ public sealed class ScopeReparentPreviewTests(PostgreSqlTestFixture fixture)
             """, connection, transaction);
         current.Parameters.AddWithValue("moved", moved);
         Assert.Equal(oldRoot, (Guid)(await current.ExecuteScalarAsync())!);
+        await using (var corrupt = new NpgsqlCommand(
+            "UPDATE platform.authorization_scopes SET parent_scope_id = @moved WHERE scope_id = @old",
+            connection, transaction))
+        {
+            corrupt.Parameters.AddWithValue("moved", moved);
+            corrupt.Parameters.AddWithValue("old", oldRoot);
+            await corrupt.ExecuteNonQueryAsync();
+        }
+        using var corruptPreview = await PreviewAsync(connection, transaction, moved, newRoot);
+        Assert.Equal("invalid_hierarchy",
+            corruptPreview.RootElement.GetProperty("status").GetString());
+        Assert.Empty(corruptPreview.RootElement.GetProperty("candidate_access_changes").EnumerateArray());
         await transaction.RollbackAsync();
     }
 

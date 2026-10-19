@@ -170,7 +170,7 @@ Both Admin endpoints use the Admin mTLS listener and the mandatory OIDC/WebAuthn
 
 ## Scope hierarchy change preflight
 
-The read-only [scope reparenting preflight](ScopeReparenting.md) reports candidate grants gained or lost when a subtree changes parent and rejects missing scopes, missing parents, cycles and no-op moves. Its PostgreSQL test verifies the output and confirms the hierarchy is unchanged. A candidate report needs independent impact review; no parent mutation route is enabled.
+The read-only [scope reparenting preflight](ScopeReparenting.md) reports candidate grants gained or lost when a subtree changes parent and rejects missing scopes, missing parents, existing hierarchy cycles and no-op moves. Its PostgreSQL test verifies the output and confirms the hierarchy is unchanged. A candidate report needs independent impact review; no parent mutation route is enabled.
 
 ## Remaining PHASE 7 work
 

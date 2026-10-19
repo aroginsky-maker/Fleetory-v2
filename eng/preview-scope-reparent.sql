@@ -50,6 +50,18 @@ validation AS (
                  WHERE scope_id = (SELECT new_parent_id FROM input)
              ) THEN 'missing_parent'
         WHEN EXISTS (
+            SELECT 1 FROM subtree AS node
+            JOIN platform.authorization_scopes AS child
+              ON child.parent_scope_id = node.scope_id
+            WHERE child.scope_id = ANY(node.path)
+        ) OR EXISTS (
+            SELECT 1 FROM old_ancestors
+            WHERE parent_scope_id = ANY(path)
+        ) OR EXISTS (
+            SELECT 1 FROM new_ancestors
+            WHERE parent_scope_id = ANY(path)
+        ) THEN 'invalid_hierarchy'
+        WHEN EXISTS (
             SELECT 1 FROM subtree
             WHERE scope_id = (SELECT new_parent_id FROM input)
         ) THEN 'cycle'
