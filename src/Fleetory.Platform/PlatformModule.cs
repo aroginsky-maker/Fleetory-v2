@@ -82,7 +82,8 @@ public sealed class PlatformModule : FleetoryModuleBase
                         .GetRequiredSecret(FleetorySecretNames.AuditImmudbPassword);
                     var environment = serviceProvider.GetRequiredService<IHostEnvironment>();
                     return new ImmudbAuditExportSink(uri, username, password,
-                        allowInsecureLoopback: environment.IsDevelopment());
+                        allowInsecureLoopback: environment.IsDevelopment(),
+                        allowDefaultAdminCredential: environment.IsDevelopment());
                 });
             }
             services.AddSingleton<PostgreSqlAuditExportPump>();

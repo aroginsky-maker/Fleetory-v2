@@ -78,6 +78,20 @@ public sealed class ImmudbAuditExportSinkTests
             new Uri(address), "writer", "password", allowInsecureLoopback: true));
     }
 
+    [Fact]
+    public void Refuses_default_admin_credentials_except_for_explicit_development_use()
+    {
+        Assert.Throws<InvalidOperationException>(() => new ImmudbAuditExportSink(
+            new Uri("https://audit.example/"), "immudb", "private-password"));
+        Assert.Throws<InvalidOperationException>(() => new ImmudbAuditExportSink(
+            new Uri("https://audit.example/"), "AUDIT-WRITER", "immudb"));
+
+        using var developmentSink = new ImmudbAuditExportSink(
+            new Uri("http://127.0.0.1:8090/"), "immudb", "private-password",
+            allowInsecureLoopback: true, allowDefaultAdminCredential: true);
+        Assert.NotNull(developmentSink);
+    }
+
     private static AuditExportEvent NewEvent(Guid eventId, string action, DateTimeOffset occurredAt) =>
         new(eventId, new AuditRecord(
             new ActorReference("person:demo", ActorKind.Person), action,

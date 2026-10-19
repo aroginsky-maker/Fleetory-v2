@@ -31,6 +31,7 @@
 - A first-enrollment grant now requires the exact new Agent certificate SHA-256, matching the already bound rotation and recovery grants. Redemption by another CA-issued certificate with the same DeviceId returns 403 without consuming the grant. Legacy grants lacking a target fingerprint also fail closed; real mTLS and PostgreSQL tests cover both paths.
 - Gateway rate limits now apply only on their matching mTLS listener. The tests send more than the configured limit to Admin and Agent paths through the public web port and confirm consistent 404 responses without consuming privileged buckets.
 - The file secret provider now refuses symbolic links for the mount and secret files and rejects a Unix mount writable by another group or user. A Linux CI test checks those failure paths; deployment still owns the parent path and service ACL.
+- Production immudb export now refuses the default administrator username or password and plain HTTP when the sink is constructed. Development retains its loopback lab configuration. The deployment guide calls for a dedicated read/write account and trusted HTTPS transport; production provisioning, backup and independent state verification remain open.
 
 ## Verification snapshot
 

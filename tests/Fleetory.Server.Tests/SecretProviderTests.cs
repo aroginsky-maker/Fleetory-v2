@@ -1,4 +1,6 @@
 using Fleetory.Platform.Contracts.Secrets;
+using Fleetory.Platform.Contracts;
+using Fleetory.Platform.Audit;
 using Fleetory.Platform.Persistence;
 using Fleetory.Platform.Secrets;
 using Fleetory.Server;
@@ -94,6 +96,51 @@ public sealed class SecretProviderTests
             scope.ServiceProvider.GetRequiredService<PlatformDbContext>().Database.GetConnectionString());
         Assert.Equal(TestConnectionString,
             scope.ServiceProvider.GetRequiredService<CoreDbContext>().Database.GetConnectionString());
+    }
+
+    [Theory]
+    [InlineData("immudb", "https://audit.example/", "secret-value-739")]
+    [InlineData("audit-writer", "https://audit.example/", "immudb")]
+    [InlineData("audit-writer", "http://127.0.0.1:8090/", "secret-value-739")]
+    public void Production_audit_export_refuses_default_credentials_or_plain_http(
+        string username, string address, string password)
+    {
+        using var directory = new TestSecretDirectory();
+        directory.Write(FleetorySecretNames.PostgreSqlConnectionString, TestConnectionString);
+        directory.Write(FleetorySecretNames.AuditImmudbPassword, password);
+
+        using var app = FleetoryApplication.Build([
+            "--environment=Production",
+            $"--Fleetory:Secrets:Directory={directory.Path}",
+            "--Fleetory:AuditExport:Enabled=true",
+            "--Fleetory:AuditExport:Sink=Immudb",
+            $"--Fleetory:AuditExport:Address={address}",
+            $"--Fleetory:AuditExport:Username={username}"
+        ]);
+
+        var exception = Assert.ThrowsAny<Exception>(() =>
+            app.Services.GetRequiredService<IAuditExportSink>());
+        Assert.DoesNotContain(password, exception.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void Production_audit_export_accepts_a_dedicated_https_credential()
+    {
+        using var directory = new TestSecretDirectory();
+        directory.Write(FleetorySecretNames.PostgreSqlConnectionString, TestConnectionString);
+        directory.Write(FleetorySecretNames.AuditImmudbPassword, "dedicated");
+
+        using var app = FleetoryApplication.Build([
+            "--environment=Production",
+            $"--Fleetory:Secrets:Directory={directory.Path}",
+            "--Fleetory:AuditExport:Enabled=true",
+            "--Fleetory:AuditExport:Sink=Immudb",
+            "--Fleetory:AuditExport:Address=https://audit.example/",
+            "--Fleetory:AuditExport:Username=audit-writer"
+        ]);
+
+        Assert.IsType<ImmudbAuditExportSink>(
+            app.Services.GetRequiredService<IAuditExportSink>());
     }
 
     [Fact]

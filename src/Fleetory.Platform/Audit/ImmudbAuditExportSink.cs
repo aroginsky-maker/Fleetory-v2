@@ -16,7 +16,8 @@ public sealed class ImmudbAuditExportSink : IAuditExportSink, IDisposable
     private readonly HttpClient _client;
 
     public ImmudbAuditExportSink(Uri address, string username, string password,
-        bool allowInsecureLoopback = false, HttpMessageHandler? handler = null)
+        bool allowInsecureLoopback = false, HttpMessageHandler? handler = null,
+        bool allowDefaultAdminCredential = false)
     {
         HttpOriginPolicy.Validate(address, allowInsecureLoopback, "Immudb");
 
@@ -25,6 +26,13 @@ public sealed class ImmudbAuditExportSink : IAuditExportSink, IDisposable
         if (username.Length > 128 || password.Length > 1024)
         {
             throw new ArgumentException("Immudb credentials are too long.");
+        }
+        if (!allowDefaultAdminCredential &&
+            (string.Equals(username, "immudb", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(password, "immudb", StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException(
+                "Immudb audit export requires a dedicated non-default credential.");
         }
 
         _address = address;
