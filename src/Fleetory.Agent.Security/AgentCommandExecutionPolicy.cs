@@ -15,7 +15,7 @@ public sealed class AgentCommandExecutionPolicy(DeviceId localDeviceId) : IComma
         return ValueTask.FromResult(
             localDeviceId.Value != Guid.Empty &&
             targetDeviceId == localDeviceId &&
-            commandType == "Inventory.Refresh" &&
+            commandType == AgentCommandTypes.InventoryRefresh &&
             payload.IsEmpty);
     }
 }

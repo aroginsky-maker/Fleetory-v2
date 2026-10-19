@@ -82,7 +82,7 @@ public sealed class OpenBaoCommandSigner : IDisposable
 
         var now = DateTimeOffset.UtcNow;
         var unsigned = new SignedCommandEnvelope(
-            targetDeviceId, Guid.NewGuid(), "Inventory.Refresh", [], now,
+            targetDeviceId, Guid.NewGuid(), AgentCommandTypes.InventoryRefresh, [], now,
             now.AddMinutes(1), Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant(),
             _signingKeyId, []);
 

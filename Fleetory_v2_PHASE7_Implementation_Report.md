@@ -12,7 +12,7 @@
 - Assignment revocation refuses to remove the last global `platform.authorization.manage` grant. The refusal is audited in the same transaction and returns HTTP 409; no access is lost.
 - Roles and scopes can be retired through audited Admin routes only after their assignments or child scopes are removed. In-use objects return 409; the database also rejects direct cascading deletion of an assigned role.
 - PostgreSQL audit event and outbox transaction, lease-based background export and retry. Optional immudb sink uses conditional EventId writes, readback and revision checks. The lab supplies its password through OpenBao.
-- File and OpenBao secret providers; Agent-local ECDSA command verification, deny-by-default policy, durable SQLite replay store and per-device public-key trust files. No Agent command execution endpoint is exposed.
+- File and OpenBao secret providers; Agent-local ECDSA command verification, deny-by-default policy, durable SQLite replay store and per-device public-key trust files. A new execution gate creates the verifier with these concrete dependencies and invokes only the inventory-refresh handler after acceptance. Cryptographic and SQLite tests cover invalid commands, replay after restart and handler failure. No Agent command execution endpoint is exposed.
 - Lab-only OpenBao Transit signing key with a separate sign-only token and DeviceId-bound public trust file. The Server token is read-only for its KV secrets.
 - Separate `Fleetory.CommandSigning` component signs only empty, one-minute `Inventory.Refresh` commands, pins the Transit key version and verifies the returned signature against a trusted public key. The Server cannot reference that project. A repeatable live lab check passed Transit signing, Agent verification, durable replay rejection and 403 for the Server token. After an OpenBao development-mode restart, every DeviceId-bound trust version is compared with the current key ring; mismatches fail closed and an explicit lab-only reset archives all stale versions. An isolated test covers this regression in CI.
 - A repeatable lab-only Transit key rotation check provisions the next DeviceId-bound public key, verifies old/new overlap, archives the previous trust file and proves that Agent rejects fresh old-version signatures while accepting new-version signatures. It does not establish production trust distribution or signer isolation.
@@ -44,8 +44,8 @@
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local tests after command signer and scope preview | 186/186 passed |
-| Local production coverage after command signer and scope preview | 93.81% |
+| Local tests after Agent execution gate | 189/189 passed |
+| Local production coverage after Agent execution gate | 93.78% |
 | Last directly retrieved CI production coverage, `a6373cb` | 93.87% |
 | Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
 | Local full audit pipeline | PostgreSQL outbox → Fleetory worker → immudb readback passed |
@@ -55,13 +55,13 @@
 | Windows server TLS chain in CI with provisioned OS CA stores | 2 certificates sent; root-only OpenSSL verification code 0 |
 | Linux container server TLS chain | 2 certificates sent; root-only OpenSSL verification code 0 |
 | Last directly retrieved Sonar PR coverage, `a6373cb` | 90.8% |
-| Sonar new-code coverage at `e99ec03` | 91.7% |
+| Sonar new-code coverage at `70e3088` | 91.7% |
 | Last directly retrieved Sonar overall duplication, `a6373cb` | 0.0% |
-| Sonar new-code duplication at `e99ec03` | 0.0% |
-| Sonar new issues at `e99ec03` | 0 |
-| Sonar Quality Gate at `e99ec03` | PASS |
+| Sonar new-code duplication at `70e3088` | 0.0% |
+| Sonar new issues at `70e3088` | 0 |
+| Sonar Quality Gate at `70e3088` | PASS |
 
-The latest completed CI at `e99ec03` is [run 39253172213](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39253172213); all jobs passed. Its Sonar check summary exposes the current new-code percentages above, while the private repository's detailed Actions logs and Sonar measures are unavailable to the connected read tool. The older overall CI and Sonar values are labeled with their verified commit rather than projected onto the latest one. A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The PowerShell provisioning test runs in CI and remains under Sonar static analysis; it is excluded from the .NET coverage denominator because `dotnet-coverage` cannot instrument PowerShell. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
+The last completed CI at `70e3088` is [run 39269827339](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39269827339); all jobs passed. The subsequent `62fb348` run remains queued without a GitHub-hosted runner, so its Sonar percentages are not yet verified. Its Sonar check summary exposes the current new-code percentages above, while the private repository's detailed Actions logs and Sonar measures are unavailable to the connected read tool. The older overall CI and Sonar values are labeled with their verified commit rather than projected onto the latest one. A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The PowerShell provisioning test runs in CI and remains under Sonar static analysis; it is excluded from the .NET coverage denominator because `dotnet-coverage` cannot instrument PowerShell. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
 
 ## Required before completion
 
