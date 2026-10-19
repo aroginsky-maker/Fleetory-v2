@@ -1,4 +1,4 @@
-# Fleetory v2 — PHASE 7 Security Foundation progress report
+﻿# Fleetory v2 — PHASE 7 Security Foundation progress report
 
 **Status:** IN PROGRESS, 18 October 2026. PHASE 6 is complete; PHASE 8 has not started. Draft [PR #2](https://github.com/aroginsky-maker/Fleetory-v2/pull/2) contains the current implementation. The detailed controls and limits are maintained in [SecurityFoundation](docs/architecture/SecurityFoundation.md) and the [local lab guide](docs/architecture/SecurityLab.md).
 
@@ -33,15 +33,16 @@
 - The file secret provider now refuses symbolic links for the mount and secret files and rejects a Unix mount writable by another group or user. A Linux CI test checks those failure paths; deployment still owns the parent path and service ACL.
 - Production immudb export now refuses the default administrator username or password and plain HTTP when the sink is constructed. Development retains its loopback lab configuration. The deployment guide calls for a dedicated read/write account and trusted HTTPS transport; production provisioning, backup and independent state verification remain open.
 - With export enabled, readiness now reports a degraded audit-export state when the oldest pending outbox entry exceeds five minutes, without synchronously calling immudb or blocking local audit writes. A PostgreSQL integration test covers empty, fresh, stale and drained queue states.
-- Admin RBAC roles can now be replaced atomically through the Admin mTLS route. The operation moves existing assignment IDs and scopes to a newly identified role, preserves a snapshot of both permission sets, deletes the old active role and appends the audit/outbox event in one serializable transaction. Removing the last global management permission is blocked and audited. The migration backfills existing roles; bootstrap and recovery SQL also record snapshots. An Admin mTLS GET route reads and audits the version lineage, including retired IDs. PostgreSQL and real mTLS tests cover success, history, missing and malformed input, denied access, last-manager protection and audit rollback. Scope replacement remains open.
+- Admin RBAC roles can now be replaced atomically through the Admin mTLS route. The operation moves existing assignment IDs and scopes to a newly identified role, preserves a snapshot of both permission sets, deletes the old active role and appends the audit/outbox event in one serializable transaction. Removing the last global management permission is blocked and audited. The migration backfills existing roles; bootstrap and recovery SQL also record snapshots. An Admin mTLS GET route reads and audits the version lineage, including retired IDs. PostgreSQL and real mTLS tests cover success, history, missing and malformed input, denied access, last-manager protection and audit rollback. Scope reparenting remains open.
+- Scope name changes now require an expected revision on the Admin mTLS route. The `ScopeId`, parent, children and assignment references stay fixed; the active name, version snapshot and audit/outbox entry commit together. Stale edits return 409 and are audited. A protected GET route reads the revision history. PostgreSQL and mTLS tests cover successful and stale revisions, legacy scope snapshotting, audit rollback and unchanged descendant access. Reparenting needs a separate impact and approval process.
 
 ## Verification snapshot
 
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local tests after role-history API | 175/175 passed |
-| Local production coverage after role-history API | 93.81% |
+| Local tests after scope revisions | 177/177 passed |
+| Local production coverage after scope revisions | 93.76% |
 | Last directly retrieved CI production coverage, `a6373cb` | 93.87% |
 | Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
 | Local full audit pipeline | PostgreSQL outbox → Fleetory worker → immudb readback passed |
@@ -51,18 +52,18 @@
 | Windows server TLS chain in CI with provisioned OS CA stores | 2 certificates sent; root-only OpenSSL verification code 0 |
 | Linux container server TLS chain | 2 certificates sent; root-only OpenSSL verification code 0 |
 | Last directly retrieved Sonar PR coverage, `a6373cb` | 90.8% |
-| Sonar new-code coverage at `344b8a0` | 91.4% |
+| Sonar new-code coverage at `442f800` | 91.3% |
 | Last directly retrieved Sonar overall duplication, `a6373cb` | 0.0% |
-| Sonar new-code duplication at `344b8a0` | 0.0% |
-| Sonar new issues at `344b8a0` | 0 |
-| Sonar Quality Gate at `344b8a0` | PASS |
+| Sonar new-code duplication at `442f800` | 0.0% |
+| Sonar new issues at `442f800` | 0 |
+| Sonar Quality Gate at `442f800` | PASS |
 
-The latest completed CI at `344b8a0` is [run 39205981725](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39205981725); all jobs passed. Its Sonar check summary exposes the current new-code percentages above, while the private repository's detailed Actions logs and Sonar measures are unavailable to the connected read tool. The older overall CI and Sonar values are labeled with their verified commit rather than projected onto the latest one. A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The PowerShell provisioning test runs in CI and remains under Sonar static analysis; it is excluded from the .NET coverage denominator because `dotnet-coverage` cannot instrument PowerShell. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
+The latest completed CI at `442f800` is [run 39206389306](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39206389306); all jobs passed. Its Sonar check summary exposes the current new-code percentages above, while the private repository's detailed Actions logs and Sonar measures are unavailable to the connected read tool. The older overall CI and Sonar values are labeled with their verified commit rather than projected onto the latest one. A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The PowerShell provisioning test runs in CI and remains under Sonar static analysis; it is excluded from the .NET coverage denominator because `dotnet-coverage` cannot instrument PowerShell. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
 
 ## Required before completion
 
 - Production Windows PKI provisioning and renewal must install the approved root and intermediate in the host certificate stores. The automated root-only wire test passes on an ephemeral runner; the earlier local machine without those store entries still needs its own provisioning before that probe can pass.
-- Validate the controlled Admin recovery runbook with production incident approval and credential custody; define role/scope replacement and versioning beyond safe retirement.
+- Validate the controlled Admin recovery runbook with production incident approval and credential custody; define a reviewed scope-reparenting and impact procedure before allowing hierarchy changes.
 - CA issuance and renewal policy, secure grant delivery, Admin certificate lifecycle and verified physical-device approval for certificate replacement or lost-key recovery; production custody and retention of recovery evidence.
 - Protected command signing and trust-file distribution, approval protocol for high-risk and bulk commands, and Agent runtime enforcement before execution is enabled.
 - Production immudb TLS and dedicated credentials, retention/backups and independently anchored verification; complete coverage of critical security call sites.

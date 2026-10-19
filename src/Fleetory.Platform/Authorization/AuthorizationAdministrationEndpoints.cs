@@ -98,29 +98,51 @@ internal static class AuthorizationAdministrationEndpoints
         }
     }
 
-    public static async Task<IResult> GetRoleVersionsAsync(
+    public static Task<IResult> GetRoleVersionsAsync(
         HttpContext context,
         Guid roleId,
+        PostgreSqlAuthorizationAdministration administration) =>
+        ReadVersionsAsync(context, roleId, administration.GetRoleVersionsAsync);
+
+    public static async Task<IResult> ReplaceScopeAsync(
+        HttpContext context,
+        Guid scopeId,
         PostgreSqlAuthorizationAdministration administration)
     {
         var actor = await ReadActorAsync(context);
         if (actor is null) { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+        var request = await BoundedJsonRequestReader.ReadAsync<ReplaceScopeRequest>(
+            context, MaximumBodyBytes);
+        if (request is null) { return Results.BadRequest(); }
 
         try
         {
-            var versions = await administration.GetRoleVersionsAsync(actor, roleId,
+            var revision = await administration.ReplaceScopeAsync(actor, scopeId,
+                request.Name, request.ExpectedRevision,
                 Correlation(context), context.RequestAborted);
-            return versions.Length == 0 ? Results.NotFound() : Results.Json(versions);
+            return revision is { } value
+                ? Results.Json(new ScopeRevisionResponse(scopeId, value))
+                : Results.NotFound();
         }
         catch (ArgumentException)
         {
             return Results.BadRequest();
+        }
+        catch (InvalidOperationException)
+        {
+            return Results.Conflict();
         }
         catch (UnauthorizedAccessException)
         {
             return Results.StatusCode(StatusCodes.Status403Forbidden);
         }
     }
+
+    public static Task<IResult> GetScopeVersionsAsync(
+        HttpContext context,
+        Guid scopeId,
+        PostgreSqlAuthorizationAdministration administration) =>
+        ReadVersionsAsync(context, scopeId, administration.GetScopeVersionsAsync);
 
     public static async Task<IResult> AssignRoleAsync(
         HttpContext context,
@@ -224,6 +246,29 @@ internal static class AuthorizationAdministrationEndpoints
         }
     }
 
+    private static async Task<IResult> ReadVersionsAsync<T>(
+        HttpContext context,
+        Guid id,
+        Func<ActorReference, Guid, CorrelationId, CancellationToken, ValueTask<T[]>> read)
+    {
+        var actor = await ReadActorAsync(context);
+        if (actor is null) { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+
+        try
+        {
+            var versions = await read(actor, id, Correlation(context), context.RequestAborted);
+            return versions.Length == 0 ? Results.NotFound() : Results.Json(versions);
+        }
+        catch (ArgumentException)
+        {
+            return Results.BadRequest();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+    }
+
     private static async Task<ActorReference?> ReadActorAsync(HttpContext context)
     {
         var certificate = await context.Connection.GetClientCertificateAsync(context.RequestAborted);
@@ -236,6 +281,8 @@ internal static class AuthorizationAdministrationEndpoints
 
     private sealed record CreateRoleRequest(string Name, string[] Permissions);
     private sealed record CreateScopeRequest(string Name, Guid? ParentScopeId);
+    private sealed record ReplaceScopeRequest(string Name, int ExpectedRevision);
     private sealed record AssignRoleRequest(string SubjectId, ActorKind Kind, Guid? ScopeId);
     private sealed record IdResponse(Guid Id);
+    private sealed record ScopeRevisionResponse(Guid Id, int Revision);
 }

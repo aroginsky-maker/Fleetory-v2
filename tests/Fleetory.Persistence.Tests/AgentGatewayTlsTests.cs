@@ -965,6 +965,7 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             "--environment=Development",
             $"--Fleetory:Secrets:Directory={secrets.Path}",
             "--Fleetory:AdminGateway:Enabled=true",
+            "--Fleetory:AdminGateway:RateLimitPerMinute=100",
             $"--Fleetory:Web:Port={webPort}",
             $"--Fleetory:AdminGateway:Port={adminPort}"
         ]);
@@ -983,6 +984,10 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             using var deniedHistory = await admin.GetAsync(
                 $"{baseUrl}/roles/{Guid.NewGuid():D}/versions");
             Assert.Equal(HttpStatusCode.Forbidden, deniedHistory.StatusCode);
+            using var deniedScopeRevision = await admin.PutAsJsonAsync(
+                $"{baseUrl}/scopes/{Guid.NewGuid():D}",
+                new { name = "Denied revision", expectedRevision = 1 });
+            Assert.Equal(HttpStatusCode.Forbidden, deniedScopeRevision.StatusCode);
             using var deniedRetirement = await admin.DeleteAsync(
                 $"{baseUrl}/roles/{Guid.NewGuid():D}");
             Assert.Equal(HttpStatusCode.Forbidden, deniedRetirement.StatusCode);
@@ -996,6 +1001,10 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             using var webHistory = await web.GetAsync(
                 $"http://127.0.0.1:{webPort}/admin/authorization/roles/{Guid.NewGuid():D}/versions");
             Assert.Equal(HttpStatusCode.NotFound, webHistory.StatusCode);
+            using var webScopeRevision = await web.PutAsJsonAsync(
+                $"http://127.0.0.1:{webPort}/admin/authorization/scopes/{Guid.NewGuid():D}",
+                new { name = "Web revision", expectedRevision = 1 });
+            Assert.Equal(HttpStatusCode.NotFound, webScopeRevision.StatusCode);
             using var webRetirement = await web.DeleteAsync(
                 $"http://127.0.0.1:{webPort}/admin/authorization/roles/{Guid.NewGuid():D}");
             Assert.Equal(HttpStatusCode.NotFound, webRetirement.StatusCode);
@@ -1050,6 +1059,29 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             Assert.Equal(HttpStatusCode.Created, scopeResponse.StatusCode);
             var scopeId = (await scopeResponse.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>())
                 .GetProperty("id").GetGuid();
+            using var invalidScopeRevision = await admin.PutAsJsonAsync(
+                $"{baseUrl}/scopes/{scopeId:D}",
+                new { name = "Invalid revision", expectedRevision = 0 });
+            Assert.Equal(HttpStatusCode.BadRequest, invalidScopeRevision.StatusCode);
+            using var missingScopeRevision = await admin.PutAsJsonAsync(
+                $"{baseUrl}/scopes/{Guid.NewGuid():D}",
+                new { name = "Missing scope", expectedRevision = 1 });
+            Assert.Equal(HttpStatusCode.NotFound, missingScopeRevision.StatusCode);
+            using var staleScope = await admin.PutAsJsonAsync(
+                $"{baseUrl}/scopes/{scopeId:D}",
+                new { name = "Stale scope", expectedRevision = 2 });
+            Assert.Equal(HttpStatusCode.Conflict, staleScope.StatusCode);
+            using var revisedScope = await admin.PutAsJsonAsync(
+                $"{baseUrl}/scopes/{scopeId:D}",
+                new { name = "mTLS revised scope", expectedRevision = 1 });
+            Assert.Equal(HttpStatusCode.OK, revisedScope.StatusCode);
+            Assert.Equal(2, (await revisedScope.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>())
+                .GetProperty("revision").GetInt32());
+            using var scopeHistory = await admin.GetAsync(
+                $"{baseUrl}/scopes/{scopeId:D}/versions");
+            Assert.Equal(HttpStatusCode.OK, scopeHistory.StatusCode);
+            Assert.Equal(2, (await scopeHistory.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>())
+                .GetArrayLength());
             var target = $"person:{Guid.NewGuid():N}";
             using var assignmentResponse = await admin.PostAsJsonAsync(
                 $"{baseUrl}/roles/{roleId:D}/assignments",

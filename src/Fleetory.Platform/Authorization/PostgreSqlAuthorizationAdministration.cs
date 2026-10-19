@@ -225,8 +225,133 @@ internal sealed class PostgreSqlAuthorizationAdministration(
                     (object?)parentScopeId?.Value ?? DBNull.Value);
                 command.Parameters.AddWithValue("name", NpgsqlDbType.Varchar, name);
                 await command.ExecuteNonQueryAsync(token);
+                await InsertScopeVersionAsync(connection, transaction, scopeId, 1,
+                    parentScopeId?.Value, name, token);
                 return scopeId;
             }, cancellationToken);
+    }
+
+    public async ValueTask<int?> ReplaceScopeAsync(
+        ActorReference actor,
+        Guid scopeId,
+        string name,
+        int expectedRevision,
+        CorrelationId correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        if (scopeId == Guid.Empty || expectedRevision < 1 || expectedRevision == int.MaxValue)
+        {
+            throw new ArgumentException("Scope revision target is invalid.");
+        }
+
+        ValidateName(name);
+        var outcome = await ExecuteAuthorizedAsync(actor,
+            "platform.authorization.scope_replaced",
+            new AuditTarget("scope", scopeId.ToString("D")), correlationId,
+            new Dictionary<string, string>
+            {
+                ["name"] = name,
+                ["expected_revision"] = expectedRevision.ToString(
+                    System.Globalization.CultureInfo.InvariantCulture)
+            },
+            async (connection, transaction, token) =>
+            {
+                Guid? parentScopeId;
+                await using (var current = new NpgsqlCommand("""
+                    SELECT parent_scope_id FROM platform.authorization_scopes
+                    WHERE scope_id = @scope_id FOR UPDATE
+                    """, connection, transaction))
+                {
+                    current.Parameters.AddWithValue("scope_id", NpgsqlDbType.Uuid, scopeId);
+                    await using var reader = await current.ExecuteReaderAsync(token);
+                    if (!await reader.ReadAsync(token))
+                    {
+                        return new ScopeRevisionOutcome(ScopeRevisionState.Missing, 0);
+                    }
+
+                    parentScopeId = reader.IsDBNull(0) ? null : reader.GetGuid(0);
+                }
+
+                await using (var revision = new NpgsqlCommand("""
+                    SELECT COALESCE(MAX(revision), 1)
+                    FROM platform.authorization_scope_versions
+                    WHERE scope_id = @scope_id
+                    """, connection, transaction))
+                {
+                    revision.Parameters.AddWithValue("scope_id", NpgsqlDbType.Uuid, scopeId);
+                    if ((int)(await revision.ExecuteScalarAsync(token))! != expectedRevision)
+                    {
+                        return new ScopeRevisionOutcome(ScopeRevisionState.Conflict, 0);
+                    }
+                }
+
+                await SnapshotExistingScopeAsync(connection, transaction, scopeId, token);
+                await using (var update = new NpgsqlCommand("""
+                    UPDATE platform.authorization_scopes SET name = @name
+                    WHERE scope_id = @scope_id
+                    """, connection, transaction))
+                {
+                    update.Parameters.AddWithValue("name", NpgsqlDbType.Varchar, name);
+                    update.Parameters.AddWithValue("scope_id", NpgsqlDbType.Uuid, scopeId);
+                    await update.ExecuteNonQueryAsync(token);
+                }
+
+                var newRevision = expectedRevision + 1;
+                await InsertScopeVersionAsync(connection, transaction, scopeId,
+                    newRevision, parentScopeId, name, token);
+                return new ScopeRevisionOutcome(ScopeRevisionState.Updated, newRevision);
+            }, cancellationToken,
+            result => result.State switch
+            {
+                ScopeRevisionState.Missing => "platform.authorization.scope_unchanged",
+                ScopeRevisionState.Conflict => "platform.authorization.scope_replacement_blocked",
+                _ => "platform.authorization.scope_replaced"
+            });
+
+        if (outcome.State == ScopeRevisionState.Conflict)
+        {
+            throw new InvalidOperationException("Scope revision is stale.");
+        }
+
+        return outcome.State == ScopeRevisionState.Updated ? outcome.Revision : null;
+    }
+
+    public ValueTask<AuthorizationScopeVersion[]> GetScopeVersionsAsync(
+        ActorReference actor,
+        Guid scopeId,
+        CorrelationId correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        if (scopeId == Guid.Empty)
+        {
+            throw new ArgumentException("Scope ID is invalid.", nameof(scopeId));
+        }
+
+        return ExecuteAuthorizedAsync(actor, "platform.authorization.scope_versions_read",
+            new AuditTarget("scope", scopeId.ToString("D")), correlationId, null,
+            async (connection, transaction, token) =>
+            {
+                await using var command = new NpgsqlCommand("""
+                    SELECT scope_id, revision, parent_scope_id, name, recorded_at
+                    FROM platform.authorization_scope_versions
+                    WHERE scope_id = @scope_id ORDER BY revision DESC
+                    """, connection, transaction);
+                command.Parameters.AddWithValue("scope_id", NpgsqlDbType.Uuid, scopeId);
+                await using var reader = await command.ExecuteReaderAsync(token);
+                var versions = new List<AuthorizationScopeVersion>();
+                while (await reader.ReadAsync(token))
+                {
+                    versions.Add(new AuthorizationScopeVersion(
+                        reader.GetGuid(0), reader.GetInt32(1),
+                        reader.IsDBNull(2) ? null : reader.GetGuid(2),
+                        reader.GetString(3), reader.GetFieldValue<DateTimeOffset>(4)));
+                }
+
+                return versions.ToArray();
+            }, cancellationToken,
+            versions => versions.Length == 0
+                ? "platform.authorization.scope_versions_missing"
+                : "platform.authorization.scope_versions_read");
     }
 
     public ValueTask<Guid> AssignRoleAsync(
@@ -529,6 +654,49 @@ internal sealed class PostgreSqlAuthorizationAdministration(
         await version.ExecuteNonQueryAsync(cancellationToken);
     }
 
+    private async Task InsertScopeVersionAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Guid scopeId,
+        int revision,
+        Guid? parentScopeId,
+        string name,
+        CancellationToken cancellationToken)
+    {
+        await using var version = new NpgsqlCommand("""
+            INSERT INTO platform.authorization_scope_versions
+                (scope_id, revision, parent_scope_id, name, recorded_at)
+            VALUES (@scope_id, @revision, @parent_scope_id, @name, @recorded_at)
+            """, connection, transaction);
+        version.Parameters.AddWithValue("scope_id", NpgsqlDbType.Uuid, scopeId);
+        version.Parameters.AddWithValue("revision", NpgsqlDbType.Integer, revision);
+        version.Parameters.AddWithValue("parent_scope_id", NpgsqlDbType.Uuid,
+            (object?)parentScopeId ?? DBNull.Value);
+        version.Parameters.AddWithValue("name", NpgsqlDbType.Varchar, name);
+        version.Parameters.AddWithValue("recorded_at", NpgsqlDbType.TimestampTz,
+            clock.UtcNow.ToUniversalTime());
+        await version.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private async Task SnapshotExistingScopeAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Guid scopeId,
+        CancellationToken cancellationToken)
+    {
+        await using var version = new NpgsqlCommand("""
+            INSERT INTO platform.authorization_scope_versions
+                (scope_id, revision, parent_scope_id, name, recorded_at)
+            SELECT scope_id, 1, parent_scope_id, name, @recorded_at
+            FROM platform.authorization_scopes WHERE scope_id = @scope_id
+            ON CONFLICT (scope_id, revision) DO NOTHING
+            """, connection, transaction);
+        version.Parameters.AddWithValue("scope_id", NpgsqlDbType.Uuid, scopeId);
+        version.Parameters.AddWithValue("recorded_at", NpgsqlDbType.TimestampTz,
+            clock.UtcNow.ToUniversalTime());
+        await version.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     private static void ValidateRole(string name, IReadOnlyCollection<string> permissions)
     {
         ValidateName(name);
@@ -560,6 +728,8 @@ internal sealed class PostgreSqlAuthorizationAdministration(
     private enum RetirementOutcome { Retired, InUse, Missing }
 
     private enum RoleReplacementOutcome { Replaced, Missing, LastManagerProtected }
+    private enum ScopeRevisionState { Updated, Missing, Conflict }
+    private readonly record struct ScopeRevisionOutcome(ScopeRevisionState State, int Revision);
 }
 
 internal sealed record AuthorizationRoleVersion(
@@ -567,4 +737,11 @@ internal sealed record AuthorizationRoleVersion(
     Guid? PredecessorRoleId,
     string Name,
     string[] Permissions,
+    DateTimeOffset RecordedAt);
+
+internal sealed record AuthorizationScopeVersion(
+    Guid ScopeId,
+    int Revision,
+    Guid? ParentScopeId,
+    string Name,
     DateTimeOffset RecordedAt);

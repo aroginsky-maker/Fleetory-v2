@@ -88,6 +88,7 @@ Platform: 202610160002_AddPlatformAuthorization (PHASE 7)
 Platform: 202610160003_AddAuditExportLease (PHASE 7)
 Platform: 202610180001_RestrictAuthorizationRoleDeletion (PHASE 7)
 Platform: 202610190001_AddAuthorizationRoleVersions (PHASE 7)
+Platform: 202610190002_AddAuthorizationScopeVersions (PHASE 7)
 Core:     202609280002_InitialCorePersistence
 Core:     20261016212919_AddAgentCertificateBindings (PHASE 7)
 Core:     20261017051549_AddAgentEnrollmentGrants (PHASE 7)
@@ -101,7 +102,7 @@ core."__EFMigrationsHistory"
 
 Production startup does not call `EnsureCreated`, automatic `Migrate`, destructive reset, or legacy v1 `Schema.sql`.
 
-PHASE 7 audit and authorization storage is written through parameterized Npgsql transactions rather than EF entity models. Platform migrations own those tables; the EF snapshot continues to describe the EF-owned Person projection. Audit events and their export queue entries commit together. Role-version snapshots retain each API-created permission set and predecessor ID; the migration backfills the current roles present when it runs. Direct database bootstrap and recovery scripts also write a snapshot in their transaction.
+PHASE 7 audit and authorization storage is written through parameterized Npgsql transactions rather than EF entity models. Platform migrations own those tables; the EF snapshot continues to describe the EF-owned Person projection. Audit events and their export queue entries commit together. Role-version snapshots retain each API-created permission set and predecessor ID; the migration backfills the current roles present when it runs. Direct database bootstrap and recovery scripts also write a snapshot in their transaction. Scope-version snapshots retain the stable scope ID, revision, parent and name; the scope migration backfills revision 1 for existing scopes.
 
 Design-time migration operations use the non-repository environment value `FLEETORY_MIGRATION_CONNECTION_STRING`. This value is not a production secret store.
 

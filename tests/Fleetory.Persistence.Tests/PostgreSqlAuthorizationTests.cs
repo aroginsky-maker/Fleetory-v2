@@ -338,6 +338,106 @@ public sealed class PostgreSqlAuthorizationTests(PostgreSqlTestFixture fixture)
     }
 
     [Fact]
+    public async Task Scope_revision_preserves_identity_assignments_and_child_access()
+    {
+        var administratorId = $"person:{Guid.NewGuid():N}";
+        await InsertGrantAsync(administratorId, ActorKind.Person,
+            PostgreSqlAuthorizationAdministration.Permission);
+        var administrator = new ActorReference(administratorId, ActorKind.Person);
+        var target = new ActorReference($"person:{Guid.NewGuid():N}", ActorKind.Person);
+        var correlation = CorrelationId.New();
+        await using var serviceScope = fixture.Services.CreateAsyncScope();
+        var administration = serviceScope.ServiceProvider
+            .GetRequiredService<PostgreSqlAuthorizationAdministration>();
+        var authorizer = serviceScope.ServiceProvider.GetRequiredService<IAuthorizationService>();
+        var rootId = await administration.CreateScopeAsync(administrator,
+            "Original scope", null, correlation);
+        var childId = await administration.CreateScopeAsync(administrator,
+            "Child scope", new ScopeId(rootId), correlation);
+        var roleId = await administration.CreateRoleAsync(administrator,
+            "Scoped reader", [ReadPermission], correlation);
+        var assignmentId = await administration.AssignRoleAsync(administrator,
+            target, roleId, new ScopeId(rootId), correlation);
+        var access = new AuthorizationRequest(target, ReadPermission, new ScopeId(childId));
+        Assert.True((await authorizer.AuthorizeAsync(access)).IsAllowed);
+
+        await Assert.ThrowsAsync<ArgumentException>(async () =>
+            await administration.ReplaceScopeAsync(administrator, rootId,
+                "New scope", 1, new CorrelationId(string.Empty)));
+        var initial = await administration.GetScopeVersionsAsync(administrator,
+            rootId, correlation);
+        Assert.Single(initial);
+        Assert.Equal("Original scope", initial[0].Name);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await administration.ReplaceScopeAsync(administrator, rootId,
+                "Stale scope", 2, correlation));
+        Assert.Equal(2, await administration.ReplaceScopeAsync(administrator,
+            rootId, "New scope", 1, correlation));
+        Assert.True((await authorizer.AuthorizeAsync(access)).IsAllowed);
+        var versions = await administration.GetScopeVersionsAsync(administrator,
+            rootId, correlation);
+        Assert.Equal(2, versions.Length);
+        Assert.Equal((2, "New scope"), (versions[0].Revision, versions[0].Name));
+        Assert.Equal((1, "Original scope"), (versions[1].Revision, versions[1].Name));
+        Assert.Null(versions[0].ParentScopeId);
+        Assert.Null(await administration.ReplaceScopeAsync(administrator,
+            Guid.NewGuid(), "Missing scope", 1, correlation));
+        Assert.Empty(await administration.GetScopeVersionsAsync(administrator,
+            Guid.NewGuid(), correlation));
+
+        await using var connection = new NpgsqlConnection(fixture.ConnectionString);
+        await connection.OpenAsync();
+        await using var relationships = new NpgsqlCommand("""
+            SELECT COUNT(*) FROM platform.authorization_assignments AS assignment
+            JOIN platform.authorization_scopes AS child
+              ON child.parent_scope_id = assignment.scope_id
+            WHERE assignment.assignment_id = @assignment_id
+              AND assignment.scope_id = @root_id
+              AND child.scope_id = @child_id
+            """, connection);
+        relationships.Parameters.AddWithValue("assignment_id", assignmentId);
+        relationships.Parameters.AddWithValue("root_id", rootId);
+        relationships.Parameters.AddWithValue("child_id", childId);
+        Assert.Equal(1L, (long)(await relationships.ExecuteScalarAsync())!);
+        await using var blocked = new NpgsqlCommand("""
+            SELECT COUNT(*) FROM platform.audit_events
+            WHERE correlation_id = @correlation
+              AND action = 'platform.authorization.scope_replacement_blocked'
+            """, connection);
+        blocked.Parameters.AddWithValue("correlation", correlation.Value);
+        Assert.Equal(1L, (long)(await blocked.ExecuteScalarAsync())!);
+        await using var missingAudit = new NpgsqlCommand("""
+            SELECT COUNT(*) FROM platform.audit_events
+            WHERE correlation_id = @correlation
+              AND action IN ('platform.authorization.scope_unchanged',
+                             'platform.authorization.scope_versions_missing')
+            """, connection);
+        missingAudit.Parameters.AddWithValue("correlation", correlation.Value);
+        Assert.Equal(2L, (long)(await missingAudit.ExecuteScalarAsync())!);
+    }
+
+    [Fact]
+    public async Task Legacy_scope_gets_a_starting_snapshot_before_revision()
+    {
+        var administratorId = $"person:{Guid.NewGuid():N}";
+        await InsertGrantAsync(administratorId, ActorKind.Person,
+            PostgreSqlAuthorizationAdministration.Permission);
+        var scopeId = Guid.NewGuid();
+        await InsertScopeAsync(scopeId);
+        await using var serviceScope = fixture.Services.CreateAsyncScope();
+        var administration = serviceScope.ServiceProvider
+            .GetRequiredService<PostgreSqlAuthorizationAdministration>();
+        var administrator = new ActorReference(administratorId, ActorKind.Person);
+        Assert.Equal(2, await administration.ReplaceScopeAsync(administrator,
+            scopeId, "Renamed legacy scope", 1, CorrelationId.New()));
+        var versions = await administration.GetScopeVersionsAsync(administrator,
+            scopeId, CorrelationId.New());
+        Assert.Equal(2, versions.Length);
+        Assert.Equal($"Scope {scopeId:N}", versions[1].Name);
+    }
+
+    [Fact]
     public async Task Roles_and_scopes_retire_only_after_assignments_and_children_are_removed()
     {
         var administratorId = $"person:{Guid.NewGuid():N}";
