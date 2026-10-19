@@ -980,6 +980,9 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             using var deniedReplacement = await admin.PostAsJsonAsync(
                 $"{baseUrl}/roles/{Guid.NewGuid():D}/replacements", roleBody);
             Assert.Equal(HttpStatusCode.Forbidden, deniedReplacement.StatusCode);
+            using var deniedHistory = await admin.GetAsync(
+                $"{baseUrl}/roles/{Guid.NewGuid():D}/versions");
+            Assert.Equal(HttpStatusCode.Forbidden, deniedHistory.StatusCode);
             using var deniedRetirement = await admin.DeleteAsync(
                 $"{baseUrl}/roles/{Guid.NewGuid():D}");
             Assert.Equal(HttpStatusCode.Forbidden, deniedRetirement.StatusCode);
@@ -990,6 +993,9 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
                 $"http://127.0.0.1:{webPort}/admin/authorization/roles/{Guid.NewGuid():D}/replacements",
                 roleBody);
             Assert.Equal(HttpStatusCode.NotFound, webReplacement.StatusCode);
+            using var webHistory = await web.GetAsync(
+                $"http://127.0.0.1:{webPort}/admin/authorization/roles/{Guid.NewGuid():D}/versions");
+            Assert.Equal(HttpStatusCode.NotFound, webHistory.StatusCode);
             using var webRetirement = await web.DeleteAsync(
                 $"http://127.0.0.1:{webPort}/admin/authorization/roles/{Guid.NewGuid():D}");
             Assert.Equal(HttpStatusCode.NotFound, webRetirement.StatusCode);
@@ -1078,6 +1084,13 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             Assert.True((await authorizer.AuthorizeAsync(new AuthorizationRequest(
                 new ActorReference(target, ActorKind.Person), "Core.Device.Write",
                 new ScopeId(scopeId)))).IsAllowed);
+            using var history = await admin.GetAsync($"{baseUrl}/roles/{roleId:D}/versions");
+            Assert.Equal(HttpStatusCode.OK, history.StatusCode);
+            var roleVersions = await history.Content.ReadFromJsonAsync<System.Text.Json.JsonElement>();
+            Assert.Equal(2, roleVersions.GetArrayLength());
+            Assert.Equal(roleId, roleVersions[0].GetProperty("roleId").GetGuid());
+            Assert.Equal("Core.Device.Write",
+                roleVersions[0].GetProperty("permissions")[0].GetString());
             using var revoked = await admin.DeleteAsync(
                 $"{baseUrl}/assignments/{assignmentId:D}");
             Assert.Equal(HttpStatusCode.NoContent, revoked.StatusCode);

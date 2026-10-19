@@ -144,6 +144,55 @@ internal sealed class PostgreSqlAuthorizationAdministration(
         return outcome == RoleReplacementOutcome.Replaced ? newRoleId : null;
     }
 
+    public ValueTask<AuthorizationRoleVersion[]> GetRoleVersionsAsync(
+        ActorReference actor,
+        Guid roleId,
+        CorrelationId correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        if (roleId == Guid.Empty)
+        {
+            throw new ArgumentException("Role ID is invalid.", nameof(roleId));
+        }
+
+        return ExecuteAuthorizedAsync(actor, "platform.authorization.role_versions_read",
+            new AuditTarget("role", roleId.ToString("D")), correlationId, null,
+            async (connection, transaction, token) =>
+            {
+                await using var command = new NpgsqlCommand("""
+                    WITH RECURSIVE chain AS (
+                        SELECT role_id, predecessor_role_id, name, permissions,
+                               recorded_at, 0 AS depth
+                        FROM platform.authorization_role_versions
+                        WHERE role_id = @role_id
+                        UNION ALL
+                        SELECT prior.role_id, prior.predecessor_role_id, prior.name,
+                               prior.permissions, prior.recorded_at, chain.depth + 1
+                        FROM platform.authorization_role_versions AS prior
+                        JOIN chain ON prior.role_id = chain.predecessor_role_id
+                        WHERE chain.depth < 127
+                    )
+                    SELECT role_id, predecessor_role_id, name, permissions, recorded_at
+                    FROM chain ORDER BY depth
+                    """, connection, transaction);
+                command.Parameters.AddWithValue("role_id", NpgsqlDbType.Uuid, roleId);
+                await using var reader = await command.ExecuteReaderAsync(token);
+                var versions = new List<AuthorizationRoleVersion>();
+                while (await reader.ReadAsync(token))
+                {
+                    versions.Add(new AuthorizationRoleVersion(
+                        reader.GetGuid(0), reader.IsDBNull(1) ? null : reader.GetGuid(1),
+                        reader.GetString(2), reader.GetFieldValue<string[]>(3),
+                        reader.GetFieldValue<DateTimeOffset>(4)));
+                }
+
+                return versions.ToArray();
+            }, cancellationToken,
+            versions => versions.Length == 0
+                ? "platform.authorization.role_versions_missing"
+                : "platform.authorization.role_versions_read");
+    }
+
     public ValueTask<Guid> CreateScopeAsync(
         ActorReference actor,
         string name,
@@ -512,3 +561,10 @@ internal sealed class PostgreSqlAuthorizationAdministration(
 
     private enum RoleReplacementOutcome { Replaced, Missing, LastManagerProtected }
 }
+
+internal sealed record AuthorizationRoleVersion(
+    Guid RoleId,
+    Guid? PredecessorRoleId,
+    string Name,
+    string[] Permissions,
+    DateTimeOffset RecordedAt);

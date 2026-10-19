@@ -204,6 +204,21 @@ public sealed class PostgreSqlAuthorizationTests(PostgreSqlTestFixture fixture)
             new AuthorizationRequest(target, WritePermission))).IsAllowed);
         Assert.Null(await administration.ReplaceRoleAsync(administrator, oldRoleId,
             "Missing version", [ReadPermission], correlation));
+        var versions = await administration.GetRoleVersionsAsync(administrator,
+            newRoleId.Value, correlation);
+        Assert.Equal(2, versions.Length);
+        Assert.Equal(newRoleId.Value, versions[0].RoleId);
+        Assert.Equal(oldRoleId, versions[0].PredecessorRoleId);
+        Assert.Equal([WritePermission], versions[0].Permissions);
+        Assert.Equal(oldRoleId, versions[1].RoleId);
+        Assert.Null(versions[1].PredecessorRoleId);
+        Assert.Equal([ReadPermission], versions[1].Permissions);
+        var retiredVersion = await administration.GetRoleVersionsAsync(administrator,
+            oldRoleId, correlation);
+        Assert.Single(retiredVersion);
+        Assert.Equal(oldRoleId, retiredVersion[0].RoleId);
+        Assert.Empty(await administration.GetRoleVersionsAsync(administrator,
+            Guid.NewGuid(), correlation));
 
         await using var connection = new NpgsqlConnection(fixture.ConnectionString);
         await connection.OpenAsync();
@@ -250,6 +265,14 @@ public sealed class PostgreSqlAuthorizationTests(PostgreSqlTestFixture fixture)
             """, connection);
         audits.Parameters.AddWithValue("correlation", correlation.Value);
         Assert.Equal(2L, (long)(await audits.ExecuteScalarAsync())!);
+        await using var readAudit = new NpgsqlCommand("""
+            SELECT COUNT(*) FROM platform.audit_events
+            WHERE correlation_id = @correlation
+              AND action IN ('platform.authorization.role_versions_read',
+                             'platform.authorization.role_versions_missing')
+            """, connection);
+        readAudit.Parameters.AddWithValue("correlation", correlation.Value);
+        Assert.Equal(3L, (long)(await readAudit.ExecuteScalarAsync())!);
     }
 
     [Fact]

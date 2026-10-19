@@ -98,6 +98,30 @@ internal static class AuthorizationAdministrationEndpoints
         }
     }
 
+    public static async Task<IResult> GetRoleVersionsAsync(
+        HttpContext context,
+        Guid roleId,
+        PostgreSqlAuthorizationAdministration administration)
+    {
+        var actor = await ReadActorAsync(context);
+        if (actor is null) { return Results.StatusCode(StatusCodes.Status403Forbidden); }
+
+        try
+        {
+            var versions = await administration.GetRoleVersionsAsync(actor, roleId,
+                Correlation(context), context.RequestAborted);
+            return versions.Length == 0 ? Results.NotFound() : Results.Json(versions);
+        }
+        catch (ArgumentException)
+        {
+            return Results.BadRequest();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+    }
+
     public static async Task<IResult> AssignRoleAsync(
         HttpContext context,
         Guid roleId,
