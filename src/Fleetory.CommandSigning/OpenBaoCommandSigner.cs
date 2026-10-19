@@ -86,8 +86,10 @@ public sealed class OpenBaoCommandSigner : IDisposable
             prehashed = false
         });
 
-        using var response = await _client.SendAsync(request, cancellationToken);
+        using var response = await _client.SendAsync(
+            request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
+        await response.Content.LoadIntoBufferAsync(4096, cancellationToken);
         using var body = await JsonDocument.ParseAsync(
             await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
         var transitSignature = body.RootElement.GetProperty("data").GetProperty("signature").GetString();

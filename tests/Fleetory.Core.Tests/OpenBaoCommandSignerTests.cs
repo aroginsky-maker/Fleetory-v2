@@ -67,6 +67,17 @@ public sealed class OpenBaoCommandSignerTests
     }
 
     [Fact]
+    public async Task Oversized_transit_response_fails_closed()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var handler = new TransitHandler(key) { Replacement = new string('A', 5000) };
+        using var signer = CreateSigner(key, handler);
+
+        await Assert.ThrowsAsync<HttpRequestException>(
+            () => signer.SignInventoryRefreshAsync(Device));
+    }
+
+    [Fact]
     public async Task Invalid_configuration_or_target_never_calls_transit()
     {
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);

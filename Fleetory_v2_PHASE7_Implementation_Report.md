@@ -42,7 +42,7 @@
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local tests after command signer and scope revisions | 184/184 passed |
+| Local tests after command signer and scope revisions | 185/185 passed |
 | Local production coverage after command signer and scope revisions | 93.83% |
 | Last directly retrieved CI production coverage, `a6373cb` | 93.87% |
 | Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
@@ -53,20 +53,20 @@
 | Windows server TLS chain in CI with provisioned OS CA stores | 2 certificates sent; root-only OpenSSL verification code 0 |
 | Linux container server TLS chain | 2 certificates sent; root-only OpenSSL verification code 0 |
 | Last directly retrieved Sonar PR coverage, `a6373cb` | 90.8% |
-| Sonar new-code coverage at `245d899` | 91.6% |
+| Sonar new-code coverage at `27ef2db` | 91.8% |
 | Last directly retrieved Sonar overall duplication, `a6373cb` | 0.0% |
-| Sonar new-code duplication at `245d899` | 0.0% |
-| Sonar new issues at `245d899` | 0 |
-| Sonar Quality Gate at `245d899` | PASS |
+| Sonar new-code duplication at `27ef2db` | 0.0% |
+| Sonar new issues at `27ef2db` | 0 |
+| Sonar Quality Gate at `27ef2db` | PASS |
 
-The latest completed CI at `245d899` passed all jobs. Its Sonar check summary exposes the current new-code percentages above, while the private repository's detailed Actions logs and Sonar measures are unavailable to the connected read tool. The older overall CI and Sonar values are labeled with their verified commit rather than projected onto the latest one. A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The PowerShell provisioning test runs in CI and remains under Sonar static analysis; it is excluded from the .NET coverage denominator because `dotnet-coverage` cannot instrument PowerShell. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
+The latest completed CI at `27ef2db` is [run 39208016516](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39208016516); all jobs passed. Its Sonar check summary exposes the current new-code percentages above, while the private repository's detailed Actions logs and Sonar measures are unavailable to the connected read tool. The older overall CI and Sonar values are labeled with their verified commit rather than projected onto the latest one. A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The PowerShell provisioning test runs in CI and remains under Sonar static analysis; it is excluded from the .NET coverage denominator because `dotnet-coverage` cannot instrument PowerShell. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
 
 ## Required before completion
 
 - Production Windows PKI provisioning and renewal must install the approved root and intermediate in the host certificate stores. The automated root-only wire test passes on an ephemeral runner; the earlier local machine without those store entries still needs its own provisioning before that probe can pass.
 - Validate the controlled Admin recovery runbook with production incident approval and credential custody; define a reviewed scope-reparenting and impact procedure before allowing hierarchy changes.
 - CA issuance and renewal policy, secure grant delivery, Admin certificate lifecycle and verified physical-device approval for certificate replacement or lost-key recovery; production custody and retention of recovery evidence.
-- Protected command signing and trust-file distribution, approval protocol for high-risk and bulk commands, and Agent runtime enforcement before execution is enabled.
+- Deploy the isolated signer behind authenticated requests and an auditable approval path, distribute Agent trust files securely, define an approval protocol for high-risk and bulk commands, and wire Agent runtime enforcement before execution is enabled.
 - Production immudb TLS and dedicated credentials, retention/backups and independently anchored verification; complete coverage of critical security call sites.
 - Negative and recovery security tests, then final strict build, full test suite and current Sonar Quality Gate.
 
