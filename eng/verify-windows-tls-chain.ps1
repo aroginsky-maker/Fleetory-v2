@@ -175,7 +175,9 @@ subjectAltName = URI:urn:fleetory:admin:00000000-0000-4000-8000-000000000001
             $ready = $true
             break
         }
-        catch { $socket?.Dispose() }
+        catch {
+            if ($null -ne $socket) { $socket.Dispose() }
+        }
     }
     if (-not $ready) {
         throw ('Fleetory Server did not start: ' +
