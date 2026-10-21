@@ -3,19 +3,8 @@ Set-StrictMode -Version Latest
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $source = Join-Path $repoRoot 'eng/provision-security-lab-certificates.ps1'
-$syntaxErrors = $null
-$ast = [Management.Automation.Language.Parser]::ParseFile(
-    $source, [ref] $null, [ref] $syntaxErrors)
-if ($syntaxErrors.Count -ne 0) { throw 'Certificate provisioner has a syntax error.' }
-foreach ($name in @('Protect-LabCertificateDirectory', 'Issue-LabCertificate')) {
-    $definition = $ast.Find({
-        param($node)
-        $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
-            $node.Name -eq $name
-    }, $true)
-    if ($null -eq $definition) { throw "Missing provisioner function $name." }
-    . ([scriptblock]::Create($definition.Extent.Text))
-}
+. (Join-Path $PSScriptRoot 'TestProvisionerHelpers.ps1') -Source $source `
+    -Names @('Protect-LabCertificateDirectory', 'Issue-LabCertificate')
 
 $work = Join-Path $repoRoot ('artifacts/certificate-provisioning-test-' +
     [Guid]::NewGuid().ToString('N'))
@@ -125,14 +114,5 @@ try {
     Write-Host 'CERTIFICATE PROVISIONING TESTS PASS: rotation archive, failed-copy rollback and mismatched-key rejection.'
 }
 finally {
-    $absoluteWork = [IO.Path]::GetFullPath($work)
-    $absoluteArtifacts = [IO.Path]::GetFullPath((Join-Path $repoRoot 'artifacts')) +
-        [IO.Path]::DirectorySeparatorChar
-    if (-not $absoluteWork.StartsWith($absoluteArtifacts,
-        [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'Unsafe certificate test cleanup path.'
-    }
-    if (Test-Path -LiteralPath $absoluteWork) {
-        Remove-Item -LiteralPath $absoluteWork -Recurse -Force
-    }
+    Remove-FleetoryTestArtifacts $work $repoRoot
 }

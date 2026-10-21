@@ -1,6 +1,6 @@
 # Fleetory v2 — PHASE 7 Security Foundation progress report
 
-**Status:** IN PROGRESS, 19 October 2026. PHASE 6 is complete; PHASE 8 has not started. Draft [PR #2](https://github.com/aroginsky-maker/Fleetory-v2/pull/2) contains the current implementation. The detailed controls and limits are maintained in [SecurityFoundation](docs/architecture/SecurityFoundation.md) and the [local lab guide](docs/architecture/SecurityLab.md).
+**Status:** IN PROGRESS, 21 October 2026. PHASE 6 is complete; PHASE 8 has not started. Draft [PR #2](https://github.com/aroginsky-maker/Fleetory-v2/pull/2) contains the current implementation. The detailed controls and limits are maintained in [SecurityFoundation](docs/architecture/SecurityFoundation.md) and the [local lab guide](docs/architecture/SecurityLab.md).
 
 ## Implemented
 
@@ -40,6 +40,7 @@
 - Admin RBAC roles can now be replaced atomically through the Admin mTLS route. The operation moves existing assignment IDs and scopes to a newly identified role, preserves a snapshot of both permission sets, deletes the old active role and appends the audit/outbox event in one serializable transaction. Removing the last global management permission is blocked and audited. The migration backfills existing roles; bootstrap and recovery SQL also record snapshots. An Admin mTLS GET route reads and audits the version lineage, including retired IDs. PostgreSQL and real mTLS tests cover success, history, missing and malformed input, denied access, last-manager protection and audit rollback. Scope reparenting remains open.
 - Scope name changes now require an expected revision on the Admin mTLS route. The `ScopeId`, parent, children and assignment references stay fixed; the active name, version snapshot and audit/outbox entry commit together. Stale edits return 409 and are audited. A protected GET route reads the revision history. PostgreSQL and mTLS tests cover successful and stale revisions, legacy scope snapshotting, audit rollback and unchanged descendant access. Reparenting needs a separate impact and approval process.
 - A read-only scope reparenting preflight lists candidate ancestor grants and the exact actor, permission and descendant-scope decisions that would change. It rejects missing scopes, missing parents, existing hierarchy cycles and no-op requests. A PostgreSQL test compares its output with real authorization decisions before and after a temporary move in a rolled-back transaction. A separately approved mutation procedure remains open.
+- The two PowerShell provisioning checks now share their function-import and safe artifact-cleanup helper. Windows CI also runs the Agent security tests, including the protected-directory ACL checks, on a Windows runner.
 
 ## Verification snapshot
 
@@ -50,7 +51,7 @@
 | Local production coverage after Windows Agent ACL hardening | 93.61% |
 | Local SonarQube Community Build at `ad4271b` | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0% |
 | Local SonarQube Community Build after Windows Agent ACL hardening | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0%; 0 bugs, vulnerabilities, code smells and hotspots |
-| Last directly retrieved CI production coverage, `a6373cb` | 93.87% |
+| Last directly retrieved CI production coverage, `9fed648` | 93.43% |
 | Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
 | Local full audit pipeline | PostgreSQL outbox → Fleetory worker → immudb readback with dedicated account passed |
 | Local command-signing lab after Windows ACL hardening | OpenBao Transit v2 signature accepted once; replay rejected; Server token denied (403) |
@@ -59,14 +60,13 @@
 | Local WebAuthn/OIDC with real Admin mTLS | 401 without token; 403 with WebAuthn token at RBAC |
 | Windows server TLS chain in CI with provisioned OS CA stores | 2 certificates sent; root-only OpenSSL verification code 0 |
 | Linux container server TLS chain | 2 certificates sent; root-only OpenSSL verification code 0 |
-| Last directly retrieved Sonar PR coverage, `a6373cb` | 90.8% |
-| Sonar new-code coverage at `70e3088` | 91.7% |
-| Last directly retrieved Sonar overall duplication, `a6373cb` | 0.0% |
-| Sonar new-code duplication at `70e3088` | 0.0% |
-| Sonar new issues at `70e3088` | 0 |
-| Sonar Quality Gate at `70e3088` | PASS |
+| Last directly retrieved Sonar PR coverage, `9fed648` | 90.3% |
+| Sonar new-code coverage at `9fed648` | 90.53% |
+| Last directly retrieved Sonar overall duplication, `9fed648` | 0.3% |
+| Sonar new-code duplication at `9fed648` | 0.26% |
+| Sonar Quality Gate at `9fed648` | PASS |
 
-The last completed CI at `70e3088` is [run 39269827339](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39269827339); all jobs passed. Subsequent runs have remained queued without a GitHub-hosted runner, so their SonarCloud percentages are not yet verified. The account's GitHub billing page shows the Actions product budget at $0.00/$0.00 with “Usage blocked”; this may prevent new metered jobs from starting. The owner chose to keep this $0 limit. Local SonarQube Community Build scans of `ad4271b` and the subsequent Windows Agent ACL changes each passed their own Quality Gate with 90.7% overall coverage and 0.0% overall duplication. The latter also reported zero bugs, vulnerabilities, code smells and security hotspots. These local scans cannot substitute for a current SonarCloud PR analysis because the server, rules and new-code baseline differ. The older overall CI and SonarCloud values are labeled with their verified commit rather than projected onto the latest one. A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The pipeline passed again on 19 October using the new dedicated immudb account. The PowerShell provisioning test runs in CI and remains under Sonar static analysis; it is excluded from the .NET coverage denominator because `dotnet-coverage` cannot instrument PowerShell. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
+The last completed CI at `9fed648` is [run 39291409173](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39291409173); both jobs and the SonarCloud Quality Gate passed. Actions resumed without changing the owner's $0 budget. SonarCloud found 18 duplicated lines in each of the two PowerShell provisioning tests; their new shared helper addresses that finding, pending a fresh PR analysis. Local SonarQube Community Build scans of `ad4271b` and the subsequent Windows Agent ACL changes each passed their own Quality Gate with 90.7% overall coverage and 0.0% overall duplication. The latter also reported zero bugs, vulnerabilities, code smells and security hotspots. These local scans cannot substitute for a current SonarCloud PR analysis because the server, rules and new-code baseline differ. A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The pipeline passed again on 19 October using the new dedicated immudb account. The PowerShell provisioning test runs in CI and remains under Sonar static analysis; it is excluded from the .NET coverage denominator because `dotnet-coverage` cannot instrument PowerShell. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
 
 ## Required before completion
 

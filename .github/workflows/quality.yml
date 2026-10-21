@@ -38,6 +38,10 @@ jobs:
         shell: pwsh
         run: dotnet build src/Fleetory.Server/Fleetory.Server.csproj -c Release
 
+      - name: Verify Agent security on Windows
+        shell: pwsh
+        run: dotnet test tests/Fleetory.Core.Tests/Fleetory.Core.Tests.csproj -c Release --nologo --warnaserror
+
       - name: Verify root-only Windows TLS chain
         shell: pwsh
         run: ./eng/verify-windows-tls-chain.ps1

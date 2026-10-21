@@ -3,19 +3,8 @@ Set-StrictMode -Version Latest
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $source = Join-Path $repoRoot 'eng/provision-security-lab-command-signing.ps1'
-$syntaxErrors = $null
-$ast = [Management.Automation.Language.Parser]::ParseFile(
-    $source, [ref] $null, [ref] $syntaxErrors)
-if ($syntaxErrors.Count -ne 0) { throw 'Command trust provisioner has a syntax error.' }
-foreach ($name in @('Get-LabCommandPublicKey', 'Sync-LabCommandTrust')) {
-    $definition = $ast.Find({
-        param($node)
-        $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
-            $node.Name -eq $name
-    }, $true)
-    if ($null -eq $definition) { throw "Missing command trust function $name." }
-    . ([scriptblock]::Create($definition.Extent.Text))
-}
+. (Join-Path $PSScriptRoot 'TestProvisionerHelpers.ps1') -Source $source `
+    -Names @('Get-LabCommandPublicKey', 'Sync-LabCommandTrust')
 
 function New-TestKeyData([int] $Version, [hashtable] $PemByVersion) {
     $keys = [pscustomobject] $PemByVersion
@@ -99,14 +88,5 @@ try {
     Write-Host 'PASS: normal overlap, stale key rejection, full reset, foreign DeviceId isolation and idempotence.'
 }
 finally {
-    $target = [IO.Path]::GetFullPath($work)
-    $artifactsRoot = [IO.Path]::GetFullPath(
-        (Join-Path $repoRoot 'artifacts')).TrimEnd([IO.Path]::DirectorySeparatorChar) +
-        [IO.Path]::DirectorySeparatorChar
-    if (-not $target.StartsWith($artifactsRoot, [StringComparison]::OrdinalIgnoreCase)) {
-        throw 'Test cleanup path escaped the Fleetory artifacts directory.'
-    }
-    if (Test-Path -LiteralPath $target) {
-        Remove-Item -LiteralPath $target -Recurse -Force
-    }
+    Remove-FleetoryTestArtifacts $work $repoRoot
 }
