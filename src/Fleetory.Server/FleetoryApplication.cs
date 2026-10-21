@@ -9,6 +9,7 @@ using Fleetory.ITSM;
 using Fleetory.ModuleAbstractions;
 using Fleetory.Monitoring;
 using Fleetory.Platform;
+using Fleetory.Platform.Authorization;
 using Fleetory.Platform.Contracts.Secrets;
 using Fleetory.Platform.Contracts;
 using Fleetory.Platform.Persistence;
@@ -17,6 +18,7 @@ using Fleetory.SharedKernel;
 using Fleetory.Server.Infrastructure;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using System.Threading.RateLimiting;
+using System.Security.Cryptography;
 using Microsoft.AspNetCore.RateLimiting;
 
 namespace Fleetory.Server;
@@ -123,6 +125,27 @@ public static class FleetoryApplication
                     if (!context.Request.Path.StartsWithSegments("/admin") || adminCertificate is null)
                     {
                         context.Response.StatusCode = StatusCodes.Status404NotFound;
+                        return;
+                    }
+
+                    if (await context.RequestServices
+                        .GetRequiredService<IAdminCertificateRevocationStore>()
+                        .IsRevokedAsync(
+                            Convert.ToHexString(SHA256.HashData(adminCertificate.RawData)),
+                            context.RequestAborted))
+                    {
+                        if (AdminCertificateIdentity.TryReadActor(adminCertificate, out var revokedActor) &&
+                            revokedActor is not null)
+                        {
+                            await context.RequestServices.GetRequiredService<IAuditWriter>()
+                                .WriteAsync(new AuditRecord(
+                                    revokedActor, "admin.certificate.revoked_denied", null,
+                                    new CorrelationId(context.TraceIdentifier),
+                                    context.RequestServices.GetRequiredService<IClock>().UtcNow),
+                                    context.RequestAborted);
+                        }
+
+                        context.Response.StatusCode = StatusCodes.Status403Forbidden;
                         return;
                     }
 

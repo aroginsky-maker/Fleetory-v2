@@ -1040,6 +1040,99 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
     }
 
     [Fact]
+    public async Task Revoked_admin_certificate_is_denied_while_replacement_with_same_identity_works()
+    {
+        var adminId = Guid.NewGuid();
+        using var pki = new TestPki(new Uri($"urn:fleetory:admin:{adminId:D}"));
+        using var secrets = new TestSecretDirectory();
+        secrets.Write("fleetory-postgresql", fixture.ConnectionString);
+        secrets.Write("admin-gateway-root-ca", pki.Root.ExportCertificatePem());
+        secrets.Write("admin-gateway-server-cert", pki.Server.ExportCertificatePem());
+        secrets.Write("admin-gateway-server-key", pki.ServerKey.ExportPkcs8PrivateKeyPem());
+        await GrantAdminPermissionAsync(adminId, "platform.authorization.manage");
+        var webPort = GetFreePort();
+        var adminPort = GetFreePort();
+        while (adminPort == webPort) { adminPort = GetFreePort(); }
+
+        await using var app = FleetoryApplication.Build([
+            "--environment=Development",
+            $"--Fleetory:Secrets:Directory={secrets.Path}",
+            "--Fleetory:AdminGateway:Enabled=true",
+            $"--Fleetory:Web:Port={webPort}",
+            $"--Fleetory:AdminGateway:Port={adminPort}"
+        ]);
+        await app.StartAsync();
+        try
+        {
+            using var original = pki.CreateClient(pki.Client);
+            using var replacement = pki.CreateClient(pki.UnregisteredClient);
+            var url = $"https://127.0.0.1:{adminPort}/admin/authorization/roles/" +
+                $"{Guid.NewGuid():D}/versions";
+            using (var before = await original.GetAsync(url))
+            {
+                Assert.Equal(HttpStatusCode.NotFound, before.StatusCode);
+            }
+
+            var fingerprint = CertificateSha256(pki.Client);
+            var sql = await File.ReadAllTextAsync(
+                Path.Combine(AppContext.BaseDirectory, "revoke-admin-certificate.sql"));
+            await using (var connection = new NpgsqlConnection(fixture.ConnectionString))
+            {
+                await connection.OpenAsync();
+                await using var transaction = await connection.BeginTransactionAsync();
+                await using (var configure = new NpgsqlCommand("""
+                    SELECT set_config('fleetory.admin_revoke.certificate_sha256', @fingerprint, true),
+                           set_config('fleetory.admin_revoke.incident_reference', @incident, true),
+                           set_config('fleetory.admin_revoke.operator_reference', @operator, true)
+                    """, connection, transaction))
+                {
+                    configure.Parameters.AddWithValue("fingerprint", fingerprint);
+                    configure.Parameters.AddWithValue("incident", "INC-ADMIN-CERT-TEST");
+                    configure.Parameters.AddWithValue("operator", "security-operator-test");
+                    await configure.ExecuteNonQueryAsync();
+                }
+
+                await using (var revoke = new NpgsqlCommand(sql, connection, transaction))
+                {
+                    await revoke.ExecuteNonQueryAsync();
+                }
+
+                await transaction.CommitAsync();
+                await using var verify = new NpgsqlCommand("""
+                    SELECT count(*) FROM platform.admin_certificate_revocations AS revocation
+                    JOIN platform.audit_events AS event
+                      ON event.target_id = revocation.certificate_sha256
+                    JOIN platform.audit_export_queue AS queue
+                      ON queue.audit_event_id = event.event_id
+                    WHERE revocation.certificate_sha256 = @fingerprint
+                      AND event.action = 'admin.certificate.revoked'
+                    """, connection);
+                verify.Parameters.AddWithValue("fingerprint", fingerprint);
+                Assert.Equal(1L, (long)(await verify.ExecuteScalarAsync())!);
+            }
+
+            using var denied = await original.GetAsync(url);
+            Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+            using var allowed = await replacement.GetAsync(url);
+            Assert.Equal(HttpStatusCode.NotFound, allowed.StatusCode);
+
+            await using var auditConnection = new NpgsqlConnection(fixture.ConnectionString);
+            await auditConnection.OpenAsync();
+            await using var deniedAudit = new NpgsqlCommand("""
+                SELECT count(*) FROM platform.audit_events
+                WHERE action = 'admin.certificate.revoked_denied'
+                  AND actor_subject_id = @subject_id
+                """, auditConnection);
+            deniedAudit.Parameters.AddWithValue("subject_id", $"person:{adminId:N}");
+            Assert.Equal(1L, (long)(await deniedAudit.ExecuteScalarAsync())!);
+        }
+        finally
+        {
+            await app.StopAsync();
+        }
+    }
+
+    [Fact]
     public async Task Admin_mtls_route_manages_scoped_roles_with_audit()
     {
         var adminId = Guid.NewGuid();

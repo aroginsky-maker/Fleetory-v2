@@ -33,5 +33,8 @@
     <None Include="../../eng/recover-admin-access.sql"
           Link="recover-admin-access.sql"
           CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../eng/revoke-admin-certificate.sql"
+          Link="revoke-admin-certificate.sql"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

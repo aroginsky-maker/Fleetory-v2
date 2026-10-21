@@ -76,6 +76,7 @@ public sealed class PlatformModule : FleetoryModuleBase
         services.AddScoped<IAuditWriter>(provider => provider.GetRequiredService<PostgreSqlAuditWriter>());
         services.AddScoped<IAuthorizationService, PostgreSqlAuthorizationService>();
         services.AddScoped<PostgreSqlAuthorizationAdministration>();
+        services.AddScoped<IAdminCertificateRevocationStore, AdminCertificateRevocationStore>();
         var auditExportEnabled = configuration.GetValue<bool>("Fleetory:AuditExport:Enabled");
         if (auditExportEnabled)
         {
