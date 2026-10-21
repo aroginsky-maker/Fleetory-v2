@@ -1133,6 +1133,136 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
     }
 
     [Fact]
+    public async Task Admin_certificate_registration_requires_exact_leaf_and_rotation_expires_old_leaf()
+    {
+        var adminId = Guid.NewGuid();
+        using var pki = new TestPki(new Uri($"urn:fleetory:admin:{adminId:D}"));
+        using var secrets = new TestSecretDirectory();
+        secrets.Write("fleetory-postgresql", fixture.ConnectionString);
+        secrets.Write("admin-gateway-root-ca", pki.Root.ExportCertificatePem());
+        secrets.Write("admin-gateway-server-cert", pki.Server.ExportCertificatePem());
+        secrets.Write("admin-gateway-server-key", pki.ServerKey.ExportPkcs8PrivateKeyPem());
+        await GrantAdminPermissionAsync(adminId, "platform.authorization.manage");
+        var webPort = GetFreePort();
+        var adminPort = GetFreePort();
+        while (adminPort == webPort) { adminPort = GetFreePort(); }
+
+        await using var app = FleetoryApplication.Build([
+            "--environment=Development",
+            $"--Fleetory:Secrets:Directory={secrets.Path}",
+            "--Fleetory:AdminGateway:Enabled=true",
+            "--Fleetory:AdminGateway:RequireCertificateRegistration=true",
+            $"--Fleetory:Web:Port={webPort}",
+            $"--Fleetory:AdminGateway:Port={adminPort}"
+        ]);
+        await app.StartAsync();
+        try
+        {
+            using var original = pki.CreateClient(pki.Client);
+            using var replacement = pki.CreateClient(pki.UnregisteredClient);
+            var url = $"https://127.0.0.1:{adminPort}/admin/authorization/roles/" +
+                $"{Guid.NewGuid():D}/versions";
+            var oldFingerprint = CertificateSha256(pki.Client);
+            var newFingerprint = CertificateSha256(pki.UnregisteredClient);
+
+            using (var denied = await original.GetAsync(url))
+            {
+                Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+            }
+
+            await RegisterAdminCertificateAsync("bootstrap", adminId, oldFingerprint);
+            using (var allowed = await original.GetAsync(url))
+            {
+                Assert.Equal(HttpStatusCode.NotFound, allowed.StatusCode);
+            }
+            using (var denied = await replacement.GetAsync(url))
+            {
+                Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
+            }
+
+            await Assert.ThrowsAsync<PostgresException>(() => RegisterAdminCertificateAsync(
+                "rotate", adminId, newFingerprint, new string('A', 64)));
+            await RegisterAdminCertificateAsync("rotate", adminId, newFingerprint, oldFingerprint);
+            using (var oldDuringOverlap = await original.GetAsync(url))
+            {
+                Assert.Equal(HttpStatusCode.NotFound, oldDuringOverlap.StatusCode);
+            }
+            using (var newDuringOverlap = await replacement.GetAsync(url))
+            {
+                Assert.Equal(HttpStatusCode.NotFound, newDuringOverlap.StatusCode);
+            }
+
+            await using var connection = new NpgsqlConnection(fixture.ConnectionString);
+            await connection.OpenAsync();
+            await using (var verify = new NpgsqlCommand("""
+                SELECT count(*) FROM platform.admin_certificate_registrations AS registration
+                JOIN platform.audit_events AS event
+                  ON event.target_id = registration.certificate_sha256
+                JOIN platform.audit_export_queue AS queue
+                  ON queue.audit_event_id = event.event_id
+                WHERE registration.actor_subject_id = @actor_id
+                  AND event.action IN ('admin.certificate.bootstrap', 'admin.certificate.rotate')
+                """, connection))
+            {
+                verify.Parameters.AddWithValue("actor_id", $"person:{adminId:N}");
+                Assert.Equal(2L, (long)(await verify.ExecuteScalarAsync())!);
+            }
+
+            await using (var expire = new NpgsqlCommand("""
+                UPDATE platform.admin_certificate_registrations
+                SET overlap_ends_at = now() - interval '1 second'
+                WHERE certificate_sha256 = @fingerprint
+                """, connection))
+            {
+                expire.Parameters.AddWithValue("fingerprint", oldFingerprint);
+                Assert.Equal(1, await expire.ExecuteNonQueryAsync());
+            }
+            using (var oldAfterOverlap = await original.GetAsync(url))
+            {
+                Assert.Equal(HttpStatusCode.Forbidden, oldAfterOverlap.StatusCode);
+            }
+            using var current = await replacement.GetAsync(url);
+            Assert.Equal(HttpStatusCode.NotFound, current.StatusCode);
+        }
+        finally
+        {
+            await app.StopAsync();
+        }
+    }
+
+    private async Task RegisterAdminCertificateAsync(string mode, Guid personId,
+        string fingerprint, string? previousFingerprint = null)
+    {
+        var script = await File.ReadAllTextAsync(
+            Path.Combine(AppContext.BaseDirectory, "register-admin-certificate.sql"));
+        await using var connection = new NpgsqlConnection(fixture.ConnectionString);
+        await connection.OpenAsync();
+        await using var transaction = await connection.BeginTransactionAsync();
+        await using (var configure = new NpgsqlCommand("""
+            SELECT set_config('fleetory.admin_register.mode', @mode, true),
+                   set_config('fleetory.admin_register.person_id', @person_id, true),
+                   set_config('fleetory.admin_register.certificate_sha256', @fingerprint, true),
+                   set_config('fleetory.admin_register.previous_certificate_sha256', @previous, true),
+                   set_config('fleetory.admin_register.incident_reference', @incident, true),
+                   set_config('fleetory.admin_register.operator_reference', @operator, true)
+            """, connection, transaction))
+        {
+            configure.Parameters.AddWithValue("mode", mode);
+            configure.Parameters.AddWithValue("person_id", personId.ToString("D"));
+            configure.Parameters.AddWithValue("fingerprint", fingerprint);
+            configure.Parameters.AddWithValue("previous", previousFingerprint ?? "");
+            configure.Parameters.AddWithValue("incident", "INC-ADMIN-REGISTRATION-TEST");
+            configure.Parameters.AddWithValue("operator", "security-operator-test");
+            await configure.ExecuteNonQueryAsync();
+        }
+        await using (var register = new NpgsqlCommand(script, connection, transaction))
+        {
+            await register.ExecuteNonQueryAsync();
+        }
+        await transaction.CommitAsync();
+    }
+
+    [Fact]
     public async Task Admin_mtls_route_manages_scoped_roles_with_audit()
     {
         var adminId = Guid.NewGuid();

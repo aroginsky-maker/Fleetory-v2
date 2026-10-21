@@ -36,5 +36,8 @@
     <None Include="../../eng/revoke-admin-certificate.sql"
           Link="revoke-admin-certificate.sql"
           CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../eng/register-admin-certificate.sql"
+          Link="register-admin-certificate.sql"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -64,11 +64,19 @@ Issue the first Admin client certificate through the external Admin CA and verif
 
 ```text
 \set ON_ERROR_STOP on
-SET fleetory.bootstrap.admin_person_id = '<uuid-from-admin-certificate-san>';
+BEGIN;
+SET LOCAL fleetory.bootstrap.admin_person_id = '<uuid-from-admin-certificate-san>';
 \i eng/bootstrap-first-admin.sql
+SET LOCAL fleetory.admin_register.mode = 'bootstrap';
+SET LOCAL fleetory.admin_register.person_id = '<uuid-from-admin-certificate-san>';
+SET LOCAL fleetory.admin_register.certificate_sha256 = '<UPPERCASE_DER_SHA256>';
+SET LOCAL fleetory.admin_register.incident_reference = '<APPROVED_DEPLOYMENT_REFERENCE>';
+SET LOCAL fleetory.admin_register.operator_reference = '<OPERATOR_ID>';
+\i eng/register-admin-certificate.sql
+COMMIT;
 ```
 
-Run this from the repository root after Platform migrations, with `ON_ERROR_STOP` enabled. Supply database credentials through the operator's normal protected `psql` mechanism; do not put a password in the command line or repository. The script creates one global `platform.authorization.manage` assignment and an audit event plus export queue entry in one transaction. It uses a transaction-scoped advisory lock and refuses to run if any global manager already exists. The PostgreSQL integration test verifies the initial grant, audit/outbox and repeated-run rejection. Restrict and revoke the temporary database operator's Platform write access after bootstrap. This procedure cannot recover a deployment that still has a manager assignment but has lost that person's certificate or OIDC access; use the controlled recovery procedure below.
+Run this from the repository root after Platform migrations, with `ON_ERROR_STOP` enabled. Supply database credentials through the operator's normal protected `psql` mechanism; do not put a password in the command line or repository. The transaction creates one global `platform.authorization.manage` assignment and registers the exact first Admin certificate, with separate audit/export entries. The bootstrap uses a transaction-scoped advisory lock and refuses to run if any global manager already exists. The PostgreSQL integration tests verify the grants and registration. Restrict and revoke the temporary database operator's Platform write access after bootstrap. This procedure cannot recover a deployment that still has a manager assignment but has lost that person's certificate or OIDC access; use the controlled recovery procedure below.
 
 ### Emergency Admin recovery
 
@@ -82,10 +90,16 @@ BEGIN;
 SET LOCAL fleetory.recovery.admin_person_id = '<uuid-from-replacement-admin-certificate-san>';
 SET LOCAL fleetory.recovery.incident_id = '<approved-incident-reference>';
 \i eng/recover-admin-access.sql
+SET LOCAL fleetory.admin_register.mode = 'recovery';
+SET LOCAL fleetory.admin_register.person_id = '<uuid-from-replacement-admin-certificate-san>';
+SET LOCAL fleetory.admin_register.certificate_sha256 = '<UPPERCASE_DER_SHA256>';
+SET LOCAL fleetory.admin_register.incident_reference = '<approved-incident-reference>';
+SET LOCAL fleetory.admin_register.operator_reference = '<OPERATOR_ID>';
+\i eng/register-admin-certificate.sql
 COMMIT;
 ```
 
-The script requires an existing global manager assignment but refuses a duplicate grant to the replacement identity. It creates a new global management role and assignment, plus an audit event and export queue entry, atomically. The audit context includes the incident reference and PostgreSQL `session_user`; the script never accepts a caller-supplied operator name. It leaves previous grants intact so the operator can first confirm the replacement person's Admin mTLS plus OIDC access. The new administrator then revokes an inaccessible prior assignment through the audited Admin route, preserving the last-manager safeguard. Confirm audit export and revoke the temporary database credential. If no global manager assignment remains, use the separate first-admin bootstrap only under an approved restoration procedure. Tests cover recovery, audit export enqueue, duplicate denial and missing-manager denial.
+The recovery script requires an existing global manager assignment but refuses a duplicate grant to the replacement identity. The transaction creates a new global management role and assignment, registers the exact replacement certificate, and writes both audit/export entries atomically. The RBAC audit context includes the incident reference and PostgreSQL `session_user`; the separate certificate registration records the supplied operator reference. Previous grants remain intact so the operator can first confirm the replacement person's Admin mTLS plus OIDC access. The new administrator then revokes an inaccessible prior assignment through the audited Admin route, preserving the last-manager safeguard. Confirm audit export and revoke the temporary database credential. If no global manager assignment remains, use the separate first-admin bootstrap only under an approved restoration procedure. Tests cover recovery, audit export enqueue, duplicate denial and missing-manager denial.
 
 ## Implemented Secret Provider boundary
 

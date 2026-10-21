@@ -35,6 +35,10 @@ public static class FleetoryApplication
         ValidatePrivilegedAuditExport(builder);
         var gateway = GatewayStartup.Configure(builder, secrets);
         var adminOidcEnabled = AdminOidcAuthentication.Configure(builder);
+        var requireAdminCertificateRegistration = gateway?.AdminPort is not null &&
+            (!builder.Environment.IsDevelopment() ||
+                builder.Configuration.GetValue<bool>(
+                    "Fleetory:AdminGateway:RequireCertificateRegistration"));
 
         builder.Logging.ClearProviders();
         builder.Logging.AddJsonConsole(options => options.IncludeScopes = true);
@@ -128,22 +132,29 @@ public static class FleetoryApplication
                         return;
                     }
 
-                    if (await context.RequestServices
-                        .GetRequiredService<IAdminCertificateRevocationStore>()
-                        .IsRevokedAsync(
-                            Convert.ToHexString(SHA256.HashData(adminCertificate.RawData)),
-                            context.RequestAborted))
+                    if (!AdminCertificateIdentity.TryReadActor(adminCertificate, out var actor) ||
+                        actor is null)
                     {
-                        if (AdminCertificateIdentity.TryReadActor(adminCertificate, out var revokedActor) &&
-                            revokedActor is not null)
-                        {
-                            await context.RequestServices.GetRequiredService<IAuditWriter>()
-                                .WriteAsync(new AuditRecord(
-                                    revokedActor, "admin.certificate.revoked_denied", null,
-                                    new CorrelationId(context.TraceIdentifier),
-                                    context.RequestServices.GetRequiredService<IClock>().UtcNow),
-                                    context.RequestAborted);
-                        }
+                        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                        return;
+                    }
+
+                    var fingerprint = Convert.ToHexString(SHA256.HashData(adminCertificate.RawData));
+                    var certificateAccess = await context.RequestServices
+                        .GetRequiredService<IAdminCertificateAccessStore>()
+                        .CheckAsync(fingerprint, actor.SubjectId,
+                            requireAdminCertificateRegistration, context.RequestAborted);
+                    if (certificateAccess != AdminCertificateAccess.Accepted)
+                    {
+                        var action = certificateAccess == AdminCertificateAccess.Revoked
+                            ? "admin.certificate.revoked_denied"
+                            : "admin.certificate.unregistered_denied";
+                        await context.RequestServices.GetRequiredService<IAuditWriter>()
+                            .WriteAsync(new AuditRecord(actor, action,
+                                new AuditTarget("admin_certificate", fingerprint),
+                                new CorrelationId(context.TraceIdentifier),
+                                context.RequestServices.GetRequiredService<IClock>().UtcNow),
+                                context.RequestAborted);
 
                         context.Response.StatusCode = StatusCodes.Status403Forbidden;
                         return;
@@ -151,13 +162,6 @@ public static class FleetoryApplication
 
                     if (adminOidcEnabled)
                     {
-                        if (!AdminCertificateIdentity.TryReadActor(adminCertificate, out var actor) ||
-                            actor is null)
-                        {
-                            context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                            return;
-                        }
-
                         var authentication = await context.AuthenticateAsync(AdminOidcAuthentication.Scheme);
                         var clientId = context.RequestServices.GetRequiredService<IConfiguration>()
                             ["Fleetory:AdminGateway:Oidc:ClientId"]!;

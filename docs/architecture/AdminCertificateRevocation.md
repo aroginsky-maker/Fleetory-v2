@@ -5,10 +5,11 @@ client leaf certificate SHA-256 in PostgreSQL on **every** Admin request. A revo
 certificate receives HTTP 403, including on an existing TLS connection. A database
 failure prevents the request from reaching an Admin handler. Denials with a valid
 Admin SAN identity are audited. Revocation is independent of the Admin actor's RBAC
-assignments, so a newly issued certificate with the same SAN UUID can continue to
-work after the old certificate is revoked.
+assignments, so a newly issued and registered certificate with the same SAN UUID
+can continue to work after the old certificate is revoked.
 
-This is an emergency denylist, not a certificate issuance or enrollment system.
+This is an emergency denylist. Normal certificate registration and rotation are
+documented in [AdminCertificateRegistration.md](AdminCertificateRegistration.md).
 An approved CA, Admin OIDC/WebAuthn, credential custody and network restrictions
 remain required. A database operator must not revoke the last working Admin
 credential until a replacement has authenticated and its permissions have been

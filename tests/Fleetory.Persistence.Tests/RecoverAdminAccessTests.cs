@@ -24,6 +24,43 @@ public sealed class RecoverAdminAccessTests(PostgreSqlTestFixture fixture)
             await recover.ExecuteNonQueryAsync();
         }
 
+        var registrationSql = await File.ReadAllTextAsync(
+            Path.Combine(AppContext.BaseDirectory, "register-admin-certificate.sql"));
+        var fingerprint = new string('D', 64);
+        await using (var configureRegistration = new NpgsqlCommand("""
+            SELECT set_config('fleetory.admin_register.mode', 'recovery', true),
+                   set_config('fleetory.admin_register.person_id', @person_id, true),
+                   set_config('fleetory.admin_register.certificate_sha256', @fingerprint, true),
+                   set_config('fleetory.admin_register.incident_reference', @incident, true),
+                   set_config('fleetory.admin_register.operator_reference', 'security-operator-test', true)
+            """, connection, transaction))
+        {
+            configureRegistration.Parameters.AddWithValue("person_id", replacementId.ToString("D"));
+            configureRegistration.Parameters.AddWithValue("fingerprint", fingerprint);
+            configureRegistration.Parameters.AddWithValue("incident", incidentId);
+            await configureRegistration.ExecuteNonQueryAsync();
+        }
+        await using (var register = new NpgsqlCommand(registrationSql, connection, transaction))
+        {
+            await register.ExecuteNonQueryAsync();
+        }
+
+        await using (var verifyRegistration = new NpgsqlCommand("""
+            SELECT count(*) FROM platform.admin_certificate_registrations AS registration
+            JOIN platform.audit_events AS event
+              ON event.target_id = registration.certificate_sha256
+            JOIN platform.audit_export_queue AS queue
+              ON queue.audit_event_id = event.event_id
+            WHERE registration.certificate_sha256 = @fingerprint
+              AND registration.actor_subject_id = @subject
+              AND event.action = 'admin.certificate.recovery'
+            """, connection, transaction))
+        {
+            verifyRegistration.Parameters.AddWithValue("fingerprint", fingerprint);
+            verifyRegistration.Parameters.AddWithValue("subject", replacementSubject);
+            Assert.Equal(1L, (long)(await verifyRegistration.ExecuteScalarAsync())!);
+        }
+
         await using (var verify = new NpgsqlCommand("""
             SELECT COUNT(*)
             FROM platform.authorization_assignments AS assignment
