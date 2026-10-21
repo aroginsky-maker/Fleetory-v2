@@ -11,6 +11,7 @@ using Fleetory.Core.Security;
 using Fleetory.Platform.Contracts;
 using Fleetory.Server;
 using Fleetory.SharedKernel;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Npgsql;
@@ -1045,22 +1046,10 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
         var adminId = Guid.NewGuid();
         using var pki = new TestPki(new Uri($"urn:fleetory:admin:{adminId:D}"));
         using var secrets = new TestSecretDirectory();
-        secrets.Write("fleetory-postgresql", fixture.ConnectionString);
-        secrets.Write("admin-gateway-root-ca", pki.Root.ExportCertificatePem());
-        secrets.Write("admin-gateway-server-cert", pki.Server.ExportCertificatePem());
-        secrets.Write("admin-gateway-server-key", pki.ServerKey.ExportPkcs8PrivateKeyPem());
         await GrantAdminPermissionAsync(adminId, "platform.authorization.manage");
-        var webPort = GetFreePort();
-        var adminPort = GetFreePort();
-        while (adminPort == webPort) { adminPort = GetFreePort(); }
-
-        await using var app = FleetoryApplication.Build([
-            "--environment=Development",
-            $"--Fleetory:Secrets:Directory={secrets.Path}",
-            "--Fleetory:AdminGateway:Enabled=true",
-            $"--Fleetory:Web:Port={webPort}",
-            $"--Fleetory:AdminGateway:Port={adminPort}"
-        ]);
+        var (builtApp, adminPort) = BuildAdminCertificateTestApp(pki, secrets,
+            requireRegistration: false);
+        await using var app = builtApp;
         await app.StartAsync();
         try
         {
@@ -1138,23 +1127,10 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
         var adminId = Guid.NewGuid();
         using var pki = new TestPki(new Uri($"urn:fleetory:admin:{adminId:D}"));
         using var secrets = new TestSecretDirectory();
-        secrets.Write("fleetory-postgresql", fixture.ConnectionString);
-        secrets.Write("admin-gateway-root-ca", pki.Root.ExportCertificatePem());
-        secrets.Write("admin-gateway-server-cert", pki.Server.ExportCertificatePem());
-        secrets.Write("admin-gateway-server-key", pki.ServerKey.ExportPkcs8PrivateKeyPem());
         await GrantAdminPermissionAsync(adminId, "platform.authorization.manage");
-        var webPort = GetFreePort();
-        var adminPort = GetFreePort();
-        while (adminPort == webPort) { adminPort = GetFreePort(); }
-
-        await using var app = FleetoryApplication.Build([
-            "--environment=Development",
-            $"--Fleetory:Secrets:Directory={secrets.Path}",
-            "--Fleetory:AdminGateway:Enabled=true",
-            "--Fleetory:AdminGateway:RequireCertificateRegistration=true",
-            $"--Fleetory:Web:Port={webPort}",
-            $"--Fleetory:AdminGateway:Port={adminPort}"
-        ]);
+        var (builtApp, adminPort) = BuildAdminCertificateTestApp(pki, secrets,
+            requireRegistration: true);
+        await using var app = builtApp;
         await app.StartAsync();
         try
         {
@@ -1260,6 +1236,32 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             await register.ExecuteNonQueryAsync();
         }
         await transaction.CommitAsync();
+    }
+
+    private (WebApplication App, int AdminPort) BuildAdminCertificateTestApp(
+        TestPki pki, TestSecretDirectory secrets, bool requireRegistration)
+    {
+        secrets.Write("fleetory-postgresql", fixture.ConnectionString);
+        secrets.Write("admin-gateway-root-ca", pki.Root.ExportCertificatePem());
+        secrets.Write("admin-gateway-server-cert", pki.Server.ExportCertificatePem());
+        secrets.Write("admin-gateway-server-key", pki.ServerKey.ExportPkcs8PrivateKeyPem());
+        var webPort = GetFreePort();
+        var adminPort = GetFreePort();
+        while (adminPort == webPort) { adminPort = GetFreePort(); }
+
+        var arguments = new List<string>
+        {
+            "--environment=Development",
+            $"--Fleetory:Secrets:Directory={secrets.Path}",
+            "--Fleetory:AdminGateway:Enabled=true",
+            $"--Fleetory:Web:Port={webPort}",
+            $"--Fleetory:AdminGateway:Port={adminPort}"
+        };
+        if (requireRegistration)
+        {
+            arguments.Add("--Fleetory:AdminGateway:RequireCertificateRegistration=true");
+        }
+        return (FleetoryApplication.Build([.. arguments]), adminPort);
     }
 
     [Fact]

@@ -26,6 +26,9 @@ BEGIN
     IF person_id IS NULL OR person_id !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' THEN
         RAISE EXCEPTION 'A valid Admin SAN person UUID is required.';
     END IF;
+    IF person_id::uuid = '00000000-0000-0000-0000-000000000000'::uuid THEN
+        RAISE EXCEPTION 'An empty Admin identity is not allowed.';
+    END IF;
     actor_id := 'person:' || replace(lower(person_id), '-', '');
     IF fingerprint IS NULL OR fingerprint !~ '^[0-9A-F]{64}$' OR
        (previous_fingerprint IS NOT NULL AND
