@@ -52,7 +52,7 @@
 | Local production coverage after emergency Admin certificate revocation | 93.64% |
 | Local SonarQube Community Build at `ad4271b` | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0% |
 | Local SonarQube Community Build after Windows Agent ACL hardening | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0%; 0 bugs, vulnerabilities, code smells and hotspots |
-| Last directly retrieved CI production coverage, `9b1de04` | 93.47% |
+| Last directly retrieved CI production coverage, `d2283bf` | 93.47% |
 | Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
 | Local full audit pipeline | PostgreSQL outbox → Fleetory worker → immudb readback with dedicated account passed |
 | Local command-signing lab after Windows ACL hardening | OpenBao Transit v2 signature accepted once; replay rejected; Server token denied (403) |
@@ -61,15 +61,15 @@
 | Local WebAuthn/OIDC with real Admin mTLS | 401 without token; 403 with WebAuthn token at RBAC |
 | Windows server TLS chain in CI with provisioned OS CA stores | 2 certificates sent; root-only OpenSSL verification code 0 |
 | Linux container server TLS chain | 2 certificates sent; root-only OpenSSL verification code 0 |
-| Last directly retrieved Sonar PR coverage, `9b1de04` | 90.3% |
-| Sonar new-code coverage at `9b1de04` | 90.55% |
-| Last directly retrieved Sonar overall duplication, `9b1de04` | 0.0% |
-| Sonar new-code duplication at `9b1de04` | 0.0% |
-| Sonar Quality Gate at `9b1de04` | PASS |
+| Last directly retrieved Sonar PR coverage, `d2283bf` | 90.3% |
+| Sonar new-code coverage at `d2283bf` | 90.55% |
+| Last directly retrieved Sonar overall duplication, `d2283bf` | 0.0% |
+| Sonar new-code duplication at `d2283bf` | 0.0% |
+| Sonar Quality Gate at `d2283bf` | PASS |
 
 The last completed CI at `14d2a65` is [run 39659108678](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39659108678); both jobs and the SonarCloud Quality Gate passed. Actions resumed without changing the owner's $0 budget. SonarCloud previously found 18 duplicated lines in each of the two PowerShell provisioning tests; their shared helper reduced overall and new-code duplication to 0.0%. The Windows job ran the Core security tests with the actual ACL checks. Local SonarQube Community Build scans of `ad4271b` and the subsequent Windows Agent ACL changes each passed their own Quality Gate with 90.7% overall coverage and 0.0% overall duplication. The latter also reported zero bugs, vulnerabilities, code smells and security hotspots. These local scans cannot substitute for a current SonarCloud PR analysis because the server, rules and new-code baseline differ. A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The pipeline passed again on 19 October using the new dedicated immudb account. The PowerShell provisioning test runs in CI and remains under Sonar static analysis; it is excluded from the .NET coverage denominator because `dotnet-coverage` cannot instrument PowerShell. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
 
-At `9b1de04`, [run 39668272054](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39668272054) passed strict build, 196 tests, coverage and SonarCloud. Its Windows TLS probe failed in the readiness retry because `$socket?.Dispose()` was parsed as an unset variable when the first connection attempt arrived before the listener. The retry now explicitly disposes a non-null socket; the next Windows CI run must confirm the fix. The local full quality run reported 93.64% production coverage, with Sonar not configured locally.
+At `9b1de04`, [run 39668272054](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39668272054) passed strict build, 196 tests, coverage and SonarCloud. Its Windows TLS probe failed in the readiness retry because `$socket?.Dispose()` was parsed as an unset variable when the first connection attempt arrived before the listener. The retry now explicitly disposes a non-null socket. The subsequent [run 39669524437](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39669524437) at `d2283bf` passed both Windows and Linux jobs, with the percentages above. The local full quality run reported 93.64% production coverage, with Sonar not configured locally.
 
 ## Required before completion
 
