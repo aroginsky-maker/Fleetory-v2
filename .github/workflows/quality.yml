@@ -91,6 +91,10 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/CommandTrustReconciliation.Tests.ps1
 
+      - name: Verify immudb signed-state receipt anchor
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ImmudbStateVerification.Tests.ps1
+
       - name: Run Fleetory quality verification
         shell: pwsh
         run: |
