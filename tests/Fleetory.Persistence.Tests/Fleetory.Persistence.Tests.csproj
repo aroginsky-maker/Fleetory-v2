@@ -39,5 +39,8 @@
     <None Include="../../eng/register-admin-certificate.sql"
           Link="register-admin-certificate.sql"
           CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../eng/reparent-scope.sql"
+          Link="reparent-scope.sql"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
