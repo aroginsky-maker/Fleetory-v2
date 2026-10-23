@@ -95,6 +95,10 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/ImmudbStateVerification.Tests.ps1
 
+      - name: Verify immudb restore acceptance
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ImmudbRestoreAcceptance.Tests.ps1
+
       - name: Run Fleetory quality verification
         shell: pwsh
         run: |

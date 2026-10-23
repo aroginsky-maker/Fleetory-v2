@@ -33,7 +33,7 @@ Keep the public key outside Git and rotate it through a dual-approved procedure.
 
 ## What this does not establish
 
-The verifier does not create a backup, restore a database or enforce retention. immudb retention can remove old value-log data while preserving proofs and schema; the retention period must therefore be chosen from the audit policy and recovery objective. Backups must be created by a separately privileged immudb administrator, copied to immutable off-host storage and restored in a disposable environment. The restored database must pass signed-state and known-EventId checks before it is considered usable.
+The verifier does not create a backup, restore a database or enforce retention. immudb retention can remove old value-log data while preserving proofs and schema; the retention period must therefore be chosen from the audit policy and recovery objective. Backups must be created by a separately privileged immudb administrator, copied to immutable off-host storage and restored in a disposable environment. The restored database must pass signed-state and known-EventId checks before it is considered usable. The repeatable acceptance procedure is documented in [ImmudbBackupRestore](../operations/ImmudbBackupRestore.md) and exercised by `tests/Fleetory.Tools.Tests/ImmudbRestoreAcceptance.Tests.ps1`.
 
 The current Fleetory sink still uses HTTPS and a dedicated read/write audit account. Production must also configure TLS certificate trust, restrict the admin API, rotate writer credentials and keep immudb administrator credentials outside Fleetory.
 
