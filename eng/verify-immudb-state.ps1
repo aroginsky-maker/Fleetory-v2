@@ -43,32 +43,69 @@ function Get-ImmudbState([uri] $Origin, [string] $Token) {
     }
 }
 
-function Invoke-ImmudbSignatureVerification(
-    [byte[]] $HashBytes,
-    [byte[]] $SignatureBytes,
-    [string] $PublicKeyPath) {
-    if (-not (Test-Path -LiteralPath $PublicKeyPath -PathType Leaf)) {
-        throw 'The immudb public signing key is missing.'
+function New-ImmudbStateSigningPayload(
+    [string] $Database,
+    [long] $TxId,
+    [byte[]] $HashBytes) {
+    if ([string]::IsNullOrEmpty($Database)) { throw 'The immudb database name is empty.' }
+    if ($TxId -le 0) { throw 'The immudb transaction ID is invalid.' }
+    if ($HashBytes.Length -ne 32) { throw 'The immudb transaction hash must be 32 bytes.' }
+    $databaseBytes = [Text.UTF8Encoding]::new($false).GetBytes($Database)
+    if ($databaseBytes.Length -gt [uint32]::MaxValue) { throw 'The immudb database name is too long.' }
+    $payload = New-Object byte[] (4 + $databaseBytes.Length + 8 + $HashBytes.Length)
+    $offset = 0
+    $lengthBytes = [BitConverter]::GetBytes([uint32]$databaseBytes.Length)
+    if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($lengthBytes) }
+    [Buffer]::BlockCopy($lengthBytes, 0, $payload, $offset, 4)
+    $offset += 4
+    [Buffer]::BlockCopy($databaseBytes, 0, $payload, $offset, $databaseBytes.Length)
+    $offset += $databaseBytes.Length
+    $txBytes = [BitConverter]::GetBytes([uint64]$TxId)
+    if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($txBytes) }
+    [Buffer]::BlockCopy($txBytes, 0, $payload, $offset, 8)
+    [Buffer]::BlockCopy($HashBytes, 0, $payload, $offset + 8, $HashBytes.Length)
+    return $payload
+}
+
+function ConvertTo-ImmudbPublicKeyPoint([byte[]] $PublicKeyBytes) {
+    if ($PublicKeyBytes.Length -eq 65 -and $PublicKeyBytes[0] -eq 4) {
+        return $PublicKeyBytes
     }
-    $fullKeyPath = [IO.Path]::GetFullPath($PublicKeyPath)
-    $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ('fleetory-immudb-state-' +
-        [guid]::NewGuid().ToString('N'))
-    New-Item -ItemType Directory -Path $tempRoot -Force | Out-Null
+    # The operator key is stored as a standard PUBLIC KEY PEM (X.509 SPKI).
+    # The P-256 uncompressed point is the final 65 bytes of that DER structure.
+    if ($PublicKeyBytes.Length -ge 65) {
+        $point = [byte[]]$PublicKeyBytes[($PublicKeyBytes.Length - 65)..($PublicKeyBytes.Length - 1)]
+        if ($point[0] -eq 4) { return $point }
+    }
+    throw 'The immudb public signing key must be a P-256 public key.'
+}
+
+function Invoke-ImmudbSignatureVerification(
+    [byte[]] $PayloadBytes,
+    [byte[]] $SignatureBytes,
+    [byte[]] $PublicKeyPoint) {
+    if ($null -eq $PayloadBytes -or $PayloadBytes.Length -eq 0) {
+        throw 'The immudb signed payload is empty.'
+    }
+    $point = ConvertTo-ImmudbPublicKeyPoint $PublicKeyPoint
+    if ($SignatureBytes.Length -eq 0) { throw 'The immudb state signature is empty.' }
+    $spkiPrefix = [byte[]](0x30,0x59,0x30,0x13,0x06,0x07,0x2A,0x86,0x48,
+        0xCE,0x3D,0x02,0x01,0x06,0x08,0x2A,0x86,0x48,0xCE,0x3D,0x03,
+        0x01,0x07,0x03,0x42,0x00)
+    $spki = New-Object byte[] ($spkiPrefix.Length + $point.Length)
+    [Array]::Copy($spkiPrefix, 0, $spki, 0, $spkiPrefix.Length)
+    [Array]::Copy($point, 0, $spki, $spkiPrefix.Length, $point.Length)
+    $ecdsa = [Security.Cryptography.ECDsa]::Create()
     try {
-        $hashPath = Join-Path $tempRoot 'tx-hash.bin'
-        $signaturePath = Join-Path $tempRoot 'state-signature.bin'
-        [IO.File]::WriteAllBytes($hashPath, $HashBytes)
-        [IO.File]::WriteAllBytes($signaturePath, $SignatureBytes)
-        & openssl dgst -sha256 -verify $fullKeyPath -signature $signaturePath $hashPath 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0) {
+        $bytesRead = 0
+        $ecdsa.ImportSubjectPublicKeyInfo($spki, [ref]$bytesRead)
+        $digest = [Security.Cryptography.SHA256]::HashData($PayloadBytes)
+        $format = [Security.Cryptography.DSASignatureFormat]::Rfc3279DerSequence
+        if (-not $ecdsa.VerifyHash($digest, $SignatureBytes, $format)) {
             throw 'The immudb state signature is invalid.'
         }
     }
-    finally {
-        if (Test-Path -LiteralPath $tempRoot) {
-            Remove-Item -LiteralPath $tempRoot -Recurse -Force
-        }
-    }
+    finally { $ecdsa.Dispose() }
 }
 
 function Get-PinnedImmudbPublicKeyBytes([string] $PublicKeyPath) {
@@ -79,7 +116,10 @@ function Get-PinnedImmudbPublicKeyBytes([string] $PublicKeyPath) {
     $match = [regex]::Match($pem,
         '-----BEGIN PUBLIC KEY-----(?<body>[A-Za-z0-9+/=\r\n]+)-----END PUBLIC KEY-----')
     if (-not $match.Success) { throw 'The immudb public signing key is not a PUBLIC KEY PEM.' }
-    try { return [Convert]::FromBase64String(($match.Groups['body'].Value -replace '\s', '')) }
+    try {
+        return ConvertTo-ImmudbPublicKeyPoint ([Convert]::FromBase64String(
+            ($match.Groups['body'].Value -replace '\s', '')))
+    }
     catch { throw 'The immudb public signing key PEM is invalid.' }
 }
 
@@ -101,21 +141,26 @@ function New-ImmudbStateReceipt($State, [string] $ExpectedDatabase, [string] $Pu
     $signature = $State.signature
     if ($null -eq $signature) { throw 'immudb state signature is missing.' }
     $signatureBytes = ConvertFrom-Base64Strict ([string]$signature.signature) 'immudb state signature'
+    $pinnedPublicKey = Get-PinnedImmudbPublicKeyBytes $PublicKeyPath
     $serverPublicKey = if ($signature.publicKey) {
-        ConvertFrom-Base64Strict ([string]$signature.publicKey) 'immudb state public key'
+        ConvertTo-ImmudbPublicKeyPoint (ConvertFrom-Base64Strict (
+            [string]$signature.publicKey) 'immudb state public key')
     }
-    else { $null }
-    if ($null -ne $serverPublicKey) {
-        $pinnedPublicKey = Get-PinnedImmudbPublicKeyBytes $PublicKeyPath
-        $expectedPublicKeyHash = [Convert]::ToHexString(
-            [Security.Cryptography.SHA256]::HashData($pinnedPublicKey))
-        $serverPublicKeyHash = [Convert]::ToHexString(
-            [Security.Cryptography.SHA256]::HashData($serverPublicKey))
-        if ($serverPublicKeyHash -cne $expectedPublicKeyHash) {
-            throw 'immudb state public key does not match the pinned key.'
+    else { $pinnedPublicKey }
+    $keysMatch = $serverPublicKey.Length -eq $pinnedPublicKey.Length
+    if ($keysMatch) {
+        for ($index = 0; $index -lt $pinnedPublicKey.Length; $index++) {
+            if ($serverPublicKey[$index] -ne $pinnedPublicKey[$index]) {
+                $keysMatch = $false
+                break
+            }
         }
     }
-    Invoke-ImmudbSignatureVerification $hashBytes $signatureBytes $PublicKeyPath
+    if (-not $keysMatch) {
+        throw 'immudb state public key does not match the pinned key.'
+    }
+    $payload = New-ImmudbStateSigningPayload ([string]$State.db) $txId $hashBytes
+    Invoke-ImmudbSignatureVerification $payload $signatureBytes $pinnedPublicKey
     [ordered]@{
         schema = 'fleetory.immudb-state-receipt.v1'
         database = [string]$State.db
@@ -123,7 +168,7 @@ function New-ImmudbStateReceipt($State, [string] $ExpectedDatabase, [string] $Pu
         txHash = [Convert]::ToBase64String($hashBytes)
         signature = [Convert]::ToBase64String($signatureBytes)
         publicKeySha256 = [Convert]::ToHexString(
-            [Security.Cryptography.SHA256]::HashData((Get-PinnedImmudbPublicKeyBytes $PublicKeyPath)))
+            [Security.Cryptography.SHA256]::HashData($pinnedPublicKey))
         observedAt = [DateTimeOffset]::UtcNow.ToString('O', [Globalization.CultureInfo]::InvariantCulture)
     }
 }

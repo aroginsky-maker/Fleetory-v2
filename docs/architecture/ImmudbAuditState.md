@@ -4,13 +4,13 @@ Fleetory's REST audit sink proves that one `EventId` can be written once and rea
 
 ## State endpoint and signature
 
-The verifier reads `GET /api/db/state` from an HTTPS origin. immudb exposes this endpoint as `ImmuService_CurrentState`; its `ImmutableState` contains the selected database name, the latest committed `txId`, a 32-byte `txHash`, and an optional `Signature` containing `publicKey` and `signature` bytes. Fleetory requires the expected database (`defaultdb` unless explicitly changed), a positive transaction ID, a 32-byte hash, and a signature. It pins the public key supplied by the operator and verifies the signature over the transaction hash with OpenSSL. A missing key, malformed base64, public-key mismatch, invalid signature or non-HTTPS origin fails closed.
+The verifier reads `GET /api/db/state` from an HTTPS origin. immudb exposes this endpoint as `ImmuService_CurrentState`; its `ImmutableState` contains the selected database name, the latest committed `txId`, a 32-byte `txHash`, and an optional `Signature` containing `publicKey` and `signature` bytes. Fleetory requires the expected database (`defaultdb` unless explicitly changed), a positive transaction ID, a 32-byte hash, and a signature. It pins the operator key and verifies the immudb v1.11.2 signing payload: a big-endian uint32 database-name length, UTF-8 database name, big-endian uint64 transaction ID and transaction hash. The signature is ECDSA P-256 ASN.1 DER, and `publicKey` is the 65-byte uncompressed point; verification uses the managed .NET cryptography API. A missing key, malformed base64, public-key mismatch, invalid signature or non-HTTPS origin fails closed.
 
 The `/api/db/state` endpoint is not an audit writer API and must be reachable only through the restricted immudb network path. The verifier never sends a write request and never receives the Fleetory audit-writer secret. A bearer token can be supplied for deployments that protect the endpoint even though the upstream REST schema marks CurrentState as unauthenticated.
 
 ## Receipt anchor
 
-The verifier writes newline-delimited canonical JSON receipts to an absolute anchor path. Each receipt has schema `fleetory.immudb-state-receipt.v1`, database, `txId`, base64 `txHash`, base64 state signature, SHA-256 of the pinned public key and UTC observation time. The append operation has these invariants:
+The verifier writes newline-delimited canonical JSON receipts to an absolute anchor path. Each receipt has schema `fleetory.immudb-state-receipt.v1`, database, `txId`, base64 `txHash`, base64 state signature, SHA-256 of the pinned 65-byte public point and UTC observation time. The append operation has these invariants:
 
 - an identical latest transaction is idempotent;
 - a lower transaction ID is rejected as rollback;
