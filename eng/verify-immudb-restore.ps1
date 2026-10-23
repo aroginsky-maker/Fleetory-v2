@@ -95,8 +95,7 @@ function Test-ImmudbRestoredEvent(
     }
     $valueBytes = ConvertFrom-ImmudbRestoreBase64Strict ([string]$Response.value) `
         'restored immudb audit value'
-    $actualHash = [Convert]::ToHexString(
-        [Security.Cryptography.SHA256]::HashData($valueBytes))
+    $actualHash = ConvertTo-ImmudbUpperHex (Get-ImmudbSha256 $valueBytes)
     if ($actualHash -ine $ExpectedValueSha256) {
         throw 'The restored immudb audit value hash does not match the acceptance record.'
     }

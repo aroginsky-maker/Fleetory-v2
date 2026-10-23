@@ -26,6 +26,28 @@ function ConvertFrom-Base64Strict([string] $Value, [string] $Name) {
     return $bytes
 }
 
+function Get-ImmudbSha256([byte[]] $Bytes) {
+    if ($null -eq $Bytes) { throw 'The SHA-256 input is missing.' }
+    $sha = [Security.Cryptography.SHA256]::Create()
+    try { return $sha.ComputeHash($Bytes) }
+    finally { $sha.Dispose() }
+}
+
+function ConvertTo-ImmudbUpperHex([byte[]] $Bytes) {
+    if ($null -eq $Bytes) { throw 'The hexadecimal input is missing.' }
+    $builder = [Text.StringBuilder]::new($Bytes.Length * 2)
+    foreach ($byte in $Bytes) {
+        [void]$builder.Append($byte.ToString('X2',
+            [Globalization.CultureInfo]::InvariantCulture))
+    }
+    return $builder.ToString()
+}
+
+function Test-ImmudbAbsolutePath([string] $Path) {
+    if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+    return $Path -match '^(?:[A-Za-z]:[\\/]|\\\\|/)'
+}
+
 function Get-ImmudbState([uri] $Origin, [string] $Token) {
     if ($Origin.Scheme -ne 'https') {
         throw 'immudb state verification requires HTTPS.'
@@ -80,6 +102,58 @@ function ConvertTo-ImmudbPublicKeyPoint([byte[]] $PublicKeyBytes) {
     throw 'The immudb public signing key must be a P-256 public key.'
 }
 
+function Read-ImmudbDerInteger([byte[]] $Signature, [int] $Offset) {
+    if ($Offset -lt 0 -or $Offset + 2 -gt $Signature.Length -or
+        $Signature[$Offset] -ne 0x02) {
+        throw 'The immudb state signature is not a valid DER sequence.'
+    }
+    $length = [int]$Signature[$Offset + 1]
+    if (($length -band 0x80) -ne 0 -or $length -le 0 -or
+        $Offset + 2 + $length -gt $Signature.Length) {
+        throw 'The immudb state signature integer length is invalid.'
+    }
+    $start = $Offset + 2
+    if (($Signature[$start] -band 0x80) -ne 0) {
+        throw 'The immudb state signature integer is negative.'
+    }
+    if ($length -gt 1 -and $Signature[$start] -eq 0 -and
+        ($Signature[$start + 1] -band 0x80) -eq 0) {
+        throw 'The immudb state signature integer is not minimally encoded.'
+    }
+    if ($Signature[$start] -eq 0) {
+        $start++
+        $length--
+    }
+    if ($length -le 0 -or $length -gt 32) {
+        throw 'The immudb state signature integer is outside the P-256 range.'
+    }
+    return [pscustomobject]@{
+        Bytes = [byte[]]$Signature[$start..($start + $length - 1)]
+        NextOffset = $Offset + 2 + [int]$Signature[$Offset + 1]
+    }
+}
+
+function ConvertFrom-ImmudbDerSignature([byte[]] $Signature) {
+    if ($null -eq $Signature -or $Signature.Length -lt 8 -or
+        $Signature[0] -ne 0x30) {
+        throw 'The immudb state signature is not a valid DER sequence.'
+    }
+    $sequenceLength = [int]$Signature[1]
+    if (($sequenceLength -band 0x80) -ne 0 -or
+        $sequenceLength -ne $Signature.Length - 2) {
+        throw 'The immudb state signature sequence length is invalid.'
+    }
+    $r = Read-ImmudbDerInteger $Signature 2
+    $s = Read-ImmudbDerInteger $Signature $r.NextOffset
+    if ($s.NextOffset -ne $Signature.Length) {
+        throw 'The immudb state signature contains trailing data.'
+    }
+    $p1363 = New-Object byte[] 64
+    [Buffer]::BlockCopy($r.Bytes, 0, $p1363, 32 - $r.Bytes.Length, $r.Bytes.Length)
+    [Buffer]::BlockCopy($s.Bytes, 0, $p1363, 64 - $s.Bytes.Length, $s.Bytes.Length)
+    return $p1363
+}
+
 function Invoke-ImmudbSignatureVerification(
     [byte[]] $PayloadBytes,
     [byte[]] $SignatureBytes,
@@ -89,19 +163,18 @@ function Invoke-ImmudbSignatureVerification(
     }
     $point = ConvertTo-ImmudbPublicKeyPoint $PublicKeyPoint
     if ($SignatureBytes.Length -eq 0) { throw 'The immudb state signature is empty.' }
-    $spkiPrefix = [byte[]](0x30,0x59,0x30,0x13,0x06,0x07,0x2A,0x86,0x48,
-        0xCE,0x3D,0x02,0x01,0x06,0x08,0x2A,0x86,0x48,0xCE,0x3D,0x03,
-        0x01,0x07,0x03,0x42,0x00)
-    $spki = New-Object byte[] ($spkiPrefix.Length + $point.Length)
-    [Array]::Copy($spkiPrefix, 0, $spki, 0, $spkiPrefix.Length)
-    [Array]::Copy($point, 0, $spki, $spkiPrefix.Length, $point.Length)
     $ecdsa = [Security.Cryptography.ECDsa]::Create()
     try {
-        $bytesRead = 0
-        $ecdsa.ImportSubjectPublicKeyInfo($spki, [ref]$bytesRead)
-        $digest = [Security.Cryptography.SHA256]::HashData($PayloadBytes)
-        $format = [Security.Cryptography.DSASignatureFormat]::Rfc3279DerSequence
-        if (-not $ecdsa.VerifyHash($digest, $SignatureBytes, $format)) {
+        $parameters = New-Object Security.Cryptography.ECParameters
+        $parameters.Curve = [Security.Cryptography.ECCurve]::CreateFromFriendlyName('nistP256')
+        $ecPoint = New-Object Security.Cryptography.ECPoint
+        $ecPoint.X = [byte[]]$point[1..32]
+        $ecPoint.Y = [byte[]]$point[33..64]
+        $parameters.Q = $ecPoint
+        $ecdsa.ImportParameters($parameters)
+        $digest = Get-ImmudbSha256 $PayloadBytes
+        $signatureP1363 = ConvertFrom-ImmudbDerSignature $SignatureBytes
+        if (-not $ecdsa.VerifyHash($digest, $signatureP1363)) {
             throw 'The immudb state signature is invalid.'
         }
     }
@@ -167,8 +240,7 @@ function New-ImmudbStateReceipt($State, [string] $ExpectedDatabase, [string] $Pu
         txId = $txId
         txHash = [Convert]::ToBase64String($hashBytes)
         signature = [Convert]::ToBase64String($signatureBytes)
-        publicKeySha256 = [Convert]::ToHexString(
-            [Security.Cryptography.SHA256]::HashData($pinnedPublicKey))
+        publicKeySha256 = ConvertTo-ImmudbUpperHex (Get-ImmudbSha256 $pinnedPublicKey)
         observedAt = [DateTimeOffset]::UtcNow.ToString('O', [Globalization.CultureInfo]::InvariantCulture)
     }
 }
@@ -188,7 +260,7 @@ function Get-ExistingImmudbReceipts([string] $Path) {
 }
 
 function Write-ImmudbStateReceipt($Receipt, [string] $AnchorPath) {
-    if (-not [IO.Path]::IsPathFullyQualified($AnchorPath)) {
+    if (-not (Test-ImmudbAbsolutePath $AnchorPath)) {
         throw 'The immudb receipt anchor path must be absolute.'
     }
     $fullPath = [IO.Path]::GetFullPath($AnchorPath)

@@ -9,6 +9,9 @@ $source = Join-Path $repoRoot 'eng/verify-immudb-restore.ps1'
         'ConvertTo-ImmudbRestoreEventKey', 'ConvertFrom-ImmudbRestoreBase64Strict',
         'Get-ImmudbAuditReadback',
         'Test-ImmudbRestoredEvent', 'Invoke-ImmudbRestoreAcceptance')
+. (Join-Path $PSScriptRoot 'TestProvisionerHelpers.ps1') `
+    -Source (Join-Path $repoRoot 'eng/verify-immudb-state.ps1') `
+    -Names @('Get-ImmudbSha256', 'ConvertTo-ImmudbUpperHex')
 
 $work = Join-Path $repoRoot ('artifacts/immudb-restore-test-' +
     [Guid]::NewGuid().ToString('N'))
@@ -16,8 +19,7 @@ $keyPath = Join-Path $work 'immudb-state-public.pem'
 $anchor = Join-Path $work 'receipts.ndjson'
 $eventId = [Guid]::Parse('9b6c4eaf-7152-4ed6-95fc-7f5e4d3ad1b2')
 $valueBytes = [byte[]](1..16)
-$valueHash = [Convert]::ToHexString(
-    [Security.Cryptography.SHA256]::HashData($valueBytes))
+$valueHash = ConvertTo-ImmudbUpperHex (Get-ImmudbSha256 $valueBytes)
 $knownKey = ConvertTo-ImmudbRestoreEventKey $eventId
 
 function Assert-Throws([scriptblock] $Action, [string] $Message) {
