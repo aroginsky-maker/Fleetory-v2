@@ -44,6 +44,7 @@
 - A read-only scope reparenting preflight lists candidate ancestor grants and the exact actor, permission and descendant-scope decisions that would change. It rejects missing scopes, missing parents, existing hierarchy cycles and no-op requests. A PostgreSQL test compares these results with real authorization decisions before and after a temporary move in a rolled-back transaction. The controlled `reparent-scope.sql` procedure now applies an approved parent change only with distinct operator and approver references, an incident ID and the expected scope revision; it serializes the change, rejects missing parents, self-parenting, cycles, stale revisions and no-ops, snapshots both parent versions, and commits the audit/outbox entry with the update. Production approval records and impact review remain operational controls.
 - The read-only `eng/verify-immudb-state.ps1` operation now reads the signed `GET /api/db/state` response, pins and verifies the immudb public signing key, rejects malformed or rolled-back state, and appends canonical transaction receipts without overwriting an existing anchor. Its PowerShell test covers valid state, duplicate idempotence, rollback, conflicting hashes, malformed state and path validation. This closes the independent state-receipt verification block; production still needs an off-host WORM anchor and a separate backup/restore and retention procedure.
 - The read-only `eng/verify-immudb-restore.ps1` acceptance operation now checks a restored signed state and a known audit `EventId` through a read-only bearer token. It verifies the expected revision and decoded value hash, rejects insecure or redirected audit readback, wrong keys, changed values and malformed state, and never accepts backup-admin credentials. `docs/operations/ImmudbBackupRestore.md` defines the separate-admin backup, immutable off-host copy, disposable restore and WORM/SIEM evidence procedure; production retention, custody and restore evidence remain deployment controls.
+- The immudb state and restore verifiers now run on both PowerShell 7 and Windows PowerShell 5.1. ECDSA P-256 public-key import, DER signature decoding, SHA-256 and absolute-path validation use APIs available on both runtimes; both test suites pass on both runtimes.
 - The two PowerShell provisioning checks now share their function-import and safe artifact-cleanup helper. Windows CI also runs the Agent security tests, including the protected-directory ACL checks, on a Windows runner.
 
 ## Verification snapshot
@@ -56,7 +57,7 @@
 | Local scope reparenting mutation and preflight tests | 2/2 passed |
 | Local SonarQube Community Build at `ad4271b` | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0% |
 | Local SonarQube Community Build after Windows Agent ACL hardening | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0%; 0 bugs, vulnerabilities, code smells and hotspots |
-| Current CI production coverage, `17880be` / run `40027572499` | 93.47% |
+| Current CI production coverage, `d2275a4` / run `40031520169` | 93.47% |
 | Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
 | Local immudb restore acceptance | Read-only token separation, known EventId revision/hash and fail-closed validation passed |
 | Local full audit pipeline | PostgreSQL outbox → Fleetory worker → immudb readback with dedicated account passed |
@@ -66,13 +67,13 @@
 | Local WebAuthn/OIDC with real Admin mTLS | 401 without token; 403 with WebAuthn token at RBAC |
 | Windows server TLS chain in CI with provisioned OS CA stores | 2 certificates sent; root-only OpenSSL verification code 0 |
 | Linux container server TLS chain | 2 certificates sent; root-only OpenSSL verification code 0 |
-| Current Sonar PR coverage, `17880be` | 90.3% |
-| Sonar new-code coverage at `17880be` | 90.590695% |
-| Current Sonar overall duplication, `17880be` | 0.0% |
-| Sonar new-code duplication at `17880be` | 0.0% |
-| Sonar Quality Gate at `17880be` | PASS |
+| Current Sonar PR coverage, `d2275a4` | 90.3% |
+| Sonar new-code coverage at `d2275a4` | 90.59069524307371% |
+| Current Sonar overall duplication, `d2275a4` | 0.0% |
+| Sonar new-code duplication at `d2275a4` | 0.0% |
+| Sonar Quality Gate at `d2275a4` | PASS |
 
-The current completed CI is [run 40027572499](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/40027572499) for `17880be`: both Windows and Linux jobs and SonarCloud passed, production coverage was 93.47%, overall Sonar coverage 90.3%, new-code coverage 90.590695%, and both overall and new-code duplication were 0.0%. The PR remains draft while the remaining production controls are open.
+The current completed CI is [run 40031520169](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/40031520169) for `d2275a4`: both Windows and Linux jobs and SonarCloud passed, production coverage was 93.47%, overall Sonar coverage 90.3%, new-code coverage 90.59069524307371%, and both overall and new-code duplication were 0.0%. The PR remains draft while the remaining production controls are open.
 
 The last completed CI at `14d2a65` is [run 39659108678](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39659108678); both jobs and the SonarCloud Quality Gate passed. Actions resumed without changing the owner's $0 budget. SonarCloud previously found 18 duplicated lines in each of the two PowerShell provisioning tests; their shared helper reduced overall and new-code duplication to 0.0%. The Windows job ran the Core security tests with the actual ACL checks. Local SonarQube Community Build scans of `ad4271b` and the subsequent Windows Agent ACL changes each passed their own Quality Gate with 90.7% overall coverage and 0.0% overall duplication. The latter also reported zero bugs, vulnerabilities, code smells and security hotspots. These local scans cannot substitute for a current SonarCloud PR analysis because the server, rules and new-code baseline differ. A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The pipeline passed again on 19 October using the new dedicated immudb account. The PowerShell provisioning test runs in CI and remains under Sonar static analysis; it is excluded from the .NET coverage denominator because `dotnet-coverage` cannot instrument PowerShell. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
 
