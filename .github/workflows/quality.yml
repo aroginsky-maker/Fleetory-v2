@@ -119,6 +119,10 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/Phase7Readiness.Tests.ps1
 
+      - name: Verify immudb TLS probe validation
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ImmudbTlsProbe.Tests.ps1
+
       - name: Run Fleetory quality verification
         shell: pwsh
         run: |

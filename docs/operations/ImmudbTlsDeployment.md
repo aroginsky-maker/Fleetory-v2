@@ -57,6 +57,13 @@ Do not put the writer password or bearer token in this probe. The Fleetory
 audit pipeline and the signed-state/restore verifiers perform the authenticated
 checks separately.
 
+The repository's read-only preflight wraps this check and emits a machine-readable
+record without contacting immudb administration:
+
+    ./eng/verify-immudb-tls.ps1 `
+      -Address https://audit.example:8080/ `
+      -RootCertificatePath C:\ProgramData\Fleetory\trust\immudb-root.pem
+
 ## Certificate rotation
 
 1. Obtain approval and record the new leaf fingerprint, issuer, validity window,

@@ -32,6 +32,7 @@
 - The read-only `eng/verify-phase7-readiness.ps1` validator checks the final readiness record: distinct actors, UTC timestamps, all production control flags, CI/Sonar evidence, WORM reference and rollback validation. Its PowerShell 7 and Windows PowerShell 5.1 tests reject missing or inconsistent evidence.
 - The self-hosted evidence record captures the successful OpenBao signer, dedicated immudb writer pipeline, backup/restore drill and readiness-verifier checks while explicitly separating local evidence from production custody.
 - The self-hosted evidence record now also includes a disposable immudb HTTPS check using an explicit CA file; the TLS container and temporary key material were removed after validation.
+- The read-only `eng/verify-immudb-tls.ps1` preflight validates HTTPS-only origin, no embedded credentials, explicit CA trust, TLS 1.2+ and redirect rejection; PowerShell 7 and Windows PowerShell 5.1 tests cover its fail-closed inputs.
 - Reproducible local browser S256 PKCE and virtual WebAuthn check: the signed token carries `amr=webauthn` and the certificate-bound subject; the Admin route returns 401 without it and 403 at RBAC with it.
 - Admin Gateway startup rejects wildcard bind addresses, keeping its listener on loopback or an explicitly selected management IP.
 - Windows CI provisions an ephemeral root and intermediate in the runner certificate stores, then confirms the actual Admin listener sends two certificates and passes root-only OpenSSL verification. Windows hosts require equivalent approved CA-store provisioning.
@@ -93,6 +94,7 @@
 | Privileged change evidence runbook | Approval identities, impact hashes, audit/WORM links, retention and recovery evidence documented |
 | PHASE 7 readiness record verifier | Final control flags, approval actors, CI/Sonar, WORM reference and rollback evidence validated |
 | Self-hosted PHASE 7 evidence record | Signer, least-privilege audit pipeline, TLS, backup/restore and readiness checks recorded with production limitations |
+| immudb TLS probe validation | HTTPS-only origin, explicit CA path, TLS 1.2+, no credentials and no redirects validated |
 | Local WebAuthn/OIDC with real Admin mTLS | 401 without token; 403 with WebAuthn token at RBAC |
 | Windows server TLS chain in CI with provisioned OS CA stores | 2 certificates sent; root-only OpenSSL verification code 0 |
 | Linux container server TLS chain | 2 certificates sent; root-only OpenSSL verification code 0 |
