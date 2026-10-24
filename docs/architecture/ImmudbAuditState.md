@@ -10,13 +10,14 @@ The `/api/db/state` endpoint is not an audit writer API and must be reachable on
 
 ## Receipt anchor
 
-The verifier writes newline-delimited canonical JSON receipts to an absolute anchor path. Each receipt has schema `fleetory.immudb-state-receipt.v1`, database, `txId`, base64 `txHash`, base64 state signature, SHA-256 of the pinned 65-byte public point and UTC observation time. The append operation has these invariants:
+The verifier writes newline-delimited canonical JSON receipts to an absolute anchor path. Each receipt has schema `fleetory.immudb-state-receipt.v1`, database, `txId`, base64 `txHash`, base64 state signature, SHA-256 of the pinned 65-byte public point, UTC observation time and a SHA-256-linked anchor chain (`previousReceiptSha256` and `receiptSha256`). The chain covers the stable identity and cryptographic fields; `observedAt` remains display metadata. The append operation has these invariants:
 
 - an identical latest transaction is idempotent;
 - a lower transaction ID is rejected as rollback;
 - a changed hash at an existing transaction is rejected as a fork/conflict;
 - a symbolic-link anchor and a relative path are rejected;
 - malformed existing receipts stop the run before any append.
+- every receipt carries the previous receipt hash and its own canonical content hash; a changed, reordered or truncated chain fails closed before append.
 
 A local file is only a tamper-evident operational receipt. Production must send the receipt to a separate administrator-controlled WORM/object-lock or SIEM destination and retain the public-key fingerprint in a second control plane. The local path must not be treated as independent evidence when the Fleetory host and anchor share the same administrator.
 

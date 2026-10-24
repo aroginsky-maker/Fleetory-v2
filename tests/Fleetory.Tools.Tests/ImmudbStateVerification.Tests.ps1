@@ -12,6 +12,8 @@ $source = Join-Path $repoRoot 'eng/verify-immudb-state.ps1'
         'Read-ImmudbDerInteger', 'ConvertFrom-ImmudbDerSignature',
         'Invoke-ImmudbSignatureVerification', 'Get-PinnedImmudbPublicKeyBytes',
         'New-ImmudbStateReceipt', 'Get-ExistingImmudbReceipts',
+        'Get-ImmudbReceiptCanonicalJson', 'Get-ImmudbReceiptSha256',
+        'Test-ImmudbReceiptChain',
         'Write-ImmudbStateReceipt', 'Invoke-ImmudbStateVerification')
 
 $work = Join-Path $repoRoot ('artifacts/immudb-state-test-' +
@@ -109,9 +111,25 @@ try {
     if (-not (Write-ImmudbStateReceipt $receipt $anchor)) {
         throw 'The first receipt was not appended.'
     }
+    $originalLine = [IO.File]::ReadAllLines($anchor)[0]
+    $firstLine = $originalLine | ConvertFrom-Json
+    if ([string]$firstLine.previousReceiptSha256 -ne '' -or
+        [string]$firstLine.receiptSha256 -notmatch '^[0-9A-F]{64}$') {
+        throw 'The receipt integrity chain was not initialized.'
+    }
     if (Write-ImmudbStateReceipt $receipt $anchor) {
         throw 'An identical receipt was appended twice.'
     }
+
+    $tampered = $firstLine.PSObject.Copy()
+    $tampered.txHash = [Convert]::ToBase64String([byte[]](32..63))
+    [IO.File]::WriteAllText($anchor,
+        ($tampered | ConvertTo-Json -Compress -Depth 4) + [Environment]::NewLine,
+        [Text.UTF8Encoding]::new($false))
+    Assert-Throws { Write-ImmudbStateReceipt $receipt $anchor } `
+        'A tampered receipt anchor was accepted.'
+    [IO.File]::WriteAllText($anchor, $originalLine,
+        [Text.UTF8Encoding]::new($false))
 
     $olderState = $state.PSObject.Copy()
     $olderState.txId = 41
@@ -137,8 +155,8 @@ try {
         [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
     Assert-Throws { Write-ImmudbStateReceipt $receipt $anchor } `
         'An incompatible existing receipt was accepted.'
-    $lines = [IO.File]::ReadAllLines($anchor)
-    [IO.File]::WriteAllLines($anchor, $lines[0], [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText($anchor, $originalLine + [Environment]::NewLine,
+        [Text.UTF8Encoding]::new($false))
 
     $wrongDatabase = $state.PSObject.Copy()
     $wrongDatabase.db = 'otherdb'

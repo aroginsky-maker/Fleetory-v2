@@ -251,12 +251,59 @@ function Get-ExistingImmudbReceipts([string] $Path) {
         throw 'The immudb receipt anchor cannot be a symbolic link.'
     }
     $receipts = @()
+    $lineNumber = 0
     foreach ($line in [IO.File]::ReadAllLines($Path)) {
+        $lineNumber++
         if ([string]::IsNullOrWhiteSpace($line)) { continue }
         try { $receipts += ($line | ConvertFrom-Json) }
-        catch { throw 'The immudb receipt anchor contains invalid JSON.' }
+        catch { throw "The immudb receipt anchor contains invalid JSON at line $lineNumber." }
     }
     return $receipts
+}
+
+function Get-ImmudbReceiptCanonicalJson($Receipt) {
+    $previousProperty = $Receipt.PSObject.Properties['previousReceiptSha256']
+    $previousReceiptHash = if ($null -eq $previousProperty) { '' } else {
+        [string]$previousProperty.Value
+    }
+    $canonical = [ordered]@{
+        schema = [string]$Receipt.schema
+        database = [string]$Receipt.database
+        txId = [long]$Receipt.txId
+        txHash = [string]$Receipt.txHash
+        signature = [string]$Receipt.signature
+        publicKeySha256 = [string]$Receipt.publicKeySha256
+        previousReceiptSha256 = $previousReceiptHash
+    }
+    return $canonical | ConvertTo-Json -Compress -Depth 4
+}
+
+function Get-ImmudbReceiptSha256($Receipt) {
+    $json = Get-ImmudbReceiptCanonicalJson $Receipt
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes($json)
+    return ConvertTo-ImmudbUpperHex (Get-ImmudbSha256 $bytes)
+}
+
+function Test-ImmudbReceiptChain($Receipts) {
+    $previousHash = ''
+    foreach ($candidate in $Receipts) {
+        $previousProperty = $candidate.PSObject.Properties['previousReceiptSha256']
+        $hashProperty = $candidate.PSObject.Properties['receiptSha256']
+        $actualHash = if ($null -ne $hashProperty) {
+            Get-ImmudbReceiptSha256 $candidate
+        }
+        else { '' }
+        if ($null -eq $previousProperty -or $null -eq $hashProperty -or
+            [string]$candidate.previousReceiptSha256 -cne $previousHash -or
+            [string]$candidate.receiptSha256 -notmatch '^[0-9A-F]{64}$' -or
+            $actualHash -cne [string]$candidate.receiptSha256) {
+            throw ('The immudb receipt anchor integrity chain is invalid. ' +
+                "previous='$($candidate.previousReceiptSha256)' expected='$previousHash' " +
+                "hash='$($candidate.receiptSha256)' calculated='$actualHash'.")
+        }
+        $previousHash = [string]$candidate.receiptSha256
+    }
+    return $previousHash
 }
 
 function Write-ImmudbStateReceipt($Receipt, [string] $AnchorPath) {
@@ -269,6 +316,7 @@ function Write-ImmudbStateReceipt($Receipt, [string] $AnchorPath) {
         New-Item -ItemType Directory -Path $parent -Force | Out-Null
     }
     $existing = @(Get-ExistingImmudbReceipts $fullPath)
+    $previousReceiptHash = Test-ImmudbReceiptChain $existing
     $previousTx = 0L
     foreach ($candidate in $existing) {
         if ([string]$candidate.schema -cne 'fleetory.immudb-state-receipt.v1' -or
@@ -298,6 +346,8 @@ function Write-ImmudbStateReceipt($Receipt, [string] $AnchorPath) {
             return $false
         }
     }
+    $Receipt.previousReceiptSha256 = $previousReceiptHash
+    $Receipt.receiptSha256 = Get-ImmudbReceiptSha256 $Receipt
     $line = $Receipt | ConvertTo-Json -Compress -Depth 4
     $utf8 = [Text.UTF8Encoding]::new($false)
     [IO.File]::AppendAllText($fullPath, $line + [Environment]::NewLine, $utf8)
