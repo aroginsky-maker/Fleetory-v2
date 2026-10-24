@@ -115,6 +115,10 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/ImmudbReceiptExportVerification.Tests.ps1
 
+      - name: Verify PHASE 7 readiness record
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/Phase7Readiness.Tests.ps1
+
       - name: Run Fleetory quality verification
         shell: pwsh
         run: |

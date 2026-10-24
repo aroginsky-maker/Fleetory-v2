@@ -208,3 +208,5 @@ The read-only [scope reparenting preflight](ScopeReparenting.md) reports both ca
 - Abuse, negative authorization, recovery and cross-platform security tests, then the full Sonar Quality Gate.
 
 PHASE 7 remains open until these controls are integrated and independently verified. No Agent execution endpoint or privileged command route is exposed by this slice.
+
+The final deployment gate can be checked with the read-only [PHASE 7 readiness verifier](../operations/Phase7Readiness.md). It validates the shape and consistency of approval/evidence records; it does not create or substitute for production custody records.
