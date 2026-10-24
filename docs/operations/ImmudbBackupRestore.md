@@ -38,6 +38,12 @@ The expected value hash is calculated from the decoded `value` returned by immud
 6. Confirm the script output contains `fleetory.immudb-restore-acceptance.v1`, the expected database, the restored signed-state transaction and the expected EventId/revision/hash. Capture the output and the WORM object identifier in the change record.
 7. Revoke the read-only token, destroy the disposable instance and retain the backup, restore log, acceptance output and WORM receipt for the approved retention period.
 
+## Local disposable-drill evidence
+
+On 2026-10-24 the checked-in security lab was used to verify the backup and restore mechanics without touching the running lab volume's data. The immudb `1.11.2` container produced a hot backup of `defaultdb` containing transactions 1 through 33 (19,908 bytes). A separate disposable immudb container restored that archive into a newly created replica database named `restored`; `immuadmin database list` reported the database as `LOADED`, `Is Replica=TRUE` and `Transactions=33`. The disposable container and temporary archive were destroyed after the check.
+
+This evidence validates the local command path only. It does not replace production TLS, immutable off-host retention, independent WORM/SIEM anchoring, key custody or the read-only restore acceptance check described above.
+
 ## Acceptance criteria
 
 - The backup was created by the separate immudb administrator and is present in immutable off-host storage.
