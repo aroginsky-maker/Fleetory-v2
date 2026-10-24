@@ -24,6 +24,7 @@
 - Reproducible local browser S256 PKCE and virtual WebAuthn check: the signed token carries `amr=webauthn` and the certificate-bound subject; the Admin route returns 401 without it and 403 at RBAC with it.
 - Admin Gateway startup rejects wildcard bind addresses, keeping its listener on loopback or an explicitly selected management IP.
 - Windows CI provisions an ephemeral root and intermediate in the runner certificate stores, then confirms the actual Admin listener sends two certificates and passes root-only OpenSSL verification. Windows hosts require equivalent approved CA-store provisioning.
+- A reusable Windows host PKI preflight now pins approved root and intermediate SHA-256 fingerprints, requires CA `Basic Constraints` and `KeyCertSign`, checks validity and the intermediate-to-root chain, installs public certificates idempotently into `LocalMachine\Root` and `LocalMachine\CA`, and rolls back only certificates added by a failed invocation. Its PowerShell 7 and Windows PowerShell 5.1 tests reject mismatched fingerprints, non-CA certificates and private-key files.
 - Lab certificate provisioning restricts the local key directory before copying new keys, validates each leaf certificate/key pair, archives the previous pair for rotation recovery and removes temporary leaf keys from CA containers. An isolated crypto-backed test verifies successful rotation and failed-copy rollback without touching the live lab.
 - Negative security checks exercise malformed Admin RBAC requests through the real mTLS listener, fail-closed Gateway startup for a wrong key, foreign CA and malformed chain, and rejection of mixed or incomplete OpenBao configuration and unsafe Admin rate-limit values.
 - Agent grant creation, certificate binding and certificate revocation now commit their Core state, completion audit event and export-queue entry in one PostgreSQL transaction. A completion-audit failure rolls back the Core change; integration tests cover failure and retry. The Platform audit writer accepts the caller's transaction while retaining ownership of its tables. The architecture guide includes a read-only recovery procedure for a lost commit acknowledgement.
@@ -56,7 +57,7 @@
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
 | Local tests after audited scope reparenting procedure | 203/203 passed |
-| Local production coverage after audited scope reparenting procedure | 93.60% |
+| Local production coverage after Windows host PKI preflight | 93.61% |
 | Local scope reparenting mutation and preflight tests | 2/2 passed |
 | Local SonarQube Community Build at `ad4271b` | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0% |
 | Local SonarQube Community Build after Windows Agent ACL hardening | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0%; 0 bugs, vulnerabilities, code smells and hotspots |
@@ -67,6 +68,7 @@
 | Local command-signing lab after Windows ACL hardening | OpenBao Transit v2 signature accepted once; replay rejected; Server token denied (403) |
 | Local live certificate renewal | 4/4 new pairs validated; 4/4 previous pairs archived and matched backup; identity UUIDs retained; OpenBao TLS secrets matched |
 | Isolated certificate provisioning checks | Rotation archive, failed-copy rollback and mismatched-key rejection passed |
+| Windows host PKI preflight checks | Fingerprint pinning, CA policy, chain validation and private-key rejection passed on PowerShell 7 and Windows PowerShell 5.1 |
 | Local WebAuthn/OIDC with real Admin mTLS | 401 without token; 403 with WebAuthn token at RBAC |
 | Windows server TLS chain in CI with provisioned OS CA stores | 2 certificates sent; root-only OpenSSL verification code 0 |
 | Linux container server TLS chain | 2 certificates sent; root-only OpenSSL verification code 0 |
@@ -84,7 +86,7 @@ At `9b1de04`, [run 39668272054](https://github.com/aroginsky-maker/Fleetory-v2/a
 
 ## Required before completion
 
-- Production Windows PKI provisioning and renewal must install the approved root and intermediate in the host certificate stores. The automated root-only wire test passes on an ephemeral runner; the earlier local machine without those store entries still needs its own provisioning before that probe can pass.
+- Run the approved Windows host PKI preflight during each production provisioning and renewal. The script and ephemeral root-only wire test are implemented, but production installation, custody, renewal approval and rollback evidence still need deployment records; the earlier local machine without those store entries still needs its own provisioning before that probe can pass.
 - Validate the controlled Admin recovery runbook with production incident approval and credential custody; validate production retention of the scope-reparenting approval and impact records before allowing hierarchy changes.
 - CA issuance and renewal policy, secure root distribution, grant delivery, production validation of Admin registration/rotation and verified physical-device approval for certificate replacement or lost-key recovery; production custody and retention of recovery evidence. The two-root rollover mechanism is implemented, but operator validation remains.
 - Deploy the isolated signer behind authenticated requests and an auditable approval path, distribute Agent trust files securely, define an approval protocol for high-risk and bulk commands, and wire Agent runtime enforcement before execution is enabled.
