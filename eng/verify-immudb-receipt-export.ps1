@@ -10,44 +10,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$stateSource = Join-Path $PSScriptRoot 'verify-immudb-state.ps1'
-$syntaxErrors = $null
-$stateAst = [Management.Automation.Language.Parser]::ParseFile(
-    $stateSource, [ref]$null, [ref]$syntaxErrors)
-if ($syntaxErrors.Count -ne 0) { throw 'The immudb receipt verifier has a syntax error.' }
-foreach ($name in @(
-    'ConvertFrom-Base64Strict',
-    'Get-ImmudbSha256',
-    'ConvertTo-ImmudbUpperHex',
-    'Test-ImmudbAbsolutePath',
-    'Get-ImmudbReceiptCanonicalJson',
-    'Get-ImmudbReceiptSha256',
-    'Test-ImmudbReceiptChain',
-    'New-ImmudbStateSigningPayload',
-    'Invoke-ImmudbSignatureVerification',
-    'ConvertFrom-ImmudbDerSignature',
-    'Read-ImmudbDerInteger',
-    'ConvertTo-ImmudbPublicKeyPoint',
-    'Get-PinnedImmudbPublicKeyBytes')) {
-    $definition = $stateAst.Find({
-        param($node)
-        $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
-            $node.Name -eq $name
-    }, $true)
-    if ($null -eq $definition) { throw "Missing receipt helper: $name." }
-    . ([scriptblock]::Create($definition.Extent.Text))
-}
-
-function Get-ExportAbsolutePath([string] $Path, [string] $Name) {
-    if (-not (Test-ImmudbAbsolutePath $Path)) {
-        throw "$Name must be an absolute path."
-    }
-    return [IO.Path]::GetFullPath($Path)
-}
-
-function Get-ExportFileSha256([byte[]] $Bytes) {
-    return ConvertTo-ImmudbUpperHex (Get-ImmudbSha256 $Bytes)
-}
+. (Join-Path $PSScriptRoot 'immudb-receipt-helpers.ps1')
 
 function Read-ReceiptExport([string] $Path) {
     $item = Get-Item -LiteralPath $Path -Force
@@ -112,7 +75,7 @@ function Test-ReceiptExportPackage(
 
     $anchorVerified = $false
     if (-not [string]::IsNullOrWhiteSpace($ExpectedAnchorPath)) {
-        $anchor = Get-ExportAbsolutePath $ExpectedAnchorPath 'Anchor path'
+        $anchor = Get-ReceiptExportAbsolutePath $ExpectedAnchorPath 'Anchor path'
         if (-not (Test-Path -LiteralPath $anchor -PathType Leaf)) {
             throw 'The expected anchor file does not exist.'
         }
@@ -120,7 +83,7 @@ function Test-ReceiptExportPackage(
         if ($anchorItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {
             throw 'The expected anchor cannot be a symbolic link.'
         }
-        $anchorHash = Get-ExportFileSha256 ([IO.File]::ReadAllBytes($anchor))
+        $anchorHash = Get-ReceiptExportFileSha256 ([IO.File]::ReadAllBytes($anchor))
         if ($anchorHash -cne [string]$Package.anchorSha256) {
             throw 'The receipt export anchor hash does not match the source anchor.'
         }
@@ -129,7 +92,7 @@ function Test-ReceiptExportPackage(
 
     $signaturesVerified = $false
     if (-not [string]::IsNullOrWhiteSpace($ExpectedPublicKeyPath)) {
-        $publicKey = Get-ExportAbsolutePath $ExpectedPublicKeyPath 'Public key path'
+        $publicKey = Get-ReceiptExportAbsolutePath $ExpectedPublicKeyPath 'Public key path'
         $pinnedPoint = Get-PinnedImmudbPublicKeyBytes $publicKey
         $fingerprint = ConvertTo-ImmudbUpperHex (Get-ImmudbSha256 $pinnedPoint)
         foreach ($receipt in $receipts) {
@@ -155,11 +118,11 @@ function Test-ReceiptExportPackage(
         anchorSha256 = [string]$Package.anchorSha256
         anchorPathVerified = $anchorVerified
         signaturesVerified = $signaturesVerified
-        exportSha256 = Get-ExportFileSha256 $ExportBytes
+        exportSha256 = Get-ReceiptExportFileSha256 $ExportBytes
     }
 }
 
-$export = Get-ExportAbsolutePath $ExportPath 'Export path'
+$export = Get-ReceiptExportAbsolutePath $ExportPath 'Export path'
 if (-not (Test-Path -LiteralPath $export -PathType Leaf)) {
     throw 'The receipt export does not exist.'
 }

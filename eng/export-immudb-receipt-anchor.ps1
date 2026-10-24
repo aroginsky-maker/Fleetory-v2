@@ -7,39 +7,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
-$stateSource = Join-Path $PSScriptRoot 'verify-immudb-state.ps1'
-$syntaxErrors = $null
-$stateAst = [Management.Automation.Language.Parser]::ParseFile(
-    $stateSource, [ref]$null, [ref]$syntaxErrors)
-if ($syntaxErrors.Count -ne 0) { throw 'The immudb receipt verifier has a syntax error.' }
-foreach ($name in @(
-    'Get-ImmudbSha256',
-    'ConvertTo-ImmudbUpperHex',
-    'Get-ImmudbReceiptCanonicalJson',
-    'Get-ImmudbReceiptSha256',
-    'Get-ExistingImmudbReceipts',
-    'Test-ImmudbReceiptChain')) {
-    $definition = $stateAst.Find({
-        param($node)
-        $node -is [Management.Automation.Language.FunctionDefinitionAst] -and
-            $node.Name -eq $name
-    }, $true)
-    if ($null -eq $definition) { throw "Missing receipt helper: $name." }
-    . ([scriptblock]::Create($definition.Extent.Text))
-}
-
-function Get-ReceiptExportAbsolutePath([string] $Path, [string] $Name) {
-    if ([string]::IsNullOrWhiteSpace($Path) -or -not [IO.Path]::IsPathFullyQualified($Path)) {
-        throw "$Name must be an absolute path."
-    }
-    return [IO.Path]::GetFullPath($Path)
-}
-
-function Get-ReceiptFileSha256([byte[]] $Bytes) {
-    $sha = [Security.Cryptography.SHA256]::Create()
-    try { return ([BitConverter]::ToString($sha.ComputeHash($Bytes))).Replace('-', '') }
-    finally { $sha.Dispose() }
-}
+. (Join-Path $PSScriptRoot 'immudb-receipt-helpers.ps1')
 
 function Write-ReceiptExport([string] $Path, [byte[]] $Bytes) {
     $parent = Split-Path -Parent $Path
@@ -90,7 +58,7 @@ $package = [ordered]@{
     firstTxId = [long]$receipts[0].txId
     lastTxId = [long]$receipts[-1].txId
     receiptCount = $receipts.Count
-    anchorSha256 = (Get-ReceiptFileSha256 $rawAnchor)
+    anchorSha256 = (Get-ReceiptExportFileSha256 $rawAnchor)
     receipts = $receipts
 } | ConvertTo-Json -Compress -Depth 8
 $bytes = [Text.UTF8Encoding]::new($false).GetBytes($package)

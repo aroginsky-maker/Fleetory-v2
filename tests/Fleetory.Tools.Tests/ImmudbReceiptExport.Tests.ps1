@@ -34,8 +34,12 @@ try {
     New-Item -ItemType Directory -Path (Split-Path -Parent $export) -Force | Out-Null
     $first = New-TestReceipt 1 ''
     $second = New-TestReceipt 2 $first.receiptSha256
-    @($first, $second) | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 4 } |
-        Set-Content -LiteralPath $anchor -Encoding utf8NoBOM
+    $anchorLines = @($first, $second) | ForEach-Object {
+        $_ | ConvertTo-Json -Compress -Depth 4
+    }
+    [IO.File]::WriteAllText($anchor,
+        ($anchorLines -join [Environment]::NewLine) + [Environment]::NewLine,
+        [Text.UTF8Encoding]::new($false))
 
     $accepted = Invoke-ReceiptExport
     if ($accepted.status -ne 'accepted' -or $accepted.receiptCount -ne 2) {
@@ -49,8 +53,12 @@ try {
         [Convert]::ToBase64String([byte[]](3..34)))
     [IO.File]::WriteAllText($anchor, $tampered, [Text.UTF8Encoding]::new($false))
     $newExport = Join-Path $work 'worm/tampered.json'
-    & pwsh -NoProfile -File $exportScript -AnchorPath $anchor -ExportPath $newExport *> $null
-    if ($LASTEXITCODE -eq 0) { throw 'Tampered receipt anchor was exported.' }
+    $tamperFailed = $false
+    try { & $exportScript -AnchorPath $anchor -ExportPath $newExport *> $null }
+    catch { $tamperFailed = $true }
+    if (-not $tamperFailed -and $LASTEXITCODE -eq 0) {
+        throw 'Tampered receipt anchor was exported.'
+    }
     $global:LASTEXITCODE = 0
     Write-Host 'IMMUDB RECEIPT EXPORT TESTS PASS: chain validation, atomic export and idempotence.'
 }
