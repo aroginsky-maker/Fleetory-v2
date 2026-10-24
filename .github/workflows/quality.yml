@@ -107,6 +107,10 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/ImmudbRestoreAcceptance.Tests.ps1
 
+      - name: Verify immudb receipt export package
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ImmudbReceiptExport.Tests.ps1
+
       - name: Run Fleetory quality verification
         shell: pwsh
         run: |
