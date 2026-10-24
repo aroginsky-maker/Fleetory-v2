@@ -94,6 +94,35 @@ public sealed class ImmudbAuditExportSinkTests
         Assert.Equal(0, handler.WriteAttempts);
     }
 
+    [Fact]
+    public async Task Refuses_malformed_authentication_response_without_leaking_credentials()
+    {
+        using var handler = new ImmudbHandler { MalformedLoginResponse = true };
+        using var sink = new ImmudbAuditExportSink(new Uri("https://audit.example/"),
+            "audit-writer", "private-password", handler: handler);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await sink.PublishAsync(NewEvent(Guid.NewGuid(), "Core.Device.Read", DateTimeOffset.UtcNow)));
+
+        Assert.Contains("response is invalid", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("private-password", exception.ToString(), StringComparison.Ordinal);
+        Assert.Equal(0, handler.WriteAttempts);
+    }
+
+    [Fact]
+    public async Task Refuses_oversized_readback_response_after_the_write()
+    {
+        using var handler = new ImmudbHandler { OversizedReadResponse = true };
+        using var sink = new ImmudbAuditExportSink(new Uri("https://audit.example/"),
+            "audit-writer", "private-password", handler: handler);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await sink.PublishAsync(NewEvent(Guid.NewGuid(), "Core.Device.Read", DateTimeOffset.UtcNow)));
+
+        Assert.Contains("response is too large", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(1, handler.CommittedWrites);
+    }
+
     [Theory]
     [InlineData("http://audit.example/")]
     [InlineData("http://127.0.0.1:8090/other")]
@@ -141,7 +170,9 @@ public sealed class ImmudbAuditExportSinkTests
     {
         private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);
         public bool LoginForbidden { get; set; }
+        public bool MalformedLoginResponse { get; set; }
         public bool DatabaseSelectionForbidden { get; set; }
+        public bool OversizedReadResponse { get; set; }
         public string ExpectedDatabase { get; set; } = "defaultdb";
         public int WriteResponseFailuresRemaining { get; set; }
         public string StoredRevision { get; set; } = "1";
@@ -158,6 +189,11 @@ public sealed class ImmudbAuditExportSinkTests
                 if (LoginForbidden)
                 {
                     return Json(HttpStatusCode.Unauthorized, "{\"error\":\"bad credentials\"}");
+                }
+
+                if (MalformedLoginResponse)
+                {
+                    return Json(HttpStatusCode.OK, "not-json");
                 }
 
                 using var login = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
@@ -205,6 +241,10 @@ public sealed class ImmudbAuditExportSinkTests
 
             var encoded = request.RequestUri.AbsolutePath["/api/db/get/".Length..];
             var storedKey = Uri.UnescapeDataString(encoded);
+            if (OversizedReadResponse)
+            {
+                return Json(HttpStatusCode.OK, new string('x', (16 * 1024) + 1));
+            }
             return _values.TryGetValue(storedKey, out var storedValue)
                 ? Json(HttpStatusCode.OK, JsonSerializer.Serialize(new
                 {
