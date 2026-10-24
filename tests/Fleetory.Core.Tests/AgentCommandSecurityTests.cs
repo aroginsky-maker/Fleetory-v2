@@ -131,6 +131,28 @@ public sealed class AgentCommandSecurityTests
     }
 
     [Fact]
+    public void Local_policy_classifies_high_risk_and_bulk_commands_as_two_person_only()
+    {
+        var policy = new AgentCommandExecutionPolicy(Device);
+
+        var low = policy.Evaluate(Device, AgentCommandTypes.InventoryRefresh,
+            ReadOnlyMemory<byte>.Empty);
+        Assert.True(low.Allowed);
+        Assert.Equal(CommandRiskLevel.Low, low.Risk);
+        Assert.Equal(CommandApprovalRequirement.None, low.Approval);
+
+        var high = policy.Evaluate(Device, "Shell.Execute", ReadOnlyMemory<byte>.Empty);
+        Assert.False(high.Allowed);
+        Assert.Equal(CommandRiskLevel.High, high.Risk);
+        Assert.Equal(CommandApprovalRequirement.TwoPerson, high.Approval);
+
+        var bulk = policy.Evaluate(Device, "Fleet.Bulk.Reboot", ReadOnlyMemory<byte>.Empty);
+        Assert.False(bulk.Allowed);
+        Assert.Equal(CommandRiskLevel.Bulk, bulk.Risk);
+        Assert.Equal(CommandApprovalRequirement.TwoPerson, bulk.Approval);
+    }
+
+    [Fact]
     public async Task Trust_directory_scopes_keys_to_device_and_reflects_revocation()
     {
         var directory = CreateTemporaryDirectory();

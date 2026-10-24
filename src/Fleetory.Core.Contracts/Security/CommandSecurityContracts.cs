@@ -1,5 +1,23 @@
 namespace Fleetory.Core.Contracts;
 
+public enum CommandRiskLevel
+{
+    Low,
+    High,
+    Bulk
+}
+
+public enum CommandApprovalRequirement
+{
+    None,
+    TwoPerson
+}
+
+public sealed record CommandPolicyDecision(
+    bool Allowed,
+    CommandRiskLevel Risk,
+    CommandApprovalRequirement Approval);
+
 /// <summary>Supplies a trusted, target-specific P-256 public key. Private signing keys stay outside Fleetory Server.</summary>
 public interface ICommandVerificationKeys
 {

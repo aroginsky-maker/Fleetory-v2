@@ -188,6 +188,8 @@ Both Admin endpoints use the Admin mTLS listener and the mandatory OIDC/WebAuthn
 
 The standalone signed-artifact verifier checks the exact manifest bytes, P-256 IEEE P1363 signature, artifact SHA-256 and protected anti-rollback anchor before installation. Repeated acceptance is idempotent; lower versions, same-version conflicts, changed artifacts and invalid signatures fail closed. The verifier is outside the normal request path; release key custody, approval and installer integration remain deployment controls.
 
+The Agent command policy now exposes a risk decision before dispatch. The only enabled command, an argument-free `Inventory.Refresh`, is low risk and needs no approval. Unsupported commands are classified as high risk, and command types prefixed with `Fleet.Bulk.` are classified as bulk; both require `TwoPerson` approval and remain denied by the local policy. No command transport or approval endpoint is enabled by this slice.
+
 ## Scope hierarchy change preflight
 
 The read-only [scope reparenting preflight](ScopeReparenting.md) reports both candidate ancestor grants and actual actor/permission/descendant access changes when a subtree changes parent and rejects missing scopes, missing parents, existing hierarchy cycles and no-op moves. Its PostgreSQL test verifies the output and confirms the hierarchy is unchanged. After independent impact review, [reparent-scope.sql](../../eng/reparent-scope.sql) applies the change only with a distinct operator and approver reference, an incident ID and an expected revision; its update, version snapshot and audit/outbox entry commit together. No parent mutation route is exposed over HTTP.
