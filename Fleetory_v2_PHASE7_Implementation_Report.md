@@ -61,7 +61,7 @@
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
 | Local tests after independent receipt-export verification | 204/204 passed |
-| Local production coverage after independent receipt-export verification | 93.61% |
+| Local production coverage after independent receipt-export verification | 93.63% |
 | Local scope reparenting mutation and preflight tests | 2/2 passed |
 | Local SonarQube Community Build at `ad4271b` | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0% |
 | Local SonarQube Community Build after Windows Agent ACL hardening | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0%; 0 bugs, vulnerabilities, code smells and hotspots |
