@@ -13,6 +13,7 @@
 - Assignment revocation refuses to remove the last global `platform.authorization.manage` grant. The refusal is audited in the same transaction and returns HTTP 409; no access is lost.
 - Roles and scopes can be retired through audited Admin routes only after their assignments or child scopes are removed. In-use objects return 409; the database also rejects direct cascading deletion of an assigned role.
 - PostgreSQL audit event and outbox transaction, lease-based background export and retry. The immudb sink uses conditional EventId writes, readback and revision checks. Non-Development Agent/Admin gateways now refuse startup unless export is enabled with the supported sink; a later sink outage leaves events in the durable local outbox. The lab provisions a dedicated `defaultdb` read/write account and supplies its password through OpenBao; the administrator credential remains outside Fleetory.
+- The immudb REST sink explicitly selects `defaultdb` after login and uses the returned database-scoped token before conditional writes or readback. The Docker audit pipeline and a focused unit test cover the selection path and fail-closed selection errors.
 - File and OpenBao secret providers; Agent-local ECDSA command verification, deny-by-default policy, durable SQLite replay store and per-device public-key trust files. A new execution gate creates the verifier with these concrete dependencies and invokes only the inventory-refresh handler after acceptance. Cryptographic and SQLite tests cover invalid commands, replay after restart and handler failure. No Agent command execution endpoint is exposed.
 - Agent trust and replay storage now check protected Windows directory ACLs, trusted owners and allowed access principals. File ACLs and changed directory permissions are checked before use; unsafe access fails closed. The lab and test fixtures share one Windows ACL provisioner.
 - The Admin mTLS listener now checks an emergency PostgreSQL denylist for the exact client certificate SHA-256 on every request. A controlled operator SQL statement commits the revocation and its audit/outbox entry together; a real mTLS/PostgreSQL test verifies the old certificate is refused and a replacement with the same Admin identity remains usable. The issuance, approval, CA-side revocation and recovery procedures remain open.
@@ -52,12 +53,12 @@
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local tests after audited scope reparenting procedure | 198/198 passed |
-| Local production coverage after audited scope reparenting procedure | 93.63% |
+| Local tests after audited scope reparenting procedure | 199/199 passed |
+| Local production coverage after audited scope reparenting procedure | 93.64% |
 | Local scope reparenting mutation and preflight tests | 2/2 passed |
 | Local SonarQube Community Build at `ad4271b` | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0% |
 | Local SonarQube Community Build after Windows Agent ACL hardening | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0%; 0 bugs, vulnerabilities, code smells and hotspots |
-| Current CI production coverage, `d2275a4` / run `40031520169` | 93.47% |
+| Current CI production coverage, `0a935bb` / run `40085586220` | 93.48% |
 | Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
 | Local immudb restore acceptance | Read-only token separation, known EventId revision/hash and fail-closed validation passed |
 | Local full audit pipeline | PostgreSQL outbox → Fleetory worker → immudb readback with dedicated account passed |
@@ -67,13 +68,13 @@
 | Local WebAuthn/OIDC with real Admin mTLS | 401 without token; 403 with WebAuthn token at RBAC |
 | Windows server TLS chain in CI with provisioned OS CA stores | 2 certificates sent; root-only OpenSSL verification code 0 |
 | Linux container server TLS chain | 2 certificates sent; root-only OpenSSL verification code 0 |
-| Current Sonar PR coverage, `d2275a4` | 90.3% |
-| Sonar new-code coverage at `d2275a4` | 90.59069524307371% |
-| Current Sonar overall duplication, `d2275a4` | 0.0% |
-| Sonar new-code duplication at `d2275a4` | 0.0% |
-| Sonar Quality Gate at `d2275a4` | PASS |
+| Current Sonar PR coverage, `0a935bb` | 90.4% |
+| Sonar new-code coverage at `0a935bb` | 90.625% |
+| Current Sonar overall duplication, `0a935bb` | 0.0% |
+| Sonar new-code duplication at `0a935bb` | 0.0% |
+| Sonar Quality Gate at `0a935bb` | PASS |
 
-The current completed CI is [run 40031520169](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/40031520169) for `d2275a4`: both Windows and Linux jobs and SonarCloud passed, production coverage was 93.47%, overall Sonar coverage 90.3%, new-code coverage 90.59069524307371%, and both overall and new-code duplication were 0.0%. The PR remains draft while the remaining production controls are open.
+The current completed CI is [run 40085586220](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/40085586220) for `0a935bb`: both Windows and Linux jobs and SonarCloud passed, production coverage was 93.48%, overall Sonar coverage 90.4%, new-code coverage 90.625%, and both overall and new-code duplication were 0.0%. The PR remains draft while the remaining production controls are open.
 
 The last completed CI at `14d2a65` is [run 39659108678](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39659108678); both jobs and the SonarCloud Quality Gate passed. Actions resumed without changing the owner's $0 budget. SonarCloud previously found 18 duplicated lines in each of the two PowerShell provisioning tests; their shared helper reduced overall and new-code duplication to 0.0%. The Windows job ran the Core security tests with the actual ACL checks. Local SonarQube Community Build scans of `ad4271b` and the subsequent Windows Agent ACL changes each passed their own Quality Gate with 90.7% overall coverage and 0.0% overall duplication. The latter also reported zero bugs, vulnerabilities, code smells and security hotspots. These local scans cannot substitute for a current SonarCloud PR analysis because the server, rules and new-code baseline differ. A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The pipeline passed again on 19 October using the new dedicated immudb account. The PowerShell provisioning test runs in CI and remains under Sonar static analysis; it is excluded from the .NET coverage denominator because `dotnet-coverage` cannot instrument PowerShell. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
 
