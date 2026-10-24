@@ -48,6 +48,7 @@ function Invoke-ArtifactVerifier {
 function Assert-VerifierFails([string] $Message) {
     & pwsh -NoProfile -File $source -ArtifactPath $artifactPath -ManifestPath $manifestPath -SignaturePath $signaturePath -PublicKeyPath $publicKeyPath -AnchorPath $anchorPath -ExpectedArtifactId 'fleetory.server' *> $null
     if ($LASTEXITCODE -eq 0) { throw $Message }
+    $global:LASTEXITCODE = 0
 }
 
 try {
