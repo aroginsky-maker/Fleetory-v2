@@ -7,7 +7,8 @@ $source = Join-Path $repoRoot 'eng/verify-immudb-restore.ps1'
 . (Join-Path $PSScriptRoot 'TestProvisionerHelpers.ps1') -Source $source `
     -Names @(
         'ConvertTo-ImmudbRestoreEventKey', 'ConvertFrom-ImmudbRestoreBase64Strict',
-        'Get-ImmudbRestoreDatabaseToken', 'Get-ImmudbAuditReadback',
+        'Invoke-ImmudbRestoreGetJson', 'Get-ImmudbRestoreDatabaseToken',
+        'Get-ImmudbAuditReadback',
         'Test-ImmudbRestoredEvent', 'Invoke-ImmudbRestoreAcceptance')
 . (Join-Path $PSScriptRoot 'TestProvisionerHelpers.ps1') `
     -Source (Join-Path $repoRoot 'eng/verify-immudb-state.ps1') `
