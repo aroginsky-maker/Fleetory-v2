@@ -22,14 +22,15 @@ Keep backup files and receipt anchors outside the Fleetory host. The backup dest
 5. Run the acceptance verifier from a protected operator host:
 
 ```powershell
+$env:FLEETORY_IMMUDB_RESTORE_READ_TOKEN = '<short-lived-token>'
 ./eng/verify-immudb-restore.ps1 `
   -Address https://restored-immudb.example/ `
   -PublicKeyPath C:\ProgramData\Fleetory\immudb-state-public.pem `
   -AnchorPath C:\ProgramData\Fleetory\audit-state\restore-receipts.ndjson `
   -KnownEventId 00000000-0000-0000-0000-000000000001 `
   -ExpectedValueSha256 0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF `
-  -ExpectedRevision 1 `
-  -ReadOnlyBearerToken $env:FLEETORY_IMMUDB_RESTORE_READ_TOKEN
+  -ExpectedRevision 1
+Remove-Item Env:FLEETORY_IMMUDB_RESTORE_READ_TOKEN
 ```
 
 The expected value hash is calculated from the decoded `value` returned by immudb for the selected `fleetory/audit/v1/{EventId:N}` key. Store that hash in the approved change record before the restore check. The script refuses HTTP, redirects, a wrong key, a wrong revision, a changed value, an invalid signed state, a rollback or a fork. It appends a local receipt only as a verification trace; copy that receipt to the independent WORM/SIEM destination before destroying the disposable instance.

@@ -6,7 +6,7 @@ param(
     [Parameter(Mandatory)][string] $PublicKeyPath,
     [Parameter(Mandatory)][string] $AnchorPath,
     [string] $ExpectedDatabase = 'defaultdb',
-    [string] $BearerToken
+    [string] $BearerToken = $env:FLEETORY_IMMUDB_STATE_BEARER_TOKEN
 )
 
 $ErrorActionPreference = 'Stop'

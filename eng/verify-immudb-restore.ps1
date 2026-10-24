@@ -10,11 +10,14 @@ param(
     [Parameter(Mandatory)][ValidatePattern('^[0-9A-Fa-f]{64}$')][string] $ExpectedValueSha256,
     [string] $ExpectedDatabase = 'defaultdb',
     [long] $ExpectedRevision = 1,
-    [Parameter(Mandatory)][string] $ReadOnlyBearerToken
+    [string] $ReadOnlyBearerToken = $env:FLEETORY_IMMUDB_RESTORE_READ_TOKEN
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+if ([string]::IsNullOrWhiteSpace($ReadOnlyBearerToken)) {
+    throw 'The read-only immudb bearer token must be supplied through FLEETORY_IMMUDB_RESTORE_READ_TOKEN or the parameter.'
+}
 
 # Import the signed-state verifier without running its entry point.
 . (Join-Path $PSScriptRoot 'verify-immudb-state.ps1') `

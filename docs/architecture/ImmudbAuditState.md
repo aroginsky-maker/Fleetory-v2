@@ -23,10 +23,12 @@ A local file is only a tamper-evident operational receipt. Production must send 
 Run the verifier from a protected scheduler or operator host:
 
 ```powershell
+$env:FLEETORY_IMMUDB_STATE_BEARER_TOKEN = '<short-lived-token>'
 ./eng/verify-immudb-state.ps1 `
   -Address https://immudb-audit.example/ `
   -PublicKeyPath C:\ProgramData\Fleetory\immudb-state-public.pem `
   -AnchorPath C:\ProgramData\Fleetory\audit-state\receipts.ndjson
+Remove-Item Env:FLEETORY_IMMUDB_STATE_BEARER_TOKEN
 ```
 
 Keep the public key outside Git and rotate it through a dual-approved procedure. During a key rollover, verify both old and new keys against the approved overlap window, then archive the prior fingerprint in the external anchor. A key change without an approved receipt is an incident, not a successful rotation.
