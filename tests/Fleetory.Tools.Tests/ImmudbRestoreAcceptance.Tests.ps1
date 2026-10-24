@@ -7,7 +7,7 @@ $source = Join-Path $repoRoot 'eng/verify-immudb-restore.ps1'
 . (Join-Path $PSScriptRoot 'TestProvisionerHelpers.ps1') -Source $source `
     -Names @(
         'ConvertTo-ImmudbRestoreEventKey', 'ConvertFrom-ImmudbRestoreBase64Strict',
-        'Get-ImmudbAuditReadback',
+        'Get-ImmudbRestoreDatabaseToken', 'Get-ImmudbAuditReadback',
         'Test-ImmudbRestoredEvent', 'Invoke-ImmudbRestoreAcceptance')
 . (Join-Path $PSScriptRoot 'TestProvisionerHelpers.ps1') `
     -Source (Join-Path $repoRoot 'eng/verify-immudb-state.ps1') `
@@ -33,6 +33,7 @@ try {
     [IO.File]::WriteAllText($keyPath, 'unused in mocked acceptance')
     $realReadback = (Get-Command Get-ImmudbAuditReadback -CommandType Function).ScriptBlock
     $script:seenToken = $null
+    $script:seenDatabase = $null
     $script:seenStateArgs = $null
     function Invoke-ImmudbStateVerification(
         [uri] $Origin,
@@ -44,6 +45,14 @@ try {
             $AnchorPath, $ExpectedDatabase)
         $script:seenToken = $Token
         return [pscustomobject]@{ txId = 77 }
+    }
+    function Get-ImmudbRestoreDatabaseToken(
+        [uri] $Origin, [string] $Token, [string] $Database) {
+        $script:seenDatabase = $Database
+        if ($Token -ne 'read-only-restore-token') {
+            throw 'The test received an unexpected source token.'
+        }
+        return 'selected-restore-token'
     }
     function Get-ImmudbAuditReadback([uri] $Origin, [string] $Token, [string] $Key) {
         $script:seenToken = $Token
@@ -62,9 +71,10 @@ try {
         $result.revision -ne 1 -or $result.valueSha256 -ne $valueHash) {
         throw 'Restore acceptance result normalization failed.'
     }
-    if ($script:seenToken -ne 'read-only-restore-token' -or
+    if ($script:seenToken -ne 'selected-restore-token' -or
+        $script:seenDatabase -cne 'defaultdb' -or
         $script:seenStateArgs[3] -cne 'defaultdb') {
-        throw 'Restore acceptance did not use the read-only token and database.'
+        throw 'Restore acceptance did not select and use the database-scoped token.'
     }
 
     $wrongRevision = [pscustomobject]@{

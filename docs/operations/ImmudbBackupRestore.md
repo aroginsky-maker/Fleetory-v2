@@ -18,7 +18,7 @@ Keep backup files and receipt anchors outside the Fleetory host. The backup dest
 1. Record the current immudb database name, latest signed state (`txId`, `txHash` and public-key fingerprint), the retention policy and the audit `EventId` selected for acceptance.
 2. With the separate immudb administrator identity, create a full backup or PITR-consistent backup according to the installed immudb version. Write it to the immutable off-host destination. Do not pass the Fleetory writer credential to `immuadmin`.
 3. Restore the backup into a disposable immudb instance isolated from production. Provision its TLS certificate and the approved public signing key. Do not attach the disposable instance to the production audit writer path.
-4. Create a short-lived read-only bearer token for the disposable instance. Grant only the database read permission needed for `GET /api/db/state` and `GET /api/db/get/{key}`.
+4. Create a short-lived read-only bearer token for the disposable instance. Grant only the database read permission needed for `GET /api/db/state`, `GET /api/db/use/{database}` and `GET /api/db/get/{key}`. The verifier selects the expected database and uses the returned database-scoped token for the acceptance readback.
 5. Run the acceptance verifier from a protected operator host:
 
 ```powershell

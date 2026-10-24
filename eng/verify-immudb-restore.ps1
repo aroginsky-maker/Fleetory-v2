@@ -38,6 +38,53 @@ function ConvertFrom-ImmudbRestoreBase64Strict([string] $Value, [string] $Name) 
     return $bytes
 }
 
+function Get-ImmudbRestoreDatabaseToken([uri] $Origin, [string] $Token, [string] $Database) {
+    if ($Origin.Scheme -ne 'https') {
+        throw 'immudb restore acceptance requires HTTPS.'
+    }
+    if ([string]::IsNullOrWhiteSpace($Token)) {
+        throw 'The read-only immudb bearer token is missing.'
+    }
+    if ([string]::IsNullOrWhiteSpace($Database) -or $Database.Length -gt 128 -or
+        $Database.IndexOfAny([char[]]@('/', '\\', ':')) -ge 0 -or
+        $Database -match '\s') {
+        throw 'The expected immudb database name is invalid.'
+    }
+    $handler = [Net.Http.HttpClientHandler]::new()
+    $handler.AllowAutoRedirect = $false
+    $client = [Net.Http.HttpClient]::new($handler)
+    $client.Timeout = [TimeSpan]::FromSeconds(20)
+    try {
+        $uri = [uri]::new($Origin, 'api/db/use/' + [uri]::EscapeDataString($Database))
+        $request = [Net.Http.HttpRequestMessage]::new([Net.Http.HttpMethod]::Get, $uri)
+        $request.Headers.Authorization = [Net.Http.Headers.AuthenticationHeaderValue]::new(
+            'Bearer', $Token)
+        try {
+            $response = $client.SendAsync($request,
+                [Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
+            if ([int]$response.StatusCode -ge 300 -and [int]$response.StatusCode -lt 400) {
+                throw 'The immudb database-selection endpoint returned a redirect.'
+            }
+            if (-not $response.IsSuccessStatusCode) {
+                throw 'The read-only immudb token could not select the expected database.'
+            }
+            $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult() |
+                ConvertFrom-Json
+            $selectedToken = [string]$body.token
+            if ([string]::IsNullOrWhiteSpace($selectedToken) -or
+                $selectedToken.Length -gt 8192 -or $selectedToken -match '\s') {
+                throw 'The immudb database-selection response is invalid.'
+            }
+            return $selectedToken
+        }
+        finally { $request.Dispose() }
+    }
+    finally {
+        $client.Dispose()
+        $handler.Dispose()
+    }
+}
+
 function Get-ImmudbAuditReadback([uri] $Origin, [string] $Token, [string] $Key) {
     if ($Origin.Scheme -ne 'https') {
         throw 'immudb restore acceptance requires HTTPS.'
@@ -118,10 +165,11 @@ function Invoke-ImmudbRestoreAcceptance(
     [long] $ExpectedRevision,
     [string] $ExpectedValueSha256,
     [string] $ReadOnlyToken) {
+    $databaseToken = Get-ImmudbRestoreDatabaseToken $Origin $ReadOnlyToken $ExpectedDatabase
     $receipt = Invoke-ImmudbStateVerification $Origin $PublicKeyPath $AnchorPath `
-        $ExpectedDatabase $ReadOnlyToken
+        $ExpectedDatabase $databaseToken
     $key = ConvertTo-ImmudbRestoreEventKey $EventId
-    $response = Get-ImmudbAuditReadback $Origin $ReadOnlyToken $key
+    $response = Get-ImmudbAuditReadback $Origin $databaseToken $key
     $event = Test-ImmudbRestoredEvent $response $EventId $ExpectedRevision `
         $ExpectedValueSha256
     return [ordered]@{
