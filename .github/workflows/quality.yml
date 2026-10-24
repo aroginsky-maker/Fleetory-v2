@@ -91,6 +91,10 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/WindowsPkiProvisioning.Tests.ps1
 
+      - name: Verify signed artifact anti-rollback
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/SignedArtifactVerification.Tests.ps1
+
       - name: Verify command trust reconciliation
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/CommandTrustReconciliation.Tests.ps1

@@ -184,6 +184,10 @@ A different Admin identity needs global `core.agent_certificate.recover.approve`
 
 Both Admin endpoints use the Admin mTLS listener and the mandatory OIDC/WebAuthn gate outside Development. The test suite checks separate actors and permissions, evidence mismatch, expiry and replay, audit rollback, old-certificate revocation and the full mTLS route. If the approval response is lost, inspect the completion audit and database state by correlation ID; an approved token cannot be recovered. Wait for the five-minute grant to expire, then start a new two-person request. The local flow provides an enforceable two-person gate and an audit link to the incident evidence; production physical-device verification, evidence retention, CA issuance and secure token delivery still require a deployment procedure.
 
+## Signed artifact verification
+
+The standalone signed-artifact verifier checks the exact manifest bytes, P-256 IEEE P1363 signature, artifact SHA-256 and protected anti-rollback anchor before installation. Repeated acceptance is idempotent; lower versions, same-version conflicts, changed artifacts and invalid signatures fail closed. The verifier is outside the normal request path; release key custody, approval and installer integration remain deployment controls.
+
 ## Scope hierarchy change preflight
 
 The read-only [scope reparenting preflight](ScopeReparenting.md) reports both candidate ancestor grants and actual actor/permission/descendant access changes when a subtree changes parent and rejects missing scopes, missing parents, existing hierarchy cycles and no-op moves. Its PostgreSQL test verifies the output and confirms the hierarchy is unchanged. After independent impact review, [reparent-scope.sql](../../eng/reparent-scope.sql) applies the change only with a distinct operator and approver reference, an incident ID and an expected revision; its update, version snapshot and audit/outbox entry commit together. No parent mutation route is exposed over HTTP.

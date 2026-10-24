@@ -21,6 +21,7 @@
 - Lab-only OpenBao Transit signing key with a separate sign-only token and DeviceId-bound public trust file. The Server token can read only its eight named KV secrets; a live check confirmed 403 for an unrelated KV path and Transit sign.
 - Separate `Fleetory.CommandSigning` component signs only empty, one-minute `Inventory.Refresh` commands, pins the Transit key version and verifies the returned signature against a trusted public key. The Server cannot reference that project. A repeatable live lab check passed Transit signing, Agent verification, durable replay rejection and 403 for the Server token. After an OpenBao development-mode restart, every DeviceId-bound trust version is compared with the current key ring; mismatches fail closed and an explicit lab-only reset archives all stale versions. An isolated test covers this regression in CI.
 - A repeatable lab-only Transit key rotation check provisions the next DeviceId-bound public key, verifies old/new overlap, archives the previous trust file and proves that Agent rejects fresh old-version signatures while accepting new-version signatures. It does not establish production trust distribution or signer isolation.
+- Signed artifact verification now checks the exact manifest bytes, P-256 signature, artifact SHA-256 and protected anti-rollback anchor before installation. Repeated acceptance is idempotent; lower versions, same-version conflicts, changed artifacts and invalid signatures fail closed. PowerShell tests cover first acceptance, forward versioning, rollback, tampering and invalid signatures.
 - Reproducible local browser S256 PKCE and virtual WebAuthn check: the signed token carries `amr=webauthn` and the certificate-bound subject; the Admin route returns 401 without it and 403 at RBAC with it.
 - Admin Gateway startup rejects wildcard bind addresses, keeping its listener on loopback or an explicitly selected management IP.
 - Windows CI provisions an ephemeral root and intermediate in the runner certificate stores, then confirms the actual Admin listener sends two certificates and passes root-only OpenSSL verification. Windows hosts require equivalent approved CA-store provisioning.
@@ -69,6 +70,7 @@
 | Local live certificate renewal | 4/4 new pairs validated; 4/4 previous pairs archived and matched backup; identity UUIDs retained; OpenBao TLS secrets matched |
 | Isolated certificate provisioning checks | Rotation archive, failed-copy rollback and mismatched-key rejection passed |
 | Windows host PKI preflight checks | Fingerprint pinning, CA policy, chain validation and private-key rejection passed on PowerShell 7 and Windows PowerShell 5.1 |
+| Signed artifact verification checks | Signature, artifact hash, idempotence, forward versioning, rollback, tampering and invalid-signature rejection passed |
 | Local WebAuthn/OIDC with real Admin mTLS | 401 without token; 403 with WebAuthn token at RBAC |
 | Windows server TLS chain in CI with provisioned OS CA stores | 2 certificates sent; root-only OpenSSL verification code 0 |
 | Linux container server TLS chain | 2 certificates sent; root-only OpenSSL verification code 0 |
