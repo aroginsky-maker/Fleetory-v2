@@ -73,10 +73,12 @@ try {
         } | ConvertTo-Json -Compress
         $auth = Invoke-RestMethod -Method Post -Uri 'http://127.0.0.1:8090/api/login' `
             -ContentType 'application/json' -Body $login
+        $selected = Invoke-RestMethod -Uri 'http://127.0.0.1:8090/api/db/use/defaultdb' `
+            -Headers @{ Authorization = "Bearer $($auth.token)" }
         $key = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(
             'fleetory/audit/v1/' + $eventId.Replace('-', '')))
         $entry = Invoke-RestMethod -Uri ('http://127.0.0.1:8090/api/db/get/' +
-            [Uri]::EscapeDataString($key)) -Headers @{ Authorization = "Bearer $($auth.token)" }
+            [Uri]::EscapeDataString($key)) -Headers @{ Authorization = "Bearer $($selected.token)" }
         $payload = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($entry.value)) |
             ConvertFrom-Json
         if ($payload.eventId -ne $eventId.Replace('-', '') -or

@@ -10,6 +10,7 @@ namespace Fleetory.Platform.Audit;
 public sealed class ImmudbAuditExportSink : IAuditExportSink, IDisposable
 {
     private const int MaximumResponseBytes = 16 * 1024;
+    private const string DatabaseName = "defaultdb";
     private readonly Uri _address;
     private readonly string _username;
     private readonly string _password;
@@ -108,6 +109,23 @@ public sealed class ImmudbAuditExportSink : IAuditExportSink, IDisposable
         }
 
         using var body = await ReadJsonAsync(response, cancellationToken);
+        var token = ReadToken(body);
+
+        using var selectRequest = NewAuthenticatedRequest(HttpMethod.Get,
+            "api/db/use/" + Uri.EscapeDataString(DatabaseName), token);
+        using var selectResponse = await _client.SendAsync(selectRequest,
+            HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        if (!selectResponse.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException("Immudb audit database selection failed.");
+        }
+
+        using var selected = await ReadJsonAsync(selectResponse, cancellationToken);
+        return ReadToken(selected);
+    }
+
+    private static string ReadToken(JsonDocument body)
+    {
         var token = body.RootElement.GetProperty("token").GetString();
         if (string.IsNullOrWhiteSpace(token) || token.Length > 8192 ||
             token.Any(char.IsWhiteSpace))

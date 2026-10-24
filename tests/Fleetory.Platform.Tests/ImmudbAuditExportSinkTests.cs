@@ -68,6 +68,21 @@ public sealed class ImmudbAuditExportSinkTests
         Assert.Equal(1, handler.CommittedWrites);
     }
 
+    [Fact]
+    public async Task Selects_the_configured_database_before_writing()
+    {
+        using var handler = new ImmudbHandler { DatabaseSelectionForbidden = true };
+        using var sink = new ImmudbAuditExportSink(new Uri("https://audit.example/"),
+            "audit-writer", "private-password", handler: handler);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await sink.PublishAsync(NewEvent(Guid.NewGuid(), "Core.Device.Read",
+                DateTimeOffset.UtcNow)));
+
+        Assert.Contains("database selection", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(0, handler.WriteAttempts);
+    }
+
     [Theory]
     [InlineData("http://audit.example/")]
     [InlineData("http://127.0.0.1:8090/other")]
@@ -104,6 +119,7 @@ public sealed class ImmudbAuditExportSinkTests
     {
         private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);
         public bool LoginForbidden { get; set; }
+        public bool DatabaseSelectionForbidden { get; set; }
         public int WriteResponseFailuresRemaining { get; set; }
         public string StoredRevision { get; set; } = "1";
         public int WriteAttempts { get; private set; }
@@ -128,8 +144,19 @@ public sealed class ImmudbAuditExportSinkTests
                 return Json(HttpStatusCode.OK, "{\"token\":\"test-token\"}");
             }
 
+            if (request.RequestUri.AbsolutePath == "/api/db/use/defaultdb")
+            {
+                Assert.Equal("Bearer", request.Headers.Authorization?.Scheme);
+                Assert.Equal("test-token", request.Headers.Authorization?.Parameter);
+                if (DatabaseSelectionForbidden)
+                {
+                    return Json(HttpStatusCode.Forbidden, "{}");
+                }
+                return Json(HttpStatusCode.OK, "{\"token\":\"selected-token\"}");
+            }
+
             Assert.Equal("Bearer", request.Headers.Authorization?.Scheme);
-            Assert.Equal("test-token", request.Headers.Authorization?.Parameter);
+            Assert.Equal("selected-token", request.Headers.Authorization?.Parameter);
             if (request.RequestUri.AbsolutePath == "/api/db/set")
             {
                 WriteAttempts++;
