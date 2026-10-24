@@ -21,6 +21,31 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  windows-tls-chain:
+    name: Windows root-only TLS chain
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Build Server
+        shell: pwsh
+        run: dotnet build src/Fleetory.Server/Fleetory.Server.csproj -c Release
+
+      - name: Verify Agent security on Windows
+        shell: pwsh
+        run: dotnet test tests/Fleetory.Core.Tests/Fleetory.Core.Tests.csproj -c Release --nologo --warnaserror
+
+      - name: Verify root-only Windows TLS chain
+        shell: pwsh
+        run: ./eng/verify-windows-tls-chain.ps1
+
   quality:
     name: Strict build, tests, coverage and Sonar
     runs-on: ubuntu-latest
@@ -57,6 +82,42 @@ jobs:
           dotnet --info
           java -version
           docker info --format '{{.ServerVersion}}'
+
+      - name: Verify lab certificate rotation and rollback
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/CertificateProvisioning.Tests.ps1
+
+      - name: Verify Windows gateway PKI policy
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/WindowsPkiProvisioning.Tests.ps1
+
+      - name: Verify signed artifact anti-rollback
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/SignedArtifactVerification.Tests.ps1
+
+      - name: Verify command trust reconciliation
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/CommandTrustReconciliation.Tests.ps1
+
+      - name: Verify immudb signed-state receipt anchor
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ImmudbStateVerification.Tests.ps1
+
+      - name: Verify immudb restore acceptance
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ImmudbRestoreAcceptance.Tests.ps1
+
+      - name: Verify immudb receipt export package
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ImmudbReceiptExport.Tests.ps1
+
+      - name: Verify immudb receipt export independently
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ImmudbReceiptExportVerification.Tests.ps1
+
+      - name: Verify PHASE 7 readiness record
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/Phase7Readiness.Tests.ps1
 
       - name: Run Fleetory quality verification
         shell: pwsh

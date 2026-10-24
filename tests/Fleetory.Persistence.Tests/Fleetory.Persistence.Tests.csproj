@@ -23,4 +23,24 @@
     <ProjectReference Include="../../src/Fleetory.Core.Contracts/Fleetory.Core.Contracts.csproj" />
     <ProjectReference Include="../../src/Fleetory.Server/Fleetory.Server.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="../../eng/bootstrap-first-admin.sql"
+          Link="bootstrap-first-admin.sql"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../eng/preview-scope-reparent.sql"
+          Link="preview-scope-reparent.sql"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../eng/recover-admin-access.sql"
+          Link="recover-admin-access.sql"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../eng/revoke-admin-certificate.sql"
+          Link="revoke-admin-certificate.sql"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../eng/register-admin-certificate.sql"
+          Link="register-admin-certificate.sql"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../eng/reparent-scope.sql"
+          Link="reparent-scope.sql"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

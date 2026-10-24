@@ -1,3 +1,4 @@
+using System.Data.Common;
 using Fleetory.SharedKernel;
 
 namespace Fleetory.Platform.Contracts;
@@ -18,5 +19,14 @@ public interface IAuditWriter
 {
     ValueTask WriteAsync(
         AuditRecord record,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Appends the event and export entry to the caller's active PostgreSQL transaction.
+    /// The caller owns the commit or rollback.
+    /// </summary>
+    ValueTask WriteInTransactionAsync(
+        AuditRecord record,
+        DbTransaction transaction,
         CancellationToken cancellationToken = default);
 }

@@ -2,7 +2,7 @@
 
 **Scope:** cross-cutting quality verification for every Fleetory phase.
 
-**Architecture status:** PHASE 6 is complete; the quality checks do not change module ownership or introduce PHASE 7 functionality.
+**Architecture status:** PHASE 6 is complete and PHASE 7 Security Foundation is in progress. These quality checks apply to every phase without changing module ownership.
 
 ## 1. What Sonar verifies
 
@@ -92,7 +92,7 @@ sonar.cs.vscoveragexml.reportsPaths=artifacts/coverage/coverage.xml
 
 Test projects remain part of Sonar analysis as test code. Production projects are not excluded from coverage to inflate percentages.
 
-The `eng/**` verification and packaging scripts remain in Sonar analysis, including duplication and issue checks. They are excluded only from Sonar's coverage denominator because `dotnet-coverage` instruments .NET assemblies and cannot measure PowerShell or shell execution. Their behavior is checked by the phase verification scripts and package smoke tests. No production `src/**` code is excluded from coverage.
+The `eng/**` verification and packaging scripts and `tests/Fleetory.Tools.Tests/**` PowerShell tests remain in Sonar analysis, including duplication and issue checks. They are excluded only from Sonar's coverage denominator because `dotnet-coverage` instruments .NET assemblies and cannot measure PowerShell or shell execution. Their behavior is checked by the phase verification scripts, package smoke tests and the dedicated CI step. No production `src/**` code is excluded from coverage.
 
 `eng/verify-quality.ps1` also calculates a local overall production line-coverage value from Fleetory production modules in `coverage.xml`. This local figure is diagnostic; the authoritative new-code coverage result remains the Sonar server Quality Gate result.
 
@@ -208,7 +208,7 @@ Do not:
 - weaken the Quality Gate;
 - ignore Security Hotspots.
 
-Small duplication across bounded contexts is preferable to introducing an incorrect shared abstraction only to satisfy duplication metrics.
+Review duplication reported by Sonar in the same increment and remove it when the repeated code has one responsibility. Keep bounded-context ownership and architecture tests intact; do not hide duplication with exclusions, suppressions or a weaker threshold.
 
 ## 12. Current code-hardening changes before external Sonar analysis
 

@@ -89,7 +89,7 @@ try {
         "/d:sonar.host.url=$SonarHostUrl",
         "/d:sonar.token=$SonarToken",
         "/d:sonar.cs.vscoveragexml.reportsPaths=$CoverageRelativePath",
-        '/d:sonar.coverage.exclusions=eng/**',
+        '/d:sonar.coverage.exclusions=eng/**,tests/Fleetory.Tools.Tests/**',
         '/d:sonar.qualitygate.wait=true',
         "/d:sonar.qualitygate.timeout=$SonarQualityGateTimeout",
         '/d:sonar.exclusions=**/bin/**,**/obj/**,artifacts/**,.sonarqube/**'

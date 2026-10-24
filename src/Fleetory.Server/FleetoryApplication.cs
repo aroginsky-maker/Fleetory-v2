@@ -1,13 +1,25 @@
 using Fleetory.Assets;
 using Fleetory.CMDB;
 using Fleetory.Core;
+using Fleetory.Core.Contracts;
+using Fleetory.Core.Security;
+using Microsoft.AspNetCore.Authentication;
 using Fleetory.Integrations;
 using Fleetory.ITSM;
 using Fleetory.ModuleAbstractions;
 using Fleetory.Monitoring;
 using Fleetory.Platform;
+using Fleetory.Platform.Authorization;
+using Fleetory.Platform.Contracts.Secrets;
+using Fleetory.Platform.Contracts;
+using Fleetory.Platform.Persistence;
+using Fleetory.Platform.Secrets;
+using Fleetory.SharedKernel;
 using Fleetory.Server.Infrastructure;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using System.Threading.RateLimiting;
+using System.Security.Cryptography;
+using Microsoft.AspNetCore.RateLimiting;
 
 namespace Fleetory.Server;
 
@@ -19,10 +31,43 @@ public static class FleetoryApplication
 
         builder.Configuration.AddEnvironmentVariables(prefix: "FLEETORY_");
 
+        var secrets = ConfigureSecrets(builder);
+        ValidatePrivilegedAuditExport(builder);
+        var gateway = GatewayStartup.Configure(builder, secrets);
+        var adminOidcEnabled = AdminOidcAuthentication.Configure(builder);
+        var requireAdminCertificateRegistration = gateway?.AdminPort is not null &&
+            (!builder.Environment.IsDevelopment() ||
+                builder.Configuration.GetValue<bool>(
+                    "Fleetory:AdminGateway:RequireCertificateRegistration"));
+
         builder.Logging.ClearProviders();
         builder.Logging.AddJsonConsole(options => options.IncludeScopes = true);
 
         builder.Services.AddHealthChecks();
+        var adminRateLimit = builder.Configuration.GetValue<int?>("Fleetory:AdminGateway:RateLimitPerMinute") ?? 30;
+        if (adminRateLimit is < 1 or > 300)
+        {
+            throw new InvalidOperationException("Fleetory:AdminGateway:RateLimitPerMinute must be between 1 and 300.");
+        }
+
+        var agentRotationRateLimit = GetAgentRateLimit(builder.Configuration,
+            "Fleetory:AgentGateway:RotationIntentRateLimitPerMinute");
+        var agentEnrollmentRateLimit = GetAgentRateLimit(builder.Configuration,
+            "Fleetory:AgentGateway:EnrollmentRateLimitPerMinute");
+
+        builder.Services.AddRateLimiter(options =>
+        {
+            options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+            AddCertificateRateLimit(options,
+                AdminSecurityPolicyNames.AdminRateLimit, adminRateLimit,
+                gateway?.AdminPort);
+            AddCertificateRateLimit(options,
+                AgentSecurityPolicyNames.RotationIntentRateLimit, agentRotationRateLimit,
+                gateway?.AgentPort);
+            AddCertificateRateLimit(options,
+                AgentSecurityPolicyNames.EnrollmentRateLimit, agentEnrollmentRateLimit,
+                gateway?.AgentPort);
+        });
 
         var modules = CreateModules();
         ValidateModules(modules);
@@ -36,7 +81,115 @@ public static class FleetoryApplication
 
         var app = builder.Build();
 
+        app.UseRouting();
+        app.UseRateLimiter();
         app.UseMiddleware<CorrelationIdMiddleware>();
+
+        if (gateway is not null)
+        {
+            app.Use(async (context, next) =>
+            {
+                if (context.Connection.LocalPort == gateway.AgentPort)
+                {
+                    if (context.Request.Path != "/agent/identity" &&
+                        context.Request.Path != "/agent/enroll" &&
+                        context.Request.Path != "/agent/rotation-intents")
+                    {
+                        context.Response.StatusCode = StatusCodes.Status404NotFound;
+                        return;
+                    }
+
+                    var certificate = await context.Connection.GetClientCertificateAsync(
+                        context.RequestAborted);
+                    if (certificate is null ||
+                        !AgentCertificateIdentity.TryReadDeviceId(certificate, out var deviceId))
+                    {
+                        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                        return;
+                    }
+
+                    if (context.Request.Path == "/agent/identity" ||
+                        context.Request.Path == "/agent/rotation-intents")
+                    {
+                        var verifier = context.RequestServices
+                            .GetRequiredService<IAgentCertificateBindingVerifier>();
+                        var status = await verifier.VerifyAsync(
+                            deviceId, certificate, context.RequestAborted);
+                        if (status != AgentCertificateStatus.Accepted)
+                        {
+                            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                            return;
+                        }
+                    }
+                }
+                else if (context.Connection.LocalPort == gateway.AdminPort)
+                {
+                    var adminCertificate = await context.Connection.GetClientCertificateAsync(
+                        context.RequestAborted);
+                    if (!context.Request.Path.StartsWithSegments("/admin") || adminCertificate is null)
+                    {
+                        context.Response.StatusCode = StatusCodes.Status404NotFound;
+                        return;
+                    }
+
+                    if (!AdminCertificateIdentity.TryReadActor(adminCertificate, out var actor) ||
+                        actor is null)
+                    {
+                        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                        return;
+                    }
+
+                    var fingerprint = Convert.ToHexString(SHA256.HashData(adminCertificate.RawData));
+                    var certificateAccess = await context.RequestServices
+                        .GetRequiredService<IAdminCertificateAccessStore>()
+                        .CheckAsync(fingerprint, actor.SubjectId,
+                            requireAdminCertificateRegistration, context.RequestAborted);
+                    if (certificateAccess != AdminCertificateAccess.Accepted)
+                    {
+                        var action = certificateAccess == AdminCertificateAccess.Revoked
+                            ? "admin.certificate.revoked_denied"
+                            : "admin.certificate.unregistered_denied";
+                        await context.RequestServices.GetRequiredService<IAuditWriter>()
+                            .WriteAsync(new AuditRecord(actor, action,
+                                new AuditTarget("admin_certificate", fingerprint),
+                                new CorrelationId(context.TraceIdentifier),
+                                context.RequestServices.GetRequiredService<IClock>().UtcNow),
+                                context.RequestAborted);
+
+                        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                        return;
+                    }
+
+                    if (adminOidcEnabled)
+                    {
+                        var authentication = await context.AuthenticateAsync(AdminOidcAuthentication.Scheme);
+                        var clientId = context.RequestServices.GetRequiredService<IConfiguration>()
+                            ["Fleetory:AdminGateway:Oidc:ClientId"]!;
+                        if (!authentication.Succeeded ||
+                            !AdminOidcAuthentication.MatchesMfaActor(
+                                authentication.Principal!, actor.SubjectId, clientId))
+                        {
+                            await context.RequestServices.GetRequiredService<IAuditWriter>()
+                                .WriteAsync(new AuditRecord(
+                                    actor, "admin.oidc.denied", null,
+                                    new CorrelationId(context.TraceIdentifier),
+                                    context.RequestServices.GetRequiredService<IClock>().UtcNow),
+                                    context.RequestAborted);
+                            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                            return;
+                        }
+                    }
+                }
+                else if (context.Request.Path.StartsWithSegments("/agent") ||
+                    context.Request.Path.StartsWithSegments("/admin"))
+                {
+                    context.Response.StatusCode = StatusCodes.Status404NotFound;
+                    return;
+                }
+
+                await next(context);
+            });
+        }
 
         app.MapHealthChecks("/health/live", new HealthCheckOptions
         {
@@ -60,6 +213,96 @@ public static class FleetoryApplication
         return app;
     }
 
+    private static int GetAgentRateLimit(IConfiguration configuration, string setting)
+    {
+        var limit = configuration.GetValue<int?>(setting) ?? 30;
+        if (limit is < 1 or > 300)
+        {
+            throw new InvalidOperationException($"{setting} must be between 1 and 300.");
+        }
+
+        return limit;
+    }
+
+    private static void AddCertificateRateLimit(RateLimiterOptions options,
+        string policyName, int limit, int? listenerPort)
+    {
+        options.AddPolicy(policyName, context =>
+            context.Connection.LocalPort != listenerPort
+                ? RateLimitPartition.GetNoLimiter("wrong-listener")
+                : RateLimitPartition.GetFixedWindowLimiter(
+                    context.Connection.ClientCertificate?.Thumbprint ??
+                    context.Connection.RemoteIpAddress?.ToString() ?? "unknown-client",
+                    _ => new FixedWindowRateLimiterOptions
+                    {
+                        PermitLimit = limit,
+                        Window = TimeSpan.FromMinutes(1),
+                        QueueLimit = 0,
+                        AutoReplenishment = true
+                    }));
+    }
+
+    private static ISecretProvider? ConfigureSecrets(WebApplicationBuilder builder)
+    {
+        var providerName = builder.Configuration["Fleetory:Secrets:Provider"] ?? "File";
+        var directory = builder.Configuration["Fleetory:Secrets:Directory"];
+        var directConnectionString = builder.Configuration.GetConnectionString("Fleetory");
+
+        if (providerName == "OpenBao")
+        {
+            if (directory is not null || directConnectionString is not null)
+            {
+                throw new InvalidOperationException(
+                    "OpenBao secrets cannot be combined with a file secret directory or direct connection string.");
+            }
+
+            var tokenDirectory = builder.Configuration["Fleetory:Secrets:TokenDirectory"];
+            var addressValue = builder.Configuration["Fleetory:Secrets:Address"];
+            if (string.IsNullOrWhiteSpace(tokenDirectory) ||
+                !Uri.TryCreate(addressValue, UriKind.Absolute, out var address))
+            {
+                throw new InvalidOperationException("OpenBao requires TokenDirectory and Address.");
+            }
+
+            var token = new FileSecretProvider(tokenDirectory).GetRequiredSecret("openbao-token");
+            var openBao = new OpenBaoSecretProvider(address, token,
+                allowInsecureLoopback: builder.Environment.IsDevelopment());
+            var openBaoConnectionString = openBao.GetRequiredSecret(FleetorySecretNames.PostgreSqlConnectionString);
+            PostgreSqlConnectionStringValidator.Validate(openBaoConnectionString);
+            builder.Services.AddSingleton<ISecretProvider>(openBao);
+            return openBao;
+        }
+
+        if (providerName != "File")
+        {
+            throw new InvalidOperationException("Unknown Fleetory:Secrets:Provider.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(directory) && directConnectionString is not null)
+        {
+            throw new InvalidOperationException(
+                "Use either Fleetory:Secrets:Directory or ConnectionStrings:Fleetory, not both.");
+        }
+
+        if (string.IsNullOrWhiteSpace(directory))
+        {
+            if (!builder.Environment.IsDevelopment())
+            {
+                throw new InvalidOperationException(
+                    "Non-development environments require Fleetory:Secrets:Directory and reject direct connection strings.");
+            }
+
+            return null;
+        }
+
+        var provider = new FileSecretProvider(directory);
+        var connectionString = provider.GetRequiredSecret(FleetorySecretNames.PostgreSqlConnectionString);
+        PostgreSqlConnectionStringValidator.Validate(connectionString);
+
+        builder.Services.AddSingleton<ISecretProvider>(provider);
+        return provider;
+    }
+
     private static IFleetoryModule[] CreateModules() =>
     [
         new PlatformModule(),
@@ -70,6 +313,23 @@ public static class FleetoryApplication
         new MonitoringModule(),
         new IntegrationsModule()
     ];
+
+    private static void ValidatePrivilegedAuditExport(WebApplicationBuilder builder)
+    {
+        if (builder.Environment.IsDevelopment() ||
+            !(builder.Configuration.GetValue<bool>("Fleetory:AgentGateway:Enabled") ||
+              builder.Configuration.GetValue<bool>("Fleetory:AdminGateway:Enabled")))
+        {
+            return;
+        }
+
+        if (!builder.Configuration.GetValue<bool>("Fleetory:AuditExport:Enabled") ||
+            builder.Configuration["Fleetory:AuditExport:Sink"] != "Immudb")
+        {
+            throw new InvalidOperationException(
+                "Non-development Agent/Admin gateways require Fleetory:AuditExport:Enabled=true and Sink=Immudb.");
+        }
+    }
 
     private static void ValidateModules(IReadOnlyCollection<IFleetoryModule> modules)
     {
