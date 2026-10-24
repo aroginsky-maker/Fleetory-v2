@@ -111,6 +111,10 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/ImmudbReceiptExport.Tests.ps1
 
+      - name: Verify immudb receipt export independently
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ImmudbReceiptExportVerification.Tests.ps1
+
       - name: Run Fleetory quality verification
         shell: pwsh
         run: |

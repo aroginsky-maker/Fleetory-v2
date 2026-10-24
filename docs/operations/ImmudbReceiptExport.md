@@ -13,6 +13,19 @@ independently administered WORM/object-lock or SIEM destination and retain its
 object identifier with the restore record. The script never deletes the local
 anchor or contacts the external destination.
 
-The CI test covers chain validation, atomic first export, idempotence and tamper
-rejection. Production WORM retention, custody, legal hold and transfer evidence
-remain deployment controls.
+Before transfer, an independent operator can verify the package without access to
+the Fleetory writer credential or the immudb server:
+
+    ./eng/verify-immudb-receipt-export.ps1 `
+      -ExportPath C:\ProgramData\Fleetory\audit-state\outbox\receipts-export.json `
+      -AnchorPath C:\ProgramData\Fleetory\audit-state\receipts.ndjson `
+      -PublicKeyPath C:\ProgramData\Fleetory\trust\immudb-state-public.pem
+
+The verifier is read-only. It checks the export schema, receipt count and
+transaction range, re-validates the receipt chain, compares the exact source
+anchor SHA-256 when `-AnchorPath` is supplied, and verifies every receipt
+signature against the pinned P-256 public key when `-PublicKeyPath` is supplied.
+It emits a deterministic verification summary and never contacts the external
+destination. The CI tests cover valid and self-contained verification, wrong
+anchor/key, chain tampering and path rejection. Production WORM retention,
+custody, legal hold and transfer evidence remain deployment controls.

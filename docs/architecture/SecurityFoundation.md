@@ -192,7 +192,7 @@ The Agent command policy now exposes a risk decision before dispatch. The only e
 
 ## immudb receipt export package
 
-The `export-immudb-receipt-anchor.ps1` operation re-validates the signed receipt chain and writes a deterministic, atomic export package containing the database, transaction range, receipt count and source-anchor SHA-256. It never overwrites a different package or contacts the external destination; operators copy the package to the independently administered WORM/SIEM destination.
+The `export-immudb-receipt-anchor.ps1` operation re-validates the signed receipt chain and writes a deterministic, atomic export package containing the database, transaction range, receipt count and source-anchor SHA-256. The read-only `verify-immudb-receipt-export.ps1` operation independently checks that package, optionally compares the exact source-anchor bytes and verifies every receipt signature against the pinned P-256 public key before transfer. Neither operation contacts the external destination; operators copy the verified package to the independently administered WORM/SIEM destination.
 
 ## Scope hierarchy change preflight
 
