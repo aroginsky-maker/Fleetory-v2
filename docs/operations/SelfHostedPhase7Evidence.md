@@ -14,6 +14,11 @@ review evidence for the implemented behavior and is not production custody.
 - Backup/restore: an immudb hot backup covering transactions 1–33 was restored
   into an isolated replica database; the final database list reported 33
   transactions.
+- Disposable immudb TLS: a uniquely named container served HTTPS with a
+  generated localhost certificate; `curl --cacert` validated the certificate
+  and returned `/` with HTTP 200 and `/api/status` with HTTP 404 without
+  credentials. The container and temporary certificate directory were removed
+  after the check.
 - Readiness record: the verifier accepted distinct actors, UTC timestamps,
   control confirmations, CI/Sonar evidence, WORM reference and rollback plan;
   duplicate actors, invalid evidence hashes and failed gates were rejected.
