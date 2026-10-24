@@ -62,7 +62,7 @@
 | Local scope reparenting mutation and preflight tests | 2/2 passed |
 | Local SonarQube Community Build at `ad4271b` | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0% |
 | Local SonarQube Community Build after Windows Agent ACL hardening | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0%; 0 bugs, vulnerabilities, code smells and hotspots |
-| Current CI production coverage, `47d66b1` / run `40107992652` | 93.45% |
+| Current CI production coverage, `ea18a75` / run `40110838129` | 93.45% |
 | Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
 | Local immudb restore acceptance | Read-only token separation, known EventId revision/hash and fail-closed validation passed |
 | Local full audit pipeline | PostgreSQL outbox → Fleetory worker → immudb readback with dedicated account passed |
@@ -74,13 +74,13 @@
 | Local WebAuthn/OIDC with real Admin mTLS | 401 without token; 403 with WebAuthn token at RBAC |
 | Windows server TLS chain in CI with provisioned OS CA stores | 2 certificates sent; root-only OpenSSL verification code 0 |
 | Linux container server TLS chain | 2 certificates sent; root-only OpenSSL verification code 0 |
-| Current Sonar PR coverage, `47d66b1` | 90.4% |
-| Sonar new-code coverage at `47d66b1` | 90.64935064935065% |
-| Current Sonar overall duplication, `47d66b1` | 0.0% |
-| Sonar new-code duplication at `47d66b1` | 0.0% |
-| Sonar Quality Gate at `47d66b1` | PASS |
+| Current Sonar PR coverage, `ea18a75` | 90.4% |
+| Sonar new-code coverage at `ea18a75` | 90.64935064935065% |
+| Current Sonar overall duplication, `ea18a75` | 0.0% |
+| Sonar new-code duplication at `ea18a75` | 0.0% |
+| Sonar Quality Gate at `ea18a75` | PASS |
 
-The current completed CI is [run 40107992652](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/40107992652) for `47d66b1`: both Windows and Linux jobs and SonarCloud passed, production coverage was 93.45%, overall Sonar coverage 90.4%, new-code coverage 90.64935064935065%, and both overall and new-code duplication were 0.0%. The PR remains draft while the remaining production controls are open.
+The current completed CI is [run 40110838129](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/40110838129) for `ea18a75`: both Windows and Linux jobs and SonarCloud passed, production coverage was 93.45%, overall Sonar coverage 90.4%, new-code coverage 90.64935064935065%, and both overall and new-code duplication were 0.0%. The PR remains draft while the remaining production controls are open.
 
 The last completed CI at `14d2a65` is [run 39659108678](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39659108678); both jobs and the SonarCloud Quality Gate passed. Actions resumed without changing the owner's $0 budget. SonarCloud previously found 18 duplicated lines in each of the two PowerShell provisioning tests; their shared helper reduced overall and new-code duplication to 0.0%. The Windows job ran the Core security tests with the actual ACL checks. Local SonarQube Community Build scans of `ad4271b` and the subsequent Windows Agent ACL changes each passed their own Quality Gate with 90.7% overall coverage and 0.0% overall duplication. The latter also reported zero bugs, vulnerabilities, code smells and security hotspots. These local scans cannot substitute for a current SonarCloud PR analysis because the server, rules and new-code baseline differ. A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The pipeline passed again on 19 October using the new dedicated immudb account. The PowerShell provisioning test runs in CI and remains under Sonar static analysis; it is excluded from the .NET coverage denominator because `dotnet-coverage` cannot instrument PowerShell. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
 
