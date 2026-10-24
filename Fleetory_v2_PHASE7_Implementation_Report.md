@@ -26,6 +26,7 @@
 - immudb receipt export now re-validates the SHA-256 chain and writes a deterministic atomic package for WORM/SIEM transfer. Repeated exports are idempotent and tampered anchors fail closed; external retention and custody remain deployment controls.
 - The read-only `eng/verify-immudb-receipt-export.ps1` operation independently validates an export package's schema, receipt range, exact source-anchor hash and P-256 receipt signatures. It is covered on PowerShell 7 and Windows PowerShell 5.1 and rejects wrong anchors, keys, chain tampering and relative paths before WORM/SIEM transfer.
 - The production immudb TLS runbook defines root-only OpenSSL chain validation, credential-free HTTPS probing, admin-network isolation and an auditable CA rotation order; the local lab remains intentionally loopback HTTP and is not production evidence.
+- The production certificate lifecycle runbook defines CA issuance, private-key custody, physical-device verification, Agent/Admin rotation, lost-key recovery and rollback evidence; the repository validates the records' technical invariants while production custody remains external.
 - Reproducible local browser S256 PKCE and virtual WebAuthn check: the signed token carries `amr=webauthn` and the certificate-bound subject; the Admin route returns 401 without it and 403 at RBAC with it.
 - Admin Gateway startup rejects wildcard bind addresses, keeping its listener on loopback or an explicitly selected management IP.
 - Windows CI provisions an ephemeral root and intermediate in the runner certificate stores, then confirms the actual Admin listener sends two certificates and passes root-only OpenSSL verification. Windows hosts require equivalent approved CA-store provisioning.
@@ -82,6 +83,7 @@
 | immudb receipt export independent verification checks | Schema, exact anchor hash, receipt signatures, wrong key, chain tampering and path rejection passed on PowerShell 7 and Windows PowerShell 5.1 |
 | immudb transport negative tests | Malformed authentication JSON and oversized readback rejected without credential leakage |
 | immudb production TLS runbook | Root-only chain check, credential-free HTTPS probe, network isolation and rotation evidence documented |
+| Production certificate lifecycle runbook | Issuance, custody, physical-device verification, rotation, recovery and rollback evidence documented |
 | Local WebAuthn/OIDC with real Admin mTLS | 401 without token; 403 with WebAuthn token at RBAC |
 | Windows server TLS chain in CI with provisioned OS CA stores | 2 certificates sent; root-only OpenSSL verification code 0 |
 | Linux container server TLS chain | 2 certificates sent; root-only OpenSSL verification code 0 |

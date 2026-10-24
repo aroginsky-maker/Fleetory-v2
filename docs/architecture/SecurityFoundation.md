@@ -200,7 +200,7 @@ The read-only [scope reparenting preflight](ScopeReparenting.md) reports both ca
 
 ## Remaining PHASE 7 work
 
-- External Agent CA issuance and grant delivery, CA lifecycle, full rotation administration with physical device verification, Admin certificate lifecycle, and revocation propagation to future long-lived Agent streams.
+- External Agent CA issuance and grant delivery, CA lifecycle, full rotation administration with physical device verification, Admin certificate lifecycle, and revocation propagation to future long-lived Agent streams. The [production certificate lifecycle runbook](../operations/CertificateLifecycle.md) defines the required issuance, custody, rotation, recovery and rollback evidence.
 - A separately deployed protected signing service with authenticated requests, auditable approvals and secure trust-file distribution, plus integration of the execution gate into the future Agent host before any command transport is enabled. High-risk and bulk command types require an approval protocol before they can be enabled. The current isolated signer component supports only `Inventory.Refresh` and has no service endpoint or command dispatch.
 - Production approval records, impact-review retention and enforcement at future privileged routes. The first-admin bootstrap, controlled recovery, scope reparenting procedure and last-global-grant safeguard are tested; actual recovery depends on the deployment's approved incident procedure and replacement credential custody.
 - Maintain Windows host CA-store provisioning and root-only wire-chain regression checks alongside the existing Linux result; verify the production certificate-management procedure during deployment.
