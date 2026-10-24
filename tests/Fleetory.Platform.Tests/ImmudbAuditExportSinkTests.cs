@@ -71,13 +71,24 @@ public sealed class ImmudbAuditExportSinkTests
     [Fact]
     public async Task Selects_the_configured_database_before_writing()
     {
+        using var handler = new ImmudbHandler { ExpectedDatabase = "fleetory-audit" };
+        using var sink = new ImmudbAuditExportSink(new Uri("https://audit.example/"),
+            "audit-writer", "private-password", handler: handler,
+            databaseName: "fleetory-audit");
+
+        await sink.PublishAsync(NewEvent(Guid.NewGuid(), "Core.Device.Read", DateTimeOffset.UtcNow));
+        Assert.Equal(1, handler.CommittedWrites);
+    }
+
+    [Fact]
+    public async Task Refuses_database_selection_failure_before_writing()
+    {
         using var handler = new ImmudbHandler { DatabaseSelectionForbidden = true };
         using var sink = new ImmudbAuditExportSink(new Uri("https://audit.example/"),
             "audit-writer", "private-password", handler: handler);
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
-            await sink.PublishAsync(NewEvent(Guid.NewGuid(), "Core.Device.Read",
-                DateTimeOffset.UtcNow)));
+            await sink.PublishAsync(NewEvent(Guid.NewGuid(), "Core.Device.Read", DateTimeOffset.UtcNow)));
 
         Assert.Contains("database selection", exception.Message, StringComparison.Ordinal);
         Assert.Equal(0, handler.WriteAttempts);
@@ -108,6 +119,17 @@ public sealed class ImmudbAuditExportSinkTests
         Assert.NotNull(developmentSink);
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("audit/db")]
+    [InlineData("audit db")]
+    public void Rejects_invalid_database_names(string databaseName)
+    {
+        Assert.Throws<ArgumentException>(() => new ImmudbAuditExportSink(
+            new Uri("https://audit.example/"), "writer", "password",
+            databaseName: databaseName));
+    }
+
     private static AuditExportEvent NewEvent(Guid eventId, string action, DateTimeOffset occurredAt) =>
         new(eventId, new AuditRecord(
             new ActorReference("person:demo", ActorKind.Person), action,
@@ -120,6 +142,7 @@ public sealed class ImmudbAuditExportSinkTests
         private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);
         public bool LoginForbidden { get; set; }
         public bool DatabaseSelectionForbidden { get; set; }
+        public string ExpectedDatabase { get; set; } = "defaultdb";
         public int WriteResponseFailuresRemaining { get; set; }
         public string StoredRevision { get; set; } = "1";
         public int WriteAttempts { get; private set; }
@@ -144,7 +167,7 @@ public sealed class ImmudbAuditExportSinkTests
                 return Json(HttpStatusCode.OK, "{\"token\":\"test-token\"}");
             }
 
-            if (request.RequestUri.AbsolutePath == "/api/db/use/defaultdb")
+            if (request.RequestUri.AbsolutePath == "/api/db/use/" + ExpectedDatabase)
             {
                 Assert.Equal("Bearer", request.Headers.Authorization?.Scheme);
                 Assert.Equal("test-token", request.Headers.Authorization?.Parameter);

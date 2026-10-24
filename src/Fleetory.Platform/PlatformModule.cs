@@ -86,6 +86,7 @@ public sealed class PlatformModule : FleetoryModuleBase
                 {
                     var address = configuration["Fleetory:AuditExport:Address"];
                     var username = configuration["Fleetory:AuditExport:Username"];
+                    var databaseName = configuration["Fleetory:AuditExport:Database"];
                     if (!Uri.TryCreate(address, UriKind.Absolute, out var uri) ||
                         string.IsNullOrWhiteSpace(username))
                     {
@@ -97,7 +98,8 @@ public sealed class PlatformModule : FleetoryModuleBase
                     var environment = serviceProvider.GetRequiredService<IHostEnvironment>();
                     return new ImmudbAuditExportSink(uri, username, password,
                         allowInsecureLoopback: environment.IsDevelopment(),
-                        allowDefaultAdminCredential: environment.IsDevelopment());
+                        allowDefaultAdminCredential: environment.IsDevelopment(),
+                        databaseName: databaseName ?? "defaultdb");
                 });
             }
             services.AddSingleton<PostgreSqlAuditExportPump>();

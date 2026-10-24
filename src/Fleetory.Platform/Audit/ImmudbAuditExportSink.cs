@@ -10,15 +10,17 @@ namespace Fleetory.Platform.Audit;
 public sealed class ImmudbAuditExportSink : IAuditExportSink, IDisposable
 {
     private const int MaximumResponseBytes = 16 * 1024;
-    private const string DatabaseName = "defaultdb";
+    private const string DefaultDatabaseName = "defaultdb";
+    private static readonly char[] InvalidDatabaseNameCharacters = ['/', '\\', ':'];
     private readonly Uri _address;
     private readonly string _username;
     private readonly string _password;
+    private readonly string _databaseName;
     private readonly HttpClient _client;
 
     public ImmudbAuditExportSink(Uri address, string username, string password,
         bool allowInsecureLoopback = false, HttpMessageHandler? handler = null,
-        bool allowDefaultAdminCredential = false)
+        bool allowDefaultAdminCredential = false, string databaseName = DefaultDatabaseName)
     {
         HttpOriginPolicy.Validate(address, allowInsecureLoopback, "Immudb");
 
@@ -35,10 +37,17 @@ public sealed class ImmudbAuditExportSink : IAuditExportSink, IDisposable
             throw new InvalidOperationException(
                 "Immudb audit export requires a dedicated non-default credential.");
         }
+        if (string.IsNullOrWhiteSpace(databaseName) || databaseName.Length > 128 ||
+            databaseName.IndexOfAny(InvalidDatabaseNameCharacters) >= 0 ||
+            databaseName.Any(char.IsWhiteSpace))
+        {
+            throw new ArgumentException("Immudb audit database name is invalid.", nameof(databaseName));
+        }
 
         _address = address;
         _username = username;
         _password = password;
+        _databaseName = databaseName;
         _client = HttpOriginPolicy.CreateNonRedirectingClient(handler);
         _client.Timeout = TimeSpan.FromSeconds(20);
     }
@@ -112,7 +121,7 @@ public sealed class ImmudbAuditExportSink : IAuditExportSink, IDisposable
         var token = ReadToken(body);
 
         using var selectRequest = NewAuthenticatedRequest(HttpMethod.Get,
-            "api/db/use/" + Uri.EscapeDataString(DatabaseName), token);
+            "api/db/use/" + Uri.EscapeDataString(_databaseName), token);
         using var selectResponse = await _client.SendAsync(selectRequest,
             HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         if (!selectResponse.IsSuccessStatusCode)
