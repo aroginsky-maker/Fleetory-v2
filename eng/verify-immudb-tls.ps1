@@ -29,7 +29,8 @@ if ($rootItem.Attributes -band [IO.FileAttributes]::ReparsePoint) {
     throw 'The root certificate cannot be a symbolic link.'
 }
 $curlName = if ($env:OS -eq 'Windows_NT') { 'curl.exe' } else { 'curl' }
-$curl = Get-Command $curlName -CommandType Application -ErrorAction SilentlyContinue
+$curl = Get-Command $curlName -CommandType Application -ErrorAction SilentlyContinue |
+    Select-Object -First 1
 if ($null -eq $curl) {
     throw 'curl is required for the immudb TLS probe.'
 }
@@ -42,11 +43,41 @@ $curlArgs = @(
     '--write-out', '%{http_code}', '--proto', '=https', '--tlsv1.2',
     '--noproxy', '*', '--connect-timeout', '5', '--max-time', '15',
     '--max-redirs', '0', '--cacert', $root, $Address.AbsoluteUri)
+$start = [Diagnostics.ProcessStartInfo]::new($curl.Source)
+$start.UseShellExecute = $false
+$start.CreateNoWindow = $true
+$start.RedirectStandardInput = $true
+$start.RedirectStandardOutput = $true
+$start.RedirectStandardError = $true
+if ($null -ne $start.PSObject.Properties['ArgumentList']) {
+    foreach ($argument in $curlArgs) { $start.ArgumentList.Add($argument) }
+}
+else {
+    # .NET Framework has no ArgumentList. Quote each Windows native argument,
+    # doubling backslashes before quotes and at the end of quoted arguments.
+    $start.Arguments = ($curlArgs | ForEach-Object {
+        '"' + ($_ -replace '(\\*)"', '$1$1\"' -replace '(\\+)$', '$1$1') + '"'
+    }) -join ' '
+}
+# Launch directly to avoid PowerShell expanding '*' into filenames on Unix.
+$process = [Diagnostics.Process]::new()
+$process.StartInfo = $start
 try {
-    $statusText = (& $curl.Source @curlArgs 2>$null | Out-String).Trim()
+    if (-not $process.Start()) { throw 'curl could not start.' }
+    $process.StandardInput.Close()
+    $stdout = $process.StandardOutput.ReadToEndAsync()
+    $stderr = $process.StandardError.ReadToEndAsync()
+    if (-not $process.WaitForExit(20000)) {
+        $process.Kill()
+        throw 'curl exceeded the probe timeout.'
+    }
+    $statusText = $stdout.GetAwaiter().GetResult().Trim()
+    [void]$stderr.GetAwaiter().GetResult()
+    $curlExitCode = $process.ExitCode
 }
 catch { throw 'The immudb TLS handshake or certificate validation failed.' }
-if ($LASTEXITCODE -ne 0) { throw 'The immudb TLS handshake or certificate validation failed.' }
+finally { $process.Dispose() }
+if ($curlExitCode -ne 0) { throw 'The immudb TLS handshake or certificate validation failed.' }
 $status = 0
 if (-not [int]::TryParse($statusText, [ref]$status) -or $status -lt 200 -or $status -ge 300) {
     throw 'The immudb TLS origin must return HTTP 2xx without a redirect.'

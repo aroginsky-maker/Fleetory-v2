@@ -82,6 +82,13 @@ try {
     if ($redirectTarget.Requests -ne 0) { throw 'The TLS probe followed a redirect.' }
     Write-Host 'IMMUDB TLS PROBE TESTS PASS: real TLS, explicit CA, hostname, curl defaults, redirect/HTTP failure rejection and origin validation.'
 }
+catch {
+    Write-Host $_.ScriptStackTrace
+    if ($null -ne $server -and $server.LastError.Length -gt 0) {
+        Write-Host $server.LastError
+    }
+    throw
+}
 finally {
     $env:CURL_HOME = $savedCurlHome
     foreach ($resource in @($server, $redirectTarget, $authority, $otherAuthority)) {
