@@ -66,14 +66,15 @@
 - The immudb TLS preflight now requires a credential-free HTTPS origin and HTTP 2xx, rejects redirects and HTTP errors, disables user curl defaults and proxies, and bounds its connection and request time. A real loopback TLS fixture tests explicit trust, foreign certificates, hostname mismatch, redirect non-delivery and non-2xx responses on PowerShell 7 and Windows PowerShell 5.1 without modifying system trust. This corrects the earlier input-only tests, which did not exercise the previously missing 3xx rejection. The fixture pins a self-signed leaf; production chain, custody and rotation records remain required.
 - The final readiness-record verifier now enforces current validity as well as UTC ordering, compares normalized actor identifiers without case sensitivity, requires actual JSON booleans, rejects non-finite coverage and unsafe/non-run CI URLs, and requires hashed object references for each of the five controls. Its summary binds the result to the exact record bytes with SHA-256 and includes check/expiry times. Regression tests exercise clock boundaries and malformed/coerced input on Linux, PowerShell 7 and Windows PowerShell 5.1. This verifies local record consistency; authentic approvals, external CI results, evidence hashes and immutable retention still require independent deployment validation.
 - Authenticated immudb state and restore checks now share a bounded HTTPS transport. It rejects redirects before forwarding any request, validates the origin and relative API path, disables cookies/proxy inheritance, and preserves TLS/hostname/revocation checks. A 20-second total deadline includes body reads, and the 16 KiB limit is enforced while streaming rather than after an unbounded download. Real TLS tests check token non-delivery to redirect targets, untrusted peers and wrong hostnames, exact-size acceptance, oversized/chunked/lengthless responses, malformed UTF-8/JSON and a stalled body without exposing credentials.
+- Independent receipt-export verification now binds all receipt contents to the supplied anchor, including count/order, signed state, chain fields and observation instant. A regression reproduced acceptance of a signed prefix with the full anchor's claimed hash; prefix/suffix/extension and same-range substitution now fail closed. Export and verification parse/hash one bounded byte buffer, enforce 8 MiB limits and receipt field types, and run on PowerShell 7 and Windows PowerShell 5.1. Tests cover a source file changed after buffer acquisition, equivalent JSON/timezone formatting, no-overwrite behavior and malformed/oversized inputs. External anchor custody, freshness and WORM retention remain deployment controls.
 
 ## Verification snapshot
 
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local tests after readiness-verifier hardening | 206/206 passed |
-| Local production coverage after readiness-verifier hardening | 93.68% |
+| Local tests after receipt-anchor binding hardening | 206/206 passed |
+| Local production coverage after receipt-anchor binding hardening | 93.68% |
 | Local scope reparenting mutation and preflight tests | 2/2 passed |
 | Local SonarQube Community Build at `ad4271b` | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0% |
 | Local SonarQube Community Build after Windows Agent ACL hardening | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0%; 0 bugs, vulnerabilities, code smells and hotspots |
@@ -89,7 +90,7 @@
 | Signed artifact verification checks | Signature, artifact hash, idempotence, forward versioning, rollback, tampering and invalid-signature rejection passed |
 | Command approval policy checks | Low-risk Inventory.Refresh allowed; high-risk and Fleet.Bulk.* classified as TwoPerson and denied |
 | immudb receipt export package checks | Chain validation, atomic export, idempotence and tamper rejection passed |
-| immudb receipt export independent verification checks | Schema, exact anchor hash, receipt signatures, wrong key, chain tampering and path rejection passed on PowerShell 7 and Windows PowerShell 5.1 |
+| immudb receipt export independent verification checks | Exact anchor hash and receipt-content binding, signed substitution rejection, snapshot consistency, signatures and equivalent formatting passed on Linux and Windows PowerShell 7/5.1 |
 | immudb transport negative tests | Malformed authentication JSON and oversized readback rejected without credential leakage |
 | Operational immudb HTTPS transport | 34 negative cases plus exact 16 KiB acceptance: real TLS, redirect non-delivery, trust/name rejection, streaming limits and total read deadline on Linux and Windows PowerShell 7/5.1 |
 | immudb production TLS runbook | Root-only chain check, credential-free HTTPS probe, network isolation and rotation evidence documented |

@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [Parameter(Mandatory)][ValidateScript({ Test-Path -LiteralPath $_ -PathType Leaf })][string] $AnchorPath,
     [Parameter(Mandatory)][string] $ExportPath
@@ -15,7 +15,7 @@ function Write-ReceiptExport([string] $Path, [byte[]] $Bytes) {
         throw 'The receipt export directory does not exist.'
     }
     if (Test-Path -LiteralPath $Path -PathType Leaf) {
-        $existing = [IO.File]::ReadAllBytes($Path)
+        $existing = (Read-ReceiptExportSnapshot $Path 'Existing receipt export').Bytes
         if ([Convert]::ToBase64String($existing) -eq [Convert]::ToBase64String($Bytes)) {
             return 'idempotent'
         }
@@ -24,7 +24,7 @@ function Write-ReceiptExport([string] $Path, [byte[]] $Bytes) {
     $temporary = "$Path.$([Guid]::NewGuid().ToString('N')).tmp"
     try {
         [IO.File]::WriteAllBytes($temporary, $Bytes)
-        [IO.File]::Move($temporary, $Path, $false)
+        [IO.File]::Move($temporary, $Path)
         return 'accepted'
     }
     finally {
@@ -45,23 +45,19 @@ if ((Get-Item -LiteralPath $exportParent -Force).Attributes -band [IO.FileAttrib
     throw 'The receipt export directory cannot be a symbolic link.'
 }
 
-$receipts = @(Get-ExistingImmudbReceipts $anchor)
-if ($receipts.Count -eq 0) { throw 'The immudb receipt anchor is empty.' }
-[void](Test-ImmudbReceiptChain $receipts)
-if ($receipts | Where-Object { [string]$_.schema -cne 'fleetory.immudb-state-receipt.v1' }) {
-    throw 'The immudb receipt anchor contains an incompatible schema.'
-}
-$rawAnchor = [IO.File]::ReadAllBytes($anchor)
+$snapshot = Read-ReceiptExportAnchor $anchor
+$receipts = $snapshot.Receipts
 $package = [ordered]@{
     schema = 'fleetory.immudb-receipt-export.v1'
     database = [string]$receipts[0].database
     firstTxId = [long]$receipts[0].txId
     lastTxId = [long]$receipts[-1].txId
     receiptCount = $receipts.Count
-    anchorSha256 = (Get-ReceiptExportFileSha256 $rawAnchor)
+    anchorSha256 = $snapshot.Sha256
     receipts = $receipts
 } | ConvertTo-Json -Compress -Depth 8
 $bytes = [Text.UTF8Encoding]::new($false).GetBytes($package)
+if ($bytes.Length -gt 8MB) { throw 'The receipt export size is outside the permitted range.' }
 $status = Write-ReceiptExport $export $bytes
 Write-Output (ConvertTo-Json ([ordered]@{
     schema = 'fleetory.immudb-receipt-export.v1'

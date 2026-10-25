@@ -58,6 +58,12 @@ jobs:
         shell: powershell
         run: ./tests/Fleetory.Tools.Tests/ImmudbHttpTransport.Tests.ps1
 
+      - name: Verify receipt export and anchor binding on Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          ./tests/Fleetory.Tools.Tests/ImmudbReceiptExport.Tests.ps1
+          ./tests/Fleetory.Tools.Tests/ImmudbReceiptExportVerification.Tests.ps1
+
   quality:
     name: Strict build, tests, coverage and Sonar
     runs-on: ubuntu-latest

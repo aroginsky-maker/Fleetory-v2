@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
@@ -24,8 +24,7 @@ function New-TestReceipt([long] $TxId, [string] $Previous) {
 }
 
 function Invoke-ReceiptExport {
-    $output = & pwsh -NoProfile -File $exportScript -AnchorPath $anchor -ExportPath $export
-    if ($LASTEXITCODE -ne 0) { throw 'Receipt export failed unexpectedly.' }
+    $output = & $exportScript -AnchorPath $anchor -ExportPath $export
     return $output | ConvertFrom-Json
 }
 
@@ -48,6 +47,18 @@ try {
     $repeat = Invoke-ReceiptExport
     if ($repeat.status -ne 'idempotent') { throw 'Repeated receipt export was not idempotent.' }
 
+    $existing = Join-Path $work 'worm/existing.json'
+    [IO.File]::WriteAllText($existing, 'retained content')
+    $overwriteDenied = $false
+    try { & $exportScript -AnchorPath $anchor -ExportPath $existing *> $null }
+    catch {
+        if ($_.Exception.Message -notlike '*different content*') { throw }
+        $overwriteDenied = $true
+    }
+    if (-not $overwriteDenied -or [IO.File]::ReadAllText($existing) -cne 'retained content') {
+        throw 'An existing receipt export was overwritten.'
+    }
+
     $tampered = [IO.File]::ReadAllText($anchor).Replace(
         [Convert]::ToBase64String([byte[]](1..32)),
         [Convert]::ToBase64String([byte[]](3..34)))
@@ -56,12 +67,12 @@ try {
     $tamperFailed = $false
     try { & $exportScript -AnchorPath $anchor -ExportPath $newExport *> $null }
     catch { $tamperFailed = $true }
-    if (-not $tamperFailed -and $LASTEXITCODE -eq 0) {
+    if (-not $tamperFailed) {
         throw 'Tampered receipt anchor was exported.'
     }
     $global:LASTEXITCODE = 0
-    Write-Host 'IMMUDB RECEIPT EXPORT TESTS PASS: chain validation, atomic export and idempotence.'
+    Write-Host 'IMMUDB RECEIPT EXPORT TESTS PASS: chain validation, bounded snapshot, atomic no-overwrite export and idempotence.'
 }
 finally {
-    if (Test-Path -LiteralPath $work) { Remove-Item -LiteralPath $work -Recurse -Force }
+    Remove-FleetoryTestArtifacts $work $repoRoot
 }
