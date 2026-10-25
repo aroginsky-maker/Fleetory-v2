@@ -5,6 +5,32 @@ runbook defines the production boundary for the future signer that produces
 Agent command signatures. The signer must remain a separate trust domain from
 Fleetory Server and the Agent host.
 
+## Implemented Transit client contract
+
+`Fleetory.CommandSigning` currently signs only an argument-free, one-minute
+`Inventory.Refresh` envelope for an explicit DeviceId. It pins the Transit key
+version and P-256 public key and verifies each returned signature locally.
+
+The client has a ten-second total deadline covering connection, response
+headers, body buffering, JSON parsing and the final cancellation check before
+releasing an envelope. Caller cancellation shares this lifetime; an already
+cancelled call sends no request. Responses are limited to 4 KiB. Invalid JSON,
+missing or incorrectly typed signature fields, unexpected key versions and
+invalid signatures fail closed.
+
+Production requires a credential-free HTTPS origin. Redirects, cookies and
+inherited proxies are disabled; provide a direct route to the approved Transit
+origin. The sign-only token must contain at most 8192 visible ASCII characters
+with no whitespace or control characters. HTTP status failures retain the
+status code but omit the remote reason phrase and body; JSON and signature
+encoding errors also use fixed messages. Do not log request headers or tokens.
+
+Unit tests cover rejected credentials and malformed responses. Real loopback
+HTTP tests verify stalled headers, stalled bodies and caller cancellation;
+their explicit test-only HTTP setting does not permit production HTTP. These
+client checks do not establish the isolated signer service or approval workflow
+required below.
+
 ## Key and service isolation
 
 1. Create a non-exportable P-256 signing key in the approved HSM or Transit

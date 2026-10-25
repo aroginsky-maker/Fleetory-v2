@@ -70,13 +70,15 @@
 - Receipt export verification now supports an independently approved predecessor package and exact SHA-256 checkpoint. The mode requires a pinned public key, verifies every predecessor signature and rejects joint local rollback, rewritten signed history, changed metadata and database mismatch while accepting identical or cumulative forward histories. The summary explicitly reports checkpoint verification, and no checkpoint file is updated. Twelve negative scenarios plus positive histories pass on Linux and Windows PowerShell 7/5.1; selection and retention of the latest independent checkpoint remain operational controls.
 - Restore acceptance now optionally verifies the exact transaction/hash of an independently approved checkpoint before reading the known event. It verifies signed state again after readback and appends the local acceptance receipt only after all checks pass. Real-cryptography tests reproduced and fixed premature anchor mutation, broken previous-hash canonicalization for ordered-dictionary forward receipts, and invalid database-name character validation. Fifteen negative cases preserve existing/absent anchors; exact-point acceptance, scoped-token use, forward chain validation and idempotence are tested on Linux and Windows PowerShell 7/5.1. Receipt-package verification is shared by export and restore without copying its implementation.
 
+- The OpenBao Transit command signer now enforces a ten-second total operation deadline through headers, body reads and envelope release, propagates caller cancellation, validates bounded visible-ASCII credentials before creating headers, and disables inherited proxies/cookies. HTTP status, JSON and signature-encoding failures use fixed messages without untrusted response text. Tests reproduce remote reason-phrase disclosure, reject malformed inputs and exercise stalled headers/body plus cancellation over real loopback HTTP. This hardens the existing signing library; isolated service deployment and authenticated approval remain open.
+
 ## Verification snapshot
 
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local tests after restore-point acceptance hardening | 206/206 passed |
-| Local production coverage after restore-point acceptance hardening | 93.68% |
+| Local tests after Transit client hardening | 227/227 passed |
+| Local production coverage after Transit client hardening | 93.78% |
 | Local scope reparenting mutation and preflight tests | 2/2 passed |
 | Local SonarQube Community Build at `ad4271b` | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0% |
 | Local SonarQube Community Build after Windows Agent ACL hardening | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0%; 0 bugs, vulnerabilities, code smells and hotspots |
@@ -100,6 +102,7 @@
 | immudb production TLS runbook | Root-only chain check, credential-free HTTPS probe, network isolation and rotation evidence documented |
 | Production certificate lifecycle runbook | Issuance, custody, physical-device verification, rotation, recovery and rollback evidence documented |
 | Protected command signer runbook | Non-exportable key custody, isolated mTLS signer, two-person approvals and trust rotation documented |
+| Transit signing client regression checks | 28/28 passed: bounded headers/body lifetime, caller cancellation, rejected credentials, safe errors and signature verification |
 | Privileged change evidence runbook | Approval identities, impact hashes, audit/WORM links, retention and recovery evidence documented |
 | PHASE 7 readiness record verifier | Current UTC validity, distinct normalized actors, strict JSON flags, finite coverage, per-control object references and exact record SHA-256 checked |
 | Self-hosted PHASE 7 evidence record | Signer, least-privilege audit pipeline, TLS, backup/restore and readiness checks recorded with production limitations |

@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -78,6 +79,143 @@ public sealed class OpenBaoCommandSignerTests
     }
 
     [Fact]
+    public async Task Remote_failure_reason_cannot_echo_signing_credentials()
+    {
+        const string sentinel = "disposable-signer-credential";
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var handler = new TransitHandler(key)
+        {
+            FailureStatus = HttpStatusCode.ServiceUnavailable,
+            FailureReason = sentinel
+        };
+        using var signer = CreateSigner(key, handler);
+        var exception = await Assert.ThrowsAsync<HttpRequestException>(
+            () => signer.SignInventoryRefreshAsync(Device));
+        Assert.Equal(HttpStatusCode.ServiceUnavailable, exception.StatusCode);
+        Assert.DoesNotContain(sentinel, exception.ToString());
+    }
+
+    [Theory]
+    [InlineData("{broken")]
+    [InlineData("[]")]
+    [InlineData("null")]
+    [InlineData("{}")]
+    [InlineData("{\"data\":null}")]
+    [InlineData("{\"data\":{}}")]
+    [InlineData("{\"data\":{\"signature\":42}}")]
+    [InlineData("{\"data\":{\"signature\":null}}")]
+    public async Task Malformed_response_never_releases_an_envelope(string json)
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var handler = new TransitHandler(key) { JsonResponse = json };
+        using var signer = CreateSigner(key, handler);
+        await Assert.ThrowsAsync<CryptographicException>(() => signer.SignInventoryRefreshAsync(Device));
+    }
+
+    [Theory]
+    [InlineData("credential\r\ninjected")]
+    [InlineData("credential with spaces")]
+    [InlineData("credential\tvalue")]
+    [InlineData("credential\u007fvalue")]
+    [InlineData("credential\u00e9value")]
+    public void Invalid_credential_is_rejected_without_echo(string credential)
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var exception = Assert.Throws<ArgumentException>(() => new OpenBaoCommandSigner(
+            new Uri("https://vault.example/"), credential, "test-key", 2, key.ExportSubjectPublicKeyInfo()));
+        Assert.DoesNotContain(credential, exception.ToString());
+    }
+
+    [Fact]
+    public void Oversized_credential_is_rejected()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        Assert.Throws<ArgumentException>(() => new OpenBaoCommandSigner(
+            new Uri("https://vault.example/"), new string('A', 8193), "test-key", 2, key.ExportSubjectPublicKeyInfo()));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(11000)]
+    public void Internal_deadline_cannot_disable_the_production_bound(int milliseconds)
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var handler = new TransitHandler(key);
+        Assert.Throws<ArgumentOutOfRangeException>(() => CreateSigner(
+            key, handler, TimeSpan.FromMilliseconds(milliseconds)));
+    }
+
+    [Fact]
+    public async Task Already_cancelled_call_never_reaches_transit()
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var handler = new TransitHandler(key);
+        using var signer = CreateSigner(key, handler);
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => signer.SignInventoryRefreshAsync(Device, cancellation.Token));
+        Assert.Equal(0, handler.CallCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public Task Deadline_covers_headers_and_body_over_real_http(bool sendHeaders) =>
+        AssertStalledRequestCancelledAsync(sendHeaders, cancelCaller: false);
+
+    [Fact]
+    public Task Caller_cancellation_interrupts_a_real_body_read() =>
+        AssertStalledRequestCancelledAsync(sendHeaders: true, cancelCaller: true);
+
+    private static async Task AssertStalledRequestCancelledAsync(bool sendHeaders, bool cancelCaller)
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var serverLifetime = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        using var caller = new CancellationTokenSource();
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        var received = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var server = HoldResponseAsync(listener, sendHeaders, received, serverLifetime.Token);
+        var origin = new Uri($"http://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}/");
+        using var signer = new OpenBaoCommandSigner(origin, "test-token", "test-key", 2,
+            key.ExportSubjectPublicKeyInfo(), allowHttpLoopback: true, handler: null,
+            requestTimeout: TimeSpan.FromSeconds(cancelCaller ? 10 : 1));
+        try
+        {
+            var signing = signer.SignInventoryRefreshAsync(Device, caller.Token);
+            await received.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            if (cancelCaller) { caller.Cancel(); }
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => signing.WaitAsync(TimeSpan.FromSeconds(3)));
+        }
+        finally
+        {
+            serverLifetime.Cancel();
+            listener.Stop();
+            try { await server; }
+            catch (OperationCanceledException) when (serverLifetime.IsCancellationRequested) { }
+        }
+    }
+
+    private static async Task HoldResponseAsync(TcpListener listener, bool sendHeaders,
+        TaskCompletionSource received, CancellationToken cancellationToken)
+    {
+        using var peer = await listener.AcceptTcpClientAsync(cancellationToken);
+        await using var stream = peer.GetStream();
+        using var reader = new StreamReader(stream, Encoding.ASCII, leaveOpen: true);
+        while (!string.IsNullOrEmpty(await reader.ReadLineAsync(cancellationToken))) { }
+        if (sendHeaders)
+        {
+            await stream.WriteAsync(Encoding.ASCII.GetBytes(
+                "HTTP/1.1 200 OK\r\nContent-Length: 80\r\nConnection: close\r\n\r\n"), cancellationToken);
+            await stream.FlushAsync(cancellationToken);
+        }
+        received.TrySetResult();
+        await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+    }
+
+    [Fact]
     public async Task Invalid_configuration_or_target_never_calls_transit()
     {
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -97,14 +235,17 @@ public sealed class OpenBaoCommandSignerTests
         Assert.Equal(0, handler.CallCount);
     }
 
-    private static OpenBaoCommandSigner CreateSigner(ECDsa key, HttpMessageHandler handler) =>
+    private static OpenBaoCommandSigner CreateSigner(ECDsa key, HttpMessageHandler handler, TimeSpan? timeout = null) =>
         new(new Uri("http://127.0.0.1:8200/"), "test-token", "test-key", 2,
-            key.ExportSubjectPublicKeyInfo(), allowHttpLoopback: true, handler);
+            key.ExportSubjectPublicKeyInfo(), allowHttpLoopback: true, handler, timeout);
 
     private sealed class TransitHandler(ECDsa key) : HttpMessageHandler
     {
         public string? Replacement { get; set; }
         public bool Redirect { get; set; }
+        public HttpStatusCode? FailureStatus { get; set; }
+        public string? FailureReason { get; set; }
+        public string? JsonResponse { get; set; }
         public string? Token { get; private set; }
         public int RequestedVersion { get; private set; }
         public int CallCount { get; private set; }
@@ -115,6 +256,10 @@ public sealed class OpenBaoCommandSignerTests
             CallCount++;
             Token = request.Headers.GetValues("X-Vault-Token").Single();
             Assert.Equal("/v1/transit/sign/test-key/sha2-256", request.RequestUri?.AbsolutePath);
+            if (FailureStatus is { } status)
+            {
+                return new HttpResponseMessage(status) { ReasonPhrase = FailureReason };
+            }
             if (Redirect)
             {
                 return new HttpResponseMessage(HttpStatusCode.Redirect)
@@ -134,7 +279,7 @@ public sealed class OpenBaoCommandSignerTests
             return new HttpResponseMessage(HttpStatusCode.OK)
             {
                 Content = new StringContent(
-                    JsonSerializer.Serialize(new { data = new { signature = value } }),
+                    JsonResponse ?? JsonSerializer.Serialize(new { data = new { signature = value } }),
                     Encoding.UTF8, "application/json")
             };
         }

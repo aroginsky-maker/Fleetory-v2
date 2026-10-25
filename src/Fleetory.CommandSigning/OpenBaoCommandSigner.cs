@@ -14,6 +14,7 @@ public sealed class OpenBaoCommandSigner : IDisposable
     private readonly int _keyVersion;
     private readonly string _signingKeyId;
     private readonly byte[] _publicKey;
+    private readonly TimeSpan _requestTimeout;
 
     public OpenBaoCommandSigner(
         Uri address,
@@ -33,7 +34,8 @@ public sealed class OpenBaoCommandSigner : IDisposable
         int keyVersion,
         ReadOnlySpan<byte> publicKey,
         bool allowHttpLoopback,
-        HttpMessageHandler? handler)
+        HttpMessageHandler? handler,
+        TimeSpan? requestTimeout = null)
     {
         ArgumentNullException.ThrowIfNull(address);
         if (!address.IsAbsoluteUri || !string.IsNullOrEmpty(address.UserInfo) ||
@@ -46,6 +48,15 @@ public sealed class OpenBaoCommandSigner : IDisposable
         }
 
         ArgumentException.ThrowIfNullOrWhiteSpace(token);
+        if (token.Length > 8192 || token.Any(character => character <= ' ' || character >= '\u007f'))
+        {
+            throw new ArgumentException("The Transit credential must contain at most 8192 visible ASCII characters.", nameof(token));
+        }
+        _requestTimeout = requestTimeout ?? TimeSpan.FromSeconds(10);
+        if (_requestTimeout <= TimeSpan.Zero || _requestTimeout > TimeSpan.FromSeconds(10))
+        {
+            throw new ArgumentOutOfRangeException(nameof(requestTimeout));
+        }
         if (!IsIdentifier(keyName) || keyVersion < 1 || keyVersion > 999999)
         {
             throw new ArgumentException("Transit key name or version is invalid.");
@@ -64,10 +75,15 @@ public sealed class OpenBaoCommandSigner : IDisposable
         _keyVersion = keyVersion;
         _signingKeyId = $"{keyName}-v{keyVersion}";
         _publicKey = publicKey.ToArray();
-        _client = new HttpClient(handler ?? new SocketsHttpHandler { AllowAutoRedirect = false }, true)
+        _client = new HttpClient(handler ?? new SocketsHttpHandler
+        {
+            AllowAutoRedirect = false,
+            UseCookies = false,
+            UseProxy = false
+        }, true)
         {
             BaseAddress = address,
-            Timeout = TimeSpan.FromSeconds(10)
+            Timeout = Timeout.InfiniteTimeSpan
         };
     }
 
@@ -79,6 +95,10 @@ public sealed class OpenBaoCommandSigner : IDisposable
         {
             throw new ArgumentException("A target DeviceId is required.", nameof(targetDeviceId));
         }
+        cancellationToken.ThrowIfCancellationRequested();
+        using var lifetime = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        lifetime.CancelAfter(_requestTimeout);
+        var operationToken = lifetime.Token;
 
         var now = DateTimeOffset.UtcNow;
         var unsigned = new SignedCommandEnvelope(
@@ -98,12 +118,13 @@ public sealed class OpenBaoCommandSigner : IDisposable
         });
 
         using var response = await _client.SendAsync(
-            request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        response.EnsureSuccessStatusCode();
-        await response.Content.LoadIntoBufferAsync(4096, cancellationToken);
-        using var body = await JsonDocument.ParseAsync(
-            await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
-        var transitSignature = body.RootElement.GetProperty("data").GetProperty("signature").GetString();
+            request, HttpCompletionOption.ResponseHeadersRead, operationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            // ReasonPhrase and response bodies are controlled by the remote peer.
+            throw new HttpRequestException("Transit signing request failed.", null, response.StatusCode);
+        }
+        var transitSignature = await ReadTransitSignatureAsync(response.Content, operationToken);
         var prefix = $"vault:v{_keyVersion}:";
         if (transitSignature is null || !transitSignature.StartsWith(prefix, StringComparison.Ordinal))
         {
@@ -117,9 +138,9 @@ public sealed class OpenBaoCommandSigner : IDisposable
             signature = Convert.FromBase64String(
                 encoded.Replace('-', '+').Replace('_', '/') + new string('=', (4 - encoded.Length % 4) % 4));
         }
-        catch (FormatException exception)
+        catch (FormatException)
         {
-            throw new CryptographicException("Transit returned an invalid signature encoding.", exception);
+            throw new CryptographicException("Transit returned an invalid signature encoding.");
         }
 
         using var ecdsa = ECDsa.Create();
@@ -130,6 +151,7 @@ public sealed class OpenBaoCommandSigner : IDisposable
         {
             throw new CryptographicException("Transit signature failed local verification.");
         }
+        operationToken.ThrowIfCancellationRequested();
 
         return new SignedCommandEnvelope(
             unsigned.TargetDeviceId, unsigned.CommandId, unsigned.CommandType, [],
@@ -137,6 +159,27 @@ public sealed class OpenBaoCommandSigner : IDisposable
     }
 
     public void Dispose() => _client.Dispose();
+
+    private static async Task<string> ReadTransitSignatureAsync(HttpContent content, CancellationToken cancellationToken)
+    {
+        await content.LoadIntoBufferAsync(4096, cancellationToken);
+        try
+        {
+            using var body = await JsonDocument.ParseAsync(
+                await content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+            if (body.RootElement.ValueKind != JsonValueKind.Object ||
+                !body.RootElement.TryGetProperty("data", out var data) || data.ValueKind != JsonValueKind.Object ||
+                !data.TryGetProperty("signature", out var signature) || signature.ValueKind != JsonValueKind.String)
+            {
+                throw new CryptographicException("Transit returned an invalid signature response.");
+            }
+            return signature.GetString()!;
+        }
+        catch (JsonException)
+        {
+            throw new CryptographicException("Transit returned an invalid JSON response.");
+        }
+    }
 
     private static bool IsIdentifier(string? value) =>
         !string.IsNullOrEmpty(value) && value.Length <= 96 &&
