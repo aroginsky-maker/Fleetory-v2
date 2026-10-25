@@ -106,13 +106,13 @@ encoding errors also use fixed messages. Do not log request headers or tokens.
 Unit tests cover rejected credentials and malformed responses. Real loopback
 HTTP tests verify stalled headers, stalled bodies and caller cancellation;
 their explicit test-only HTTP setting does not permit production HTTP. These
-client checks do not establish the isolated signer service or approval workflow
-required below.
+client checks are combined with the host's mTLS and journal controls described
+above; production approval deployment remains a separate requirement.
 
 ## Implemented caller authorization component
 
 `SigningClientAuthorizationPolicy` and `AuthorizedCommandSigner` provide the
-input authorization layer for the future isolated host. The host must first
+input authorization layer for the standalone host. The host must first
 prove possession of the client key through an actual mTLS handshake and pass
 that connection's certificate. A certificate supplied in JSON, an HTTP header
 or a forwarded-certificate header is not authentication and must not be used.
@@ -133,7 +133,7 @@ works when the old and new CAs have the same subject name and different keys.
 An unregistered Server or Agent certificate is denied even
 when its chain is trusted. The wrapper checks authorization before Transit
 access and again before releasing the signed envelope, and returns the configured
-caller identity for the future audit record. Its only operation remains empty
+caller identity for the durable request record. Its only operation remains empty
 `Inventory.Refresh`; high-risk and bulk signing are unavailable.
 
 This component performs no CRL/OCSP lookup. Revocation currently means replacing
@@ -155,7 +155,8 @@ Use local protected PostgreSQL transport or a verified TLS data source; producti
 host transport enforcement remains part of the host integration.
 
 The runtime role needs only CONNECT to that database, USAGE on `signer`, and
-SELECT/INSERT on `signer.signing_requests` and `signer.signing_results`. Do not
+SELECT/INSERT on `signer.signing_requests`, `signer.signing_results` and
+`signer.signing_rejections`. Do not
 grant table/schema ownership, UPDATE, DELETE, TRUNCATE or schema CREATE. The
 provisioning script does not create a login or embed a password; record runtime
 role provisioning separately. PostgreSQL must retain its durable fsync/WAL and
