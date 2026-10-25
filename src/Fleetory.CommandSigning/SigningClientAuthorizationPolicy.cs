@@ -53,9 +53,14 @@ public sealed class SigningClientAuthorizationPolicy : IDisposable
 
     /// <summary>Returns the configured caller identity, or null. No request-supplied identity is trusted.</summary>
     public string? GetAuthorizedInventoryRefreshCaller(X509Certificate2? certificate, DeviceId targetDeviceId)
+        => targetDeviceId.Value == Guid.Empty ? null : GetAuthorizedCaller(certificate, targetDeviceId);
+
+    public string? GetAuthorizedCaller(X509Certificate2? certificate) => GetAuthorizedCaller(certificate, null);
+
+    private string? GetAuthorizedCaller(X509Certificate2? certificate, DeviceId? targetDeviceId)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (certificate is null || targetDeviceId.Value == Guid.Empty)
+        if (certificate is null)
         {
             return null;
         }
@@ -64,7 +69,8 @@ public sealed class SigningClientAuthorizationPolicy : IDisposable
             var fingerprint = certificate.GetCertHashString(HashAlgorithmName.SHA256);
             var now = _time.GetUtcNow();
             if (!_grants.TryGetValue(fingerprint, out var grant) ||
-                now < grant.NotBefore || now >= grant.ExpiresAt || !grant.Devices.Contains(targetDeviceId) ||
+                now < grant.NotBefore || now >= grant.ExpiresAt ||
+                targetDeviceId is { } target && !grant.Devices.Contains(target) ||
                 !HasClientPurpose(certificate))
             {
                 return null;

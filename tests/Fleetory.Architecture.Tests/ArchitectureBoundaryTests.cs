@@ -69,6 +69,8 @@ public sealed partial class ArchitectureBoundaryTests
 
     private static readonly string[] OsNeutralServerSideProjects =
     [
+        "Fleetory.Security.Infrastructure",
+        "Fleetory.CommandSigner.Host",
         "Fleetory.Server",
         "Fleetory.Platform",
         "Fleetory.Platform.Contracts",
@@ -656,6 +658,7 @@ public sealed partial class ArchitectureBoundaryTests
             {
                 expected.Add("Fleetory.Platform.Contracts");
             }
+            else { expected.Add("Fleetory.Security.Infrastructure"); }
 
             AssertProjectReferencesEqual(projectName, expected, references);
         }
@@ -668,7 +671,8 @@ public sealed partial class ArchitectureBoundaryTests
         var references = GetProjectReferences(ProjectPath(root, "Fleetory.Server"));
         var expected = new HashSet<string>(ImplementationProjects, StringComparer.OrdinalIgnoreCase)
         {
-            "Fleetory.ModuleAbstractions"
+            "Fleetory.ModuleAbstractions",
+            "Fleetory.Security.Infrastructure"
         };
 
         AssertProjectReferencesEqual("Fleetory.Server", expected, references);
@@ -718,6 +722,21 @@ public sealed partial class ArchitectureBoundaryTests
         {
             Assert.DoesNotContain("Fleetory.CommandSigning",
                 GetProjectReferences(ProjectPath(root, projectName)));
+        }
+    }
+
+    [Fact]
+    public void Signing_host_must_be_isolated_from_application_implementations()
+    {
+        var root = FindSolutionRoot();
+        AssertProjectReferencesEqual("Fleetory.CommandSigner.Host",
+            ["Fleetory.CommandSigning", "Fleetory.Core.Contracts", "Fleetory.ModuleAbstractions", "Fleetory.Security.Infrastructure"],
+            GetProjectReferences(ProjectPath(root, "Fleetory.CommandSigner.Host")));
+        AssertProjectReferencesEqual("Fleetory.Security.Infrastructure", ["Fleetory.Platform.Contracts"],
+            GetProjectReferences(ProjectPath(root, "Fleetory.Security.Infrastructure")));
+        foreach (var project in ImplementationProjects.Append("Fleetory.Server").Append("Fleetory.Agent.Security"))
+        {
+            Assert.DoesNotContain("Fleetory.CommandSigner.Host", GetProjectReferences(ProjectPath(root, project)));
         }
     }
 
@@ -772,7 +791,7 @@ public sealed partial class ArchitectureBoundaryTests
                 var source = File.ReadAllText(sourceFile.FullName);
                 foreach (var token in forbiddenSourceTokens)
                 {
-                    if (projectName == "Fleetory.Platform" &&
+                    if (projectName == "Fleetory.Security.Infrastructure" &&
                         sourceFile.Name == "FileSecretProvider.cs" &&
                         token == "OperatingSystem.IsWindows()")
                     {

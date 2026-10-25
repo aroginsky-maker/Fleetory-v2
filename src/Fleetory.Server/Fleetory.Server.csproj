@@ -3,6 +3,7 @@
     <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="../Fleetory.Security.Infrastructure/Fleetory.Security.Infrastructure.csproj" />
     <ProjectReference Include="../Fleetory.ModuleAbstractions/Fleetory.ModuleAbstractions.csproj" />
     <ProjectReference Include="../Fleetory.Platform/Fleetory.Platform.csproj" />
     <ProjectReference Include="../Fleetory.Core/Fleetory.Core.csproj" />

@@ -29,7 +29,7 @@ public sealed class AuthorizedCommandSigner(
             authenticatedClientCertificate!.GetCertHashString(HashAlgorithmName.SHA256), targetDeviceId);
         if (!await journal.TryBeginAsync(request, cancellationToken))
         {
-            throw new InvalidOperationException("Signing RequestId is already reserved; reconcile its journal record.");
+            throw new SigningRequestConflictException();
         }
         var envelope = await signer.SignInventoryRefreshAsync(targetDeviceId, cancellationToken);
         EnsureAuthorized(authenticatedClientCertificate, targetDeviceId, caller);

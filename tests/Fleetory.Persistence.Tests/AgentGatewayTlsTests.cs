@@ -1719,7 +1719,7 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
         return Convert.ToInt32(await command.ExecuteScalarAsync());
     }
 
-    private sealed class TestSecretDirectory : IDisposable
+    internal sealed class TestSecretDirectory : IDisposable
     {
         public string Path { get; } = System.IO.Path.Combine(
             System.IO.Path.GetTempPath(), "fleetory-mtls-test-" + Guid.NewGuid().ToString("N"));
@@ -1767,7 +1767,7 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             ValueTask.FromException(new InvalidOperationException("Completion audit unavailable."));
     }
 
-    private sealed class TestPki : IDisposable
+    internal sealed class TestPki : IDisposable
     {
         private readonly ECDsa rootKey = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         private readonly ECDsa? intermediateKey;

@@ -1,4 +1,6 @@
 using System.Net;
+using Fleetory.Core.Contracts;
+using Fleetory.Security.Infrastructure;
 using Fleetory.Platform.Contracts.Secrets;
 using Microsoft.AspNetCore.Server.Kestrel.Https;
 
@@ -49,7 +51,8 @@ internal static class GatewayStartup
                 agentTls = MutualTlsMaterial.Load(secrets,
                     FleetorySecretNames.AgentGatewayRootCa,
                     FleetorySecretNames.AgentGatewayServerCertificate,
-                    FleetorySecretNames.AgentGatewayServerPrivateKey);
+                    FleetorySecretNames.AgentGatewayServerPrivateKey,
+                    X509EndEntityPolicy.HasDigitalSignatureUsage);
             }
 
             if (adminEnabled)
@@ -57,7 +60,8 @@ internal static class GatewayStartup
                 adminTls = MutualTlsMaterial.Load(secrets,
                     FleetorySecretNames.AdminGatewayRootCa,
                     FleetorySecretNames.AdminGatewayServerCertificate,
-                    FleetorySecretNames.AdminGatewayServerPrivateKey);
+                    FleetorySecretNames.AdminGatewayServerPrivateKey,
+                    X509EndEntityPolicy.HasDigitalSignatureUsage);
             }
 
             if (agentTls is not null && adminTls is not null && agentTls.SharesRootWith(adminTls))

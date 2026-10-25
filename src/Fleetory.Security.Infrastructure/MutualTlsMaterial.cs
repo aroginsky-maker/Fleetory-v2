@@ -1,25 +1,26 @@
 using System.Net.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-using Fleetory.Core.Contracts;
 using Fleetory.Platform.Contracts.Secrets;
 
-namespace Fleetory.Server.Infrastructure;
+namespace Fleetory.Security.Infrastructure;
 
-internal sealed class MutualTlsMaterial : IDisposable
+public sealed class MutualTlsMaterial : IDisposable
 {
     private const string ClientAuthenticationOid = "1.3.6.1.5.5.7.3.2";
     private const string ServerAuthenticationOid = "1.3.6.1.5.5.7.3.1";
 
     private readonly X509Certificate2Collection trustedRoots;
     private readonly X509Certificate2Collection serverChain;
+    private readonly Func<X509Certificate2, bool> leafPolicy;
 
     private MutualTlsMaterial(X509Certificate2Collection trustedRoots, X509Certificate2 serverCertificate,
-        X509Certificate2Collection serverChain)
+        X509Certificate2Collection serverChain, Func<X509Certificate2, bool> leafPolicy)
     {
         this.trustedRoots = trustedRoots;
         ServerCertificate = serverCertificate;
         this.serverChain = serverChain;
+        this.leafPolicy = leafPolicy;
     }
 
     public X509Certificate2 ServerCertificate { get; }
@@ -33,9 +34,11 @@ internal sealed class MutualTlsMaterial : IDisposable
         ISecretProvider secrets,
         string rootCaSecret,
         string serverCertificateSecret,
-        string serverPrivateKeySecret)
+        string serverPrivateKeySecret,
+        Func<X509Certificate2, bool> leafPolicy)
     {
         ArgumentNullException.ThrowIfNull(secrets);
+        ArgumentNullException.ThrowIfNull(leafPolicy);
         var roots = new X509Certificate2Collection();
         X509Certificate2? server = null;
         var intermediates = new X509Certificate2Collection();
@@ -86,7 +89,7 @@ internal sealed class MutualTlsMaterial : IDisposable
                 CryptographicOperations.ZeroMemory(pkcs12);
             }
 
-            if (!X509EndEntityPolicy.HasDigitalSignatureUsage(server) || !server.HasPrivateKey ||
+            if (!leafPolicy(server) || !server.HasPrivateKey ||
                 !roots.Cast<X509Certificate2>().Any(root =>
                     BuildChain(server, root, ServerAuthenticationOid, intermediates)))
             {
@@ -94,7 +97,7 @@ internal sealed class MutualTlsMaterial : IDisposable
             }
 
             pemCertificates[0].Dispose();
-            return new MutualTlsMaterial(roots, server, intermediates);
+            return new MutualTlsMaterial(roots, server, intermediates, leafPolicy);
         }
         catch (Exception exception) when (exception is CryptographicException or ArgumentException)
         {
@@ -116,7 +119,7 @@ internal sealed class MutualTlsMaterial : IDisposable
         X509Certificate2? certificate,
         X509Chain? peerChain,
         SslPolicyErrors __) =>
-        certificate is not null && X509EndEntityPolicy.HasDigitalSignatureUsage(certificate) &&
+        certificate is not null && leafPolicy(certificate) &&
         trustedRoots.Cast<X509Certificate2>().Any(root =>
             BuildChain(certificate, root, ClientAuthenticationOid,
                 peerChain?.ChainElements.Cast<X509ChainElement>()

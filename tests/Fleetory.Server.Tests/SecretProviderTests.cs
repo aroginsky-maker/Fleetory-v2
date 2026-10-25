@@ -3,6 +3,7 @@ using Fleetory.Platform.Contracts;
 using Fleetory.Platform.Audit;
 using Fleetory.Platform.Persistence;
 using Fleetory.Platform.Secrets;
+using Fleetory.Security.Infrastructure;
 using Fleetory.Server;
 using Fleetory.Core.Persistence;
 using Microsoft.EntityFrameworkCore;

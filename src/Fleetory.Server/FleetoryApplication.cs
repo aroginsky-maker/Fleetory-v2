@@ -16,6 +16,7 @@ using Fleetory.Platform.Persistence;
 using Fleetory.Platform.Secrets;
 using Fleetory.SharedKernel;
 using Fleetory.Server.Infrastructure;
+using Fleetory.Security.Infrastructure;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using System.Threading.RateLimiting;
 using System.Security.Cryptography;

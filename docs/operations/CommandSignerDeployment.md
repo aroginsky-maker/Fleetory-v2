@@ -1,9 +1,85 @@
 # Protected command signer deployment
 
-Fleetory does not expose a command execution endpoint in this phase. This
-runbook defines the production boundary for the future signer that produces
-Agent command signatures. The signer must remain a separate trust domain from
-Fleetory Server and the Agent host.
+Fleetory now includes the separate `Fleetory.CommandSigner.Host` executable.
+It exposes only authenticated signing of empty `Inventory.Refresh` envelopes;
+Agent command delivery/execution and high-risk/bulk approvals are not enabled.
+The signer remains a separate trust domain from Fleetory Server and Agent.
+
+## Run the mTLS host
+
+Publish `src/Fleetory.CommandSigner.Host/Fleetory.CommandSigner.Host.csproj` for
+the selected Windows/Linux host and run its DLL as the dedicated signer identity.
+Use a protected management address, dedicated approval-service client CA/leaf
+grants and a separate signer database login. No application Server or Agent
+certificate should be granted signer-client authority.
+
+```text
+dotnet Fleetory.CommandSigner.Host.dll --Signer:SecretsDirectory=/run/fleetory-signer --Signer:TransitAddress=https://transit.example --Signer:TransitKey=agent-command --Signer:TransitKeyVersion=2
+```
+
+The default listener is `127.0.0.1:9443`. Set `Signer:BindAddress` to one specific
+management IP and `Signer:Port` to the approved port. Wildcard addresses and
+additional `Kestrel:Endpoints` are refused. Configuration can also be supplied
+through `FLEETORY_SIGNER_` environment variables using `__` for nested keys.
+Do not put tokens, connection strings or private keys in command arguments.
+
+The required secret files are loaded through the shared bounded file provider:
+
+| File | Value |
+| --- | --- |
+| `signer-server-ca` | Approved public server root CA PEM, one or two roots |
+| `signer-server-cert` | Server leaf followed by intermediate CA PEMs |
+| `signer-server-key` | Matching TLS private-key PEM |
+| `signer-policy` | JSON below, containing public client trust and explicit grants |
+| `signer-postgresql` | Separate runtime login connection string; local transport or verified TLS |
+| `signer-transit-token` | Short-lived, sign-only Transit token |
+| `signer-transit-public-key` | Base64 DER SubjectPublicKeyInfo for the pinned P-256 key version |
+
+`signer-policy` uses camelCase properties `rootsPem`, `intermediatesPem` (optional)
+and `callers`. Each caller contains `callerId`, `certificateSha256`, `deviceIds`
+(array of UUID strings), `notBefore` and `expiresAt` (UTC strings). All fields are
+validated; unknown/duplicate JSON properties, private-key policy material and
+malformed/missing callers fail startup. Existing policy bounds still apply.
+Mount directories/files with service-only access and protect their parent paths;
+Unix files require private modes, and Windows deployments must provision private
+service/System/Administrators ACLs. The shared loader rejects links and bounded
+UTF-8 violations. Windows TLS deployments must also perform host PKI provisioning
+as described in the Windows preflight runbook.
+
+Provision journal schema v2 with `eng/provision-signing-journal.sql`. Grant the
+runtime login only CONNECT, schema USAGE and SELECT/INSERT on all three signer
+tables, including `signing_rejections`. Startup and `/health/ready` check these
+rights, deny UPDATE/DELETE/TRUNCATE/schema CREATE and reject privileged or
+session-role-switched connections. Database credentials must not be shared with
+Fleetory Server. `/health/live` and `/health/ready` require registered mTLS too;
+readiness verifies the journal, while Transit failures are reported by signing
+requests and must be monitored separately.
+
+Send `POST /signing/inventory-refresh` with exactly `requestId` and `deviceId`
+as UUID JSON strings. The certificate must come from the TLS connection;
+forwarded-certificate headers cannot supply authentication. TLS 1.2/1.3 and
+client certificates are mandatory. The host permits at most four in-flight
+requests, defaults to ten requests/minute globally (configurable 1–60), rejects
+bodies above 1 KiB and applies a twenty-second application deadline. Limits
+also apply to health probes. There is no HTTP listener, general command API,
+cookie login, forwarded-header trust or public command execution route.
+
+The response contains request/device/command IDs, format version, command type,
+issued/expiry times, nonce, signing key ID and base64 signature, with `no-store`.
+Reconstruct the signed envelope with an empty payload and verify it using the
+existing Core contract. Duplicate requests return 409, invalid JSON returns 400,
+scope denials return 403 and rate/concurrency denials return 429. HTTP rejections
+are committed with the actual peer fingerprint and a fixed reason; valid parsed
+request/device IDs are retained. `X-Fleetory-Audit-Id` identifies the denial record.
+If rejection audit fails, the response is 503. Operational errors use fixed
+responses and do not return backend exceptions or credentials.
+
+For disposable local tests only, Development plus explicit
+`Signer:AllowLoopbackHttpTransit=true` allows loopback HTTP Transit. Production
+rejects it even when the flag is supplied. The signer listener always remains
+HTTPS/mTLS. Policy changes/revocation currently require a controlled restart;
+atomic reload, production custody, TLS-handshake audit retention, delivery
+reconciliation and WORM/SIEM export remain deployment/integration controls.
 
 ## Implemented Transit client contract
 
@@ -61,10 +137,9 @@ caller identity for the future audit record. Its only operation remains empty
 This component performs no CRL/OCSP lookup. Revocation currently means replacing
 the protected policy snapshot without the old leaf grant; rotation may allow
 two explicit leaf grants during overlap. Online revocation, atomic host reload,
-the mTLS listener, request limits and authenticated approval
-service integration still require host implementation and deployment tests.
-The component alone does not prove client-key possession or constitute a
-deployed signing service.
+authenticated approval integration and production deployment still require
+independent evidence. The host now supplies the actual mTLS connection
+certificate and request limits; the library alone does not prove key possession.
 
 ## Implemented durable request journal
 
@@ -103,9 +178,10 @@ then returns the envelope. A completion row proves signing was journaled, not
 that an Agent received or executed the command. Lost acknowledgements, database
 errors and cancellation require reconciliation rather than another signature.
 
-This implements durable records for authorized signing attempts. The future
-mTLS host must additionally audit rejected authentication/authorization attempts,
-provide read-only reconciliation and correlate delivery acknowledgements. The
+This implements durable records for authorized signing attempts. The host also
+records HTTP denials in `signing_rejections`; TLS negotiation failures happen
+before HTTP and require retained TLS operational diagnostics. Read-only
+reconciliation and delivery acknowledgement correlation remain open. The
 separate WORM/SIEM export, immutable retention and independent administrator
 custody remain deployment/integration requirements; database append permissions
 alone do not establish those controls.

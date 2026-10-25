@@ -255,7 +255,7 @@ public sealed class SigningClientAuthorizationTests
         using var scenario = new JournalScenario();
         var requestId = Guid.NewGuid();
         await scenario.Service.SignInventoryRefreshAsync(requestId, scenario.Client, Device);
-        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        await Assert.ThrowsAsync<SigningRequestConflictException>(() =>
             scenario.Service.SignInventoryRefreshAsync(requestId, scenario.Client, Device));
         Assert.Equal(1, scenario.Transit.CallCount);
         Assert.Single(scenario.Journal.Results);
@@ -299,7 +299,7 @@ public sealed class SigningClientAuthorizationTests
         await Assert.ThrowsAsync<IOException>(() => scenario.Service.SignInventoryRefreshAsync(requestId, scenario.Client, Device));
         Assert.Single(scenario.Journal.Requests);
         Assert.Empty(scenario.Journal.Results);
-        await Assert.ThrowsAsync<InvalidOperationException>(() => scenario.Service.SignInventoryRefreshAsync(requestId, scenario.Client, Device));
+        await Assert.ThrowsAsync<SigningRequestConflictException>(() => scenario.Service.SignInventoryRefreshAsync(requestId, scenario.Client, Device));
         Assert.Equal(1, scenario.Transit.CallCount);
     }
 

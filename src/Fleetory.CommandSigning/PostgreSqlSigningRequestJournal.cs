@@ -5,7 +5,7 @@ using Npgsql;
 namespace Fleetory.CommandSigning;
 
 /// <summary>Append-only signer-owned journal; schema provisioning belongs to an independent deployment identity.</summary>
-public sealed class PostgreSqlSigningRequestJournal(NpgsqlDataSource dataSource) : ISigningRequestJournal
+public sealed partial class PostgreSqlSigningRequestJournal(NpgsqlDataSource dataSource) : ISigningRequestJournal
 {
     public async Task<bool> TryBeginAsync(SigningRequest request, CancellationToken cancellationToken = default)
     {

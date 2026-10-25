@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <ProjectReference Include="../Fleetory.Platform.Contracts/Fleetory.Platform.Contracts.csproj" />
+  </ItemGroup>
+</Project>

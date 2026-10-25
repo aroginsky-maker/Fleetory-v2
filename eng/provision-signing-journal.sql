@@ -1,5 +1,5 @@
--- Signer request journal schema v1. Run as deployment owner in the separate signer database.
--- The runtime role needs USAGE on signer and SELECT, INSERT on these two tables.
+-- Signer journal schema v2. Run as deployment owner in the separate signer database.
+-- The runtime role needs USAGE on signer and SELECT, INSERT on these three tables.
 -- Keep UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, schema CREATE and ownership away from that role.
 BEGIN;
 CREATE SCHEMA IF NOT EXISTS signer;
@@ -20,4 +20,13 @@ CREATE TABLE IF NOT EXISTS signer.signing_results (
     recorded_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
 REVOKE ALL ON signer.signing_requests, signer.signing_results FROM PUBLIC;
+CREATE TABLE IF NOT EXISTS signer.signing_rejections (
+    event_id uuid PRIMARY KEY,
+    client_certificate_sha256 char(64) NOT NULL CHECK (client_certificate_sha256 ~ '^[0-9A-F]{64}$'),
+    reason text NOT NULL CHECK (reason IN ('InvalidRequest','Forbidden','Duplicate','RateLimited','Unavailable','Cancelled')),
+    request_id uuid NULL,
+    target_device_id uuid NULL,
+    recorded_at timestamptz NOT NULL DEFAULT clock_timestamp()
+);
+REVOKE ALL ON signer.signing_rejections FROM PUBLIC;
 COMMIT;

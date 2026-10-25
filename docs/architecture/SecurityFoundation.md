@@ -32,6 +32,19 @@ The Transit client now bounds the complete request and response lifetime to ten 
 
 Authorized signing now requires a durable RequestId reservation and result journal before returning any envelope. The signer-owned PostgreSQL adapter commits append-only request/result rows with `synchronous_commit=on`, blocks duplicate RequestIds across concurrent connections and binds completion to caller, certificate and DeviceId. It stores CommandId/key ID and a canonical-envelope/signature hash rather than credentials or raw signature material. Failures remain pending for reconciliation; even a committed signing result does not prove delivery. The data source belongs to the independent signer deployment, outside the Server dependency graph. Host-level denial audit, delivery reconciliation and independent WORM/SIEM export remain open.
 
+`Fleetory.CommandSigner.Host` is now a separate executable with no Server/Agent
+implementation references. Its single HTTPS listener requires the registered
+client key through mTLS and rechecks grant/DeviceId scope before signing. The
+strict, bounded endpoint exposes only empty `Inventory.Refresh`; global rate,
+concurrency and request deadlines apply. A narrow PostgreSQL login is required
+before startup; runtime loss of rights degrades journal readiness. HTTP denials
+are stored with the actual peer fingerprint and a returned audit ID; backend
+failures never release an unaudited envelope. Shared TLS/file-secret adapters
+now live in `Fleetory.Security.Infrastructure`, outside bounded-context
+implementations, and remain covered by existing Server tests. Production
+isolation/custody, handshake-log retention, policy reload and external approvals
+are still separate controls; see [the signer runbook](../operations/CommandSignerDeployment.md).
+
 ## Implemented local audit persistence
 
 Platform now registers `IAuditWriter` backed by PostgreSQL. A write inserts an append-only `platform.audit_events` row and a matching `platform.audit_export_queue` row in the same transaction. The method returns only after commit. A database or transaction failure propagates to the caller; critical call sites must not swallow it. Both tables and their indexes are created by Platform migration `202610160001_AddPlatformAuditOutbox`. No foreign key crosses a module schema.

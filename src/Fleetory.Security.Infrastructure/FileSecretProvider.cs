@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using System.Text;
 using Fleetory.Platform.Contracts.Secrets;
 
-namespace Fleetory.Platform.Secrets;
+namespace Fleetory.Security.Infrastructure;
 
 public sealed class FileSecretProvider : ISecretProvider
 {

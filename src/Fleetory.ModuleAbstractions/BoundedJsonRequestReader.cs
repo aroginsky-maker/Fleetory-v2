@@ -8,7 +8,8 @@ public static class BoundedJsonRequestReader
 {
     public static async Task<T?> ReadAsync<T>(
         HttpContext context,
-        long maximumBodyBytes)
+        long maximumBodyBytes,
+        JsonSerializerOptions? options = null)
     {
         if (maximumBodyBytes < 1 || context.Request.ContentLength is { } length &&
             length > maximumBodyBytes)
@@ -24,7 +25,7 @@ public static class BoundedJsonRequestReader
 
         try
         {
-            return await context.Request.ReadFromJsonAsync<T>(context.RequestAborted);
+            return await context.Request.ReadFromJsonAsync<T>(options, context.RequestAborted);
         }
         catch (Exception exception) when (exception is JsonException or BadHttpRequestException or InvalidOperationException)
         {

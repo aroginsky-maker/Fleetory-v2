@@ -1,6 +1,6 @@
-namespace Fleetory.Platform.Secrets;
+namespace Fleetory.Security.Infrastructure;
 
-internal static class SecretName
+public static class SecretName
 {
     public static void Validate(string? name)
     {

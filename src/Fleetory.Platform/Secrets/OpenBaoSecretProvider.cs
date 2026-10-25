@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Text;
 using System.Text.Json;
 using Fleetory.Platform.Contracts.Secrets;
+using Fleetory.Security.Infrastructure;
 
 namespace Fleetory.Platform.Secrets;
 

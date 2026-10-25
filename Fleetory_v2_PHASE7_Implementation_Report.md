@@ -80,13 +80,15 @@
 
 - CI now selects the exact SDK from `eng/global.ci.json` and pins the setup action revision. This addresses a failed environment setup in which the floating .NET channel selected unavailable SDK/runtime downloads (HTTP 409); SDK 10.0.402 was verified in the preceding successful CI and its Windows/Linux archives were available. The CI-only SDK selection does not change local developer SDK selection.
 
+- The independent `Fleetory.CommandSigner.Host` now exposes one mTLS-only Inventory.Refresh signing endpoint with registered-leaf proof, strict 1 KiB JSON, fixed rate/concurrency limits, total request deadline, duplicate denial and required durable journal. It requires an actual narrow PostgreSQL login before startup, exposes authenticated health checks, persists HTTP denial metadata and returns a denial audit ID. Real HTTPS/PostgreSQL tests cover missing/foreign/unregistered certificates, forged headers, scope/JSON/route denial, valid signature verification, repeated requests, rate/concurrency limits, backend/audit permission failure, unsafe configuration and production rejection of lab HTTP Transit. Shared TLS and file-secret adapters were extracted rather than copied; architecture checks preserve host isolation. Production deployment evidence, handshake audit retention, policy reload, human approvals, delivery and WORM export remain open.
+
 ## Verification snapshot
 
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local tests after durable signer journal | 287/287 passed |
-| Local production coverage after durable signer journal | 93.88% |
+| Local tests after mTLS signer host | 313/313 passed |
+| Local production coverage after mTLS signer host | 93.53% |
 | Local scope reparenting mutation and preflight tests | 2/2 passed |
 | Local SonarQube Community Build at `ad4271b` | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0% |
 | Local SonarQube Community Build after Windows Agent ACL hardening | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0%; 0 bugs, vulnerabilities, code smells and hotspots |
@@ -113,6 +115,7 @@
 | Transit signing client regression checks | 28/28 passed: bounded headers/body lifetime, caller cancellation, rejected credentials, safe errors and signature verification |
 | Signer caller authorization checks | 31/31 passed: pinned client identity, custom trust, purpose/validity, exact target, immutable inputs, same-subject CA rollover, leaf rotation and no Transit call on denial |
 | Durable signer journal checks | 20 PostgreSQL cases and 9 orchestration cases passed: persistence, concurrent reservation, immutable completion, narrow permissions, forced synchronous commit and failure/cancellation/expiry without release |
+| Standalone signer mTLS host | 25 real HTTPS/PostgreSQL cases passed: key possession, scoped signing, strict JSON, duplicate/rate/concurrency denial, journal safety and production configuration |
 | Privileged change evidence runbook | Approval identities, impact hashes, audit/WORM links, retention and recovery evidence documented |
 | PHASE 7 readiness record verifier | Current UTC validity, distinct normalized actors, strict JSON flags, finite coverage, per-control object references and exact record SHA-256 checked |
 | Self-hosted PHASE 7 evidence record | Signer, least-privilege audit pipeline, TLS, backup/restore and readiness checks recorded with production limitations |
