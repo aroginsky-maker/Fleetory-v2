@@ -61,10 +61,54 @@ caller identity for the future audit record. Its only operation remains empty
 This component performs no CRL/OCSP lookup. Revocation currently means replacing
 the protected policy snapshot without the old leaf grant; rotation may allow
 two explicit leaf grants during overlap. Online revocation, atomic host reload,
-the mTLS listener, request limits, durable audit and authenticated approval
+the mTLS listener, request limits and authenticated approval
 service integration still require host implementation and deployment tests.
 The component alone does not prove client-key possession or constitute a
 deployed signing service.
+
+## Implemented durable request journal
+
+`AuthorizedCommandSigner` now requires an `ISigningRequestJournal` and a nonempty
+RequestId. `PostgreSqlSigningRequestJournal` uses the independent `signer` schema;
+provision it with `eng/provision-signing-journal.sql` under a deployment owner in
+the separate signer database. Supply its data source from the protected signer
+secret configuration. Fleetory Server must not receive these database credentials.
+Do not point this component at Platform/Core tables or use the Server account.
+Use local protected PostgreSQL transport or a verified TLS data source; production
+host transport enforcement remains part of the host integration.
+
+The runtime role needs only CONNECT to that database, USAGE on `signer`, and
+SELECT/INSERT on `signer.signing_requests` and `signer.signing_results`. Do not
+grant table/schema ownership, UPDATE, DELETE, TRUNCATE or schema CREATE. The
+provisioning script does not create a login or embed a password; record runtime
+role provisioning separately. PostgreSQL must retain its durable fsync/WAL and
+backup configuration. Each journal transaction explicitly sets
+`synchronous_commit=on`, including when the connection's default is off.
+
+Before Transit access, a unique RequestId reservation commits the configured
+caller identity, client certificate SHA-256, target DeviceId, fixed command type
+and database acceptance time. Concurrent or later attempts with that RequestId
+are rejected, including attempts with changed caller/target metadata. A failure
+after reservation leaves a pending row; it is never removed or retried by the
+signer. An operator must reconcile the incident and request before authorizing
+any new RequestId. A new RequestId must not be used blindly to bypass this state.
+
+After local signature verification, the journal commits CommandId, signing key
+ID, database recording time and SHA-256 over canonical signing bytes followed
+by the 64-byte signature. It stores no bearer credential, private key, payload
+or raw signature. Completion is bound to every reservation identity field;
+repeated identical completion is idempotent and conflicting completion fails.
+The signer rechecks authorization and cancellation after this commit and only
+then returns the envelope. A completion row proves signing was journaled, not
+that an Agent received or executed the command. Lost acknowledgements, database
+errors and cancellation require reconciliation rather than another signature.
+
+This implements durable records for authorized signing attempts. The future
+mTLS host must additionally audit rejected authentication/authorization attempts,
+provide read-only reconciliation and correlate delivery acknowledgements. The
+separate WORM/SIEM export, immutable retention and independent administrator
+custody remain deployment/integration requirements; database append permissions
+alone do not establish those controls.
 
 ## Key and service isolation
 

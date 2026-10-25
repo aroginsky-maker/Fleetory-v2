@@ -76,13 +76,15 @@
 
 - The caller-policy rollover regression exposed an OpenSSL difference: a combined trust store with same-subject CAs can choose the wrong public key. The policy now validates independently against each pinned root, preserving signature and chain checks. Equal-subject/different-key roots in both orders and an explicit intermediate are covered by the regression suite; the original difference was reproduced on Windows and in Linux Docker.
 
+- Authorized command signing now requires a durable RequestId reservation before Transit access and a committed result before envelope release. The independent signer PostgreSQL journal records caller/certificate/target metadata and a canonical envelope/signature digest with synchronous commit, rejects duplicate requests and conflicting completions, and works with SELECT/INSERT-only privileges. Pending attempts are retained without automatic retries; authorization and cancellation are rechecked after result commit. Real PostgreSQL tests cover persistence, concurrency, identity binding, result conflicts, narrow-role denial and forced durable commit. Host denial audit, delivery reconciliation and independent WORM export remain open.
+
 ## Verification snapshot
 
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local tests after signer caller authorization | 258/258 passed |
-| Local production coverage after signer caller authorization | 93.81% |
+| Local tests after durable signer journal | 287/287 passed |
+| Local production coverage after durable signer journal | 93.88% |
 | Local scope reparenting mutation and preflight tests | 2/2 passed |
 | Local SonarQube Community Build at `ad4271b` | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0% |
 | Local SonarQube Community Build after Windows Agent ACL hardening | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0%; 0 bugs, vulnerabilities, code smells and hotspots |
@@ -108,6 +110,7 @@
 | Protected command signer runbook | Non-exportable key custody, isolated mTLS signer, two-person approvals and trust rotation documented |
 | Transit signing client regression checks | 28/28 passed: bounded headers/body lifetime, caller cancellation, rejected credentials, safe errors and signature verification |
 | Signer caller authorization checks | 31/31 passed: pinned client identity, custom trust, purpose/validity, exact target, immutable inputs, same-subject CA rollover, leaf rotation and no Transit call on denial |
+| Durable signer journal checks | 20 PostgreSQL cases and 9 orchestration cases passed: persistence, concurrent reservation, immutable completion, narrow permissions, forced synchronous commit and failure/cancellation/expiry without release |
 | Privileged change evidence runbook | Approval identities, impact hashes, audit/WORM links, retention and recovery evidence documented |
 | PHASE 7 readiness record verifier | Current UTC validity, distinct normalized actors, strict JSON flags, finite coverage, per-control object references and exact record SHA-256 checked |
 | Self-hosted PHASE 7 evidence record | Signer, least-privilege audit pipeline, TLS, backup/restore and readiness checks recorded with production limitations |

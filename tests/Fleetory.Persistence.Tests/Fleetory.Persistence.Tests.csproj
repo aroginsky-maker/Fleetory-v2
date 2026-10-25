@@ -17,6 +17,7 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="../../src/Fleetory.CommandSigning/Fleetory.CommandSigning.csproj" />
     <ProjectReference Include="../../src/Fleetory.Platform/Fleetory.Platform.csproj" />
     <ProjectReference Include="../../src/Fleetory.Platform.Contracts/Fleetory.Platform.Contracts.csproj" />
     <ProjectReference Include="../../src/Fleetory.Core/Fleetory.Core.csproj" />
@@ -24,6 +25,9 @@
     <ProjectReference Include="../../src/Fleetory.Server/Fleetory.Server.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="../../eng/provision-signing-journal.sql"
+          Link="provision-signing-journal.sql"
+          CopyToOutputDirectory="PreserveNewest" />
     <None Include="../../eng/bootstrap-first-admin.sql"
           Link="bootstrap-first-admin.sql"
           CopyToOutputDirectory="PreserveNewest" />

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Fleetory.CommandSigning;
@@ -193,12 +194,12 @@ public sealed class SigningClientAuthorizationTests
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         using var transit = new TransitTestHandler(key);
         using var signer = CreateTransitSigner(transit, key);
-        var service = new AuthorizedCommandSigner(policy, signer);
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.SignInventoryRefreshAsync(null, Device));
-        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.SignInventoryRefreshAsync(client, new DeviceId(Guid.NewGuid())));
+        var service = new AuthorizedCommandSigner(policy, signer, new MemorySigningJournal());
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.SignInventoryRefreshAsync(Guid.NewGuid(), null, Device));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.SignInventoryRefreshAsync(Guid.NewGuid(), client, new DeviceId(Guid.NewGuid())));
         using var cancelled = new CancellationTokenSource();
         cancelled.Cancel();
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.SignInventoryRefreshAsync(client, Device, cancelled.Token));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.SignInventoryRefreshAsync(Guid.NewGuid(), client, Device, cancelled.Token));
         Assert.Equal(0, transit.CallCount);
     }
 
@@ -211,7 +212,7 @@ public sealed class SigningClientAuthorizationTests
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         using var transit = new TransitTestHandler(key);
         using var signer = CreateTransitSigner(transit, key);
-        var signed = await new AuthorizedCommandSigner(policy, signer).SignInventoryRefreshAsync(client, Device);
+        var signed = await new AuthorizedCommandSigner(policy, signer, new MemorySigningJournal()).SignInventoryRefreshAsync(Guid.NewGuid(), client, Device);
         Assert.Equal("approval-service", signed.CallerId);
         Assert.Equal(Device, signed.Envelope.TargetDeviceId);
         Assert.Equal(AgentCommandTypes.InventoryRefresh, signed.Envelope.CommandType);
@@ -230,8 +231,115 @@ public sealed class SigningClientAuthorizationTests
         using var transit = new TransitTestHandler(key) { OnSigning = () => clock.UtcNow = Now.AddHours(1) };
         using var signer = CreateTransitSigner(transit, key);
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
-            new AuthorizedCommandSigner(policy, signer).SignInventoryRefreshAsync(client, Device));
+            new AuthorizedCommandSigner(policy, signer, new MemorySigningJournal()).SignInventoryRefreshAsync(Guid.NewGuid(), client, Device));
         Assert.Equal(1, transit.CallCount);
+    }
+
+    [Fact]
+    public async Task Signing_reservation_and_result_exist_before_the_envelope_is_returned()
+    {
+        using var scenario = new JournalScenario();
+        var requestId = Guid.NewGuid();
+        var result = await scenario.Service.SignInventoryRefreshAsync(requestId, scenario.Client, Device);
+        var request = Assert.Single(scenario.Journal.Requests.Values);
+        Assert.Equal(requestId, request.RequestId);
+        Assert.Equal("approval-service", request.CallerId);
+        Assert.Equal(scenario.Client.GetCertHashString(HashAlgorithmName.SHA256), request.ClientCertificateSha256);
+        Assert.Equal(Device, request.TargetDeviceId);
+        Assert.Same(result.Envelope, Assert.Single(scenario.Journal.Results.Values));
+    }
+
+    [Fact]
+    public async Task Repeated_request_does_not_generate_another_command()
+    {
+        using var scenario = new JournalScenario();
+        var requestId = Guid.NewGuid();
+        await scenario.Service.SignInventoryRefreshAsync(requestId, scenario.Client, Device);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            scenario.Service.SignInventoryRefreshAsync(requestId, scenario.Client, Device));
+        Assert.Equal(1, scenario.Transit.CallCount);
+        Assert.Single(scenario.Journal.Results);
+    }
+
+    [Fact]
+    public async Task Concurrent_same_request_is_signed_only_once()
+    {
+        using var scenario = new JournalScenario();
+        var requestId = Guid.NewGuid();
+        var calls = Enumerable.Range(0, 12).Select(async _ =>
+        {
+            try
+            {
+                await scenario.Service.SignInventoryRefreshAsync(requestId, scenario.Client, Device);
+                return true;
+            }
+            catch (InvalidOperationException) { return false; }
+        });
+        var results = await Task.WhenAll(calls);
+        Assert.Equal(1, results.Count(signed => signed));
+        Assert.Equal(1, scenario.Transit.CallCount);
+    }
+
+    [Fact]
+    public async Task Failed_reservation_prevents_transit_access()
+    {
+        using var scenario = new JournalScenario();
+        scenario.Journal.FailBegin = true;
+        await Assert.ThrowsAsync<IOException>(() => scenario.Service.SignInventoryRefreshAsync(Guid.NewGuid(), scenario.Client, Device));
+        Assert.Equal(0, scenario.Transit.CallCount);
+        Assert.Empty(scenario.Journal.Requests);
+    }
+
+    [Fact]
+    public async Task Failed_completion_withholds_the_signature_and_prevents_resigning()
+    {
+        using var scenario = new JournalScenario();
+        scenario.Journal.FailCompletion = true;
+        var requestId = Guid.NewGuid();
+        await Assert.ThrowsAsync<IOException>(() => scenario.Service.SignInventoryRefreshAsync(requestId, scenario.Client, Device));
+        Assert.Single(scenario.Journal.Requests);
+        Assert.Empty(scenario.Journal.Results);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => scenario.Service.SignInventoryRefreshAsync(requestId, scenario.Client, Device));
+        Assert.Equal(1, scenario.Transit.CallCount);
+    }
+
+    [Fact]
+    public async Task Transit_failure_leaves_a_pending_reservation()
+    {
+        using var scenario = new JournalScenario();
+        scenario.Transit.Replacement = "vault:v3:unexpected";
+        await Assert.ThrowsAsync<CryptographicException>(() => scenario.Service.SignInventoryRefreshAsync(Guid.NewGuid(), scenario.Client, Device));
+        Assert.Single(scenario.Journal.Requests);
+        Assert.Empty(scenario.Journal.Results);
+    }
+
+    [Fact]
+    public async Task Grant_expiring_during_journal_commit_prevents_release()
+    {
+        using var scenario = new JournalScenario();
+        scenario.Journal.OnCompleting = () => scenario.Clock.UtcNow = Now.AddHours(1);
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => scenario.Service.SignInventoryRefreshAsync(Guid.NewGuid(), scenario.Client, Device));
+        Assert.Single(scenario.Journal.Results);
+    }
+
+    [Fact]
+    public async Task Cancellation_during_journal_commit_prevents_release()
+    {
+        using var scenario = new JournalScenario();
+        using var lifetime = new CancellationTokenSource();
+        scenario.Journal.OnCompleting = lifetime.Cancel;
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            scenario.Service.SignInventoryRefreshAsync(Guid.NewGuid(), scenario.Client, Device, lifetime.Token));
+        Assert.Single(scenario.Journal.Results);
+    }
+
+    [Fact]
+    public async Task Empty_request_id_is_rejected_before_journaling()
+    {
+        using var scenario = new JournalScenario();
+        await Assert.ThrowsAsync<ArgumentException>(() => scenario.Service.SignInventoryRefreshAsync(Guid.Empty, scenario.Client, Device));
+        Assert.Empty(scenario.Journal.Requests);
+        Assert.Equal(0, scenario.Transit.CallCount);
     }
 
     private static SigningClientGrant Grant(X509Certificate2 certificate) =>
@@ -243,6 +351,62 @@ public sealed class SigningClientAuthorizationTests
     private static OpenBaoCommandSigner CreateTransitSigner(TransitTestHandler transit, ECDsa key) =>
         new(new Uri("http://127.0.0.1:8200/"), "test-token", "test-key", 2,
             key.ExportSubjectPublicKeyInfo(), allowHttpLoopback: true, transit);
+
+    private sealed class MemorySigningJournal : ISigningRequestJournal
+    {
+        public ConcurrentDictionary<Guid, SigningRequest> Requests { get; } = new();
+        public ConcurrentDictionary<Guid, SignedCommandEnvelope> Results { get; } = new();
+        public bool FailBegin { get; set; }
+        public bool FailCompletion { get; set; }
+        public Action? OnCompleting { get; set; }
+
+        public Task<bool> TryBeginAsync(SigningRequest request, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (FailBegin) { throw new IOException("Reservation unavailable."); }
+            return Task.FromResult(Requests.TryAdd(request.RequestId, request));
+        }
+
+        public Task CompleteAsync(SigningRequest request, SignedCommandEnvelope envelope, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (FailCompletion) { throw new IOException("Completion unavailable."); }
+            Results[request.RequestId] = envelope;
+            OnCompleting?.Invoke();
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class JournalScenario : IDisposable
+    {
+        private readonly Certificates _certificates = new();
+        private readonly ECDsa _key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        private readonly OpenBaoCommandSigner _signer;
+        private readonly SigningClientAuthorizationPolicy _policy;
+        public MutableTime Clock { get; } = new(Now);
+        public MemorySigningJournal Journal { get; } = new();
+        public X509Certificate2 Client { get; }
+        public TransitTestHandler Transit { get; }
+        public AuthorizedCommandSigner Service { get; }
+
+        public JournalScenario()
+        {
+            Client = _certificates.Issue();
+            Transit = new TransitTestHandler(_key);
+            _signer = CreateTransitSigner(Transit, _key);
+            _policy = CreatePolicy(_certificates.Root, Grant(Client), Clock);
+            Service = new AuthorizedCommandSigner(_policy, _signer, Journal);
+        }
+
+        public void Dispose()
+        {
+            _signer.Dispose();
+            _policy.Dispose();
+            Client.Dispose();
+            _key.Dispose();
+            _certificates.Dispose();
+        }
+    }
 
     private sealed class MutableTime(DateTimeOffset now) : TimeProvider
     {
