@@ -46,6 +46,10 @@ jobs:
         shell: pwsh
         run: ./eng/verify-windows-tls-chain.ps1
 
+      - name: Verify immudb TLS probe on Windows PowerShell 5.1
+        shell: powershell
+        run: ./tests/Fleetory.Tools.Tests/ImmudbTlsProbe.Tests.ps1
+
   quality:
     name: Strict build, tests, coverage and Sonar
     runs-on: ubuntu-latest
@@ -119,7 +123,7 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/Phase7Readiness.Tests.ps1
 
-      - name: Verify immudb TLS probe validation
+      - name: Verify immudb TLS probe over a real TLS connection
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/ImmudbTlsProbe.Tests.ps1
 

@@ -1,6 +1,6 @@
 # Fleetory v2 — PHASE 7 Security Foundation progress report
 
-**Status:** IN PROGRESS, 23 October 2026. PHASE 6 is complete; PHASE 8 has not started. Draft [PR #2](https://github.com/aroginsky-maker/Fleetory-v2/pull/2) contains the current implementation. The detailed controls and limits are maintained in [SecurityFoundation](docs/architecture/SecurityFoundation.md) and the [local lab guide](docs/architecture/SecurityLab.md).
+**Status:** IN PROGRESS, 25 October 2026. PHASE 6 is complete; PHASE 8 has not started. Draft [PR #2](https://github.com/aroginsky-maker/Fleetory-v2/pull/2) contains the current implementation. The detailed controls and limits are maintained in [SecurityFoundation](docs/architecture/SecurityFoundation.md) and the [local lab guide](docs/architecture/SecurityLab.md).
 
 ## Implemented
 
@@ -63,18 +63,19 @@
 - Read-only immudb verifier tokens default to protected environment variables (`FLEETORY_IMMUDB_STATE_BEARER_TOKEN` and `FLEETORY_IMMUDB_RESTORE_READ_TOKEN`) so routine invocations do not place bearer credentials in process arguments. Explicit parameters remain available for controlled automation.
 - The signed-state receipt anchor now carries a SHA-256 chain across stable receipt fields. A changed, reordered or truncated receipt fails closed before append; PowerShell tests cover initialization, idempotence, rollback, conflict and tampering.
 - The two PowerShell provisioning checks now share their function-import and safe artifact-cleanup helper. Windows CI also runs the Agent security tests, including the protected-directory ACL checks, on a Windows runner.
+- The immudb TLS preflight now requires a credential-free HTTPS origin and HTTP 2xx, rejects redirects and HTTP errors, disables user curl defaults and proxies, and bounds its connection and request time. A real loopback TLS fixture tests explicit trust, foreign certificates, hostname mismatch, redirect non-delivery and non-2xx responses on PowerShell 7 and Windows PowerShell 5.1 without modifying system trust. This corrects the earlier input-only tests, which did not exercise the previously missing 3xx rejection. The fixture pins a self-signed leaf; production chain, custody and rotation records remain required.
 
 ## Verification snapshot
 
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local tests after independent receipt-export verification | 204/204 passed |
-| Local production coverage after independent receipt-export verification | 93.63% |
+| Local tests after immudb TLS preflight hardening | 206/206 passed |
+| Local production coverage after immudb TLS preflight hardening | 93.68% |
 | Local scope reparenting mutation and preflight tests | 2/2 passed |
 | Local SonarQube Community Build at `ad4271b` | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0% |
 | Local SonarQube Community Build after Windows Agent ACL hardening | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0%; 0 bugs, vulnerabilities, code smells and hotspots |
-| Current CI production coverage, `71c6adc` / run `40116080650` | 93.47% |
+| Completed CI baseline before TLS regression hardening, `4a4d69f` / run `40136441774` | 93.52% |
 | Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
 | Local immudb restore acceptance | Read-only token separation, known EventId revision/hash and fail-closed validation passed |
 | Local disposable immudb backup/restore drill | Hot backup transactions 1–33 restored into an isolated replica database; final state reported 33 transactions |
@@ -94,17 +95,17 @@
 | Privileged change evidence runbook | Approval identities, impact hashes, audit/WORM links, retention and recovery evidence documented |
 | PHASE 7 readiness record verifier | Final control flags, approval actors, CI/Sonar, WORM reference and rollback evidence validated |
 | Self-hosted PHASE 7 evidence record | Signer, least-privilege audit pipeline, TLS, backup/restore and readiness checks recorded with production limitations |
-| immudb TLS probe validation | HTTPS-only origin, explicit CA path, TLS 1.2+, no credentials and no redirects validated |
+| immudb TLS probe validation | Real TLS on PowerShell 7 and Windows PowerShell 5.1: trust, hostname, redirect non-delivery, HTTP errors and curl defaults checked |
 | Local WebAuthn/OIDC with real Admin mTLS | 401 without token; 403 with WebAuthn token at RBAC |
 | Windows server TLS chain in CI with provisioned OS CA stores | 2 certificates sent; root-only OpenSSL verification code 0 |
 | Linux container server TLS chain | 2 certificates sent; root-only OpenSSL verification code 0 |
-| Current Sonar PR coverage, `7d8b229` | 90.4% |
-| Sonar new-code coverage at `7d8b229` | 90.67357512953367% |
-| Current Sonar overall duplication, `7d8b229` | 0.0% |
-| Sonar new-code duplication at `7d8b229` | 0.0% |
-| Sonar Quality Gate at `7d8b229` | PASS |
+| Sonar PR coverage baseline, `4a4d69f` | 90.6% |
+| Sonar new-code coverage baseline, `4a4d69f` | 90.82901554404145% |
+| Sonar overall duplication baseline, `4a4d69f` | 0.0% |
+| Sonar new-code duplication baseline, `4a4d69f` | 0.0% |
+| Sonar Quality Gate baseline, `4a4d69f` | PASS |
 
-The current completed CI is [run 40116080650](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/40116080650) for `71c6adc`: both Windows and Linux jobs and SonarCloud passed, production coverage was 93.47%, overall Sonar coverage 90.4%, new-code coverage 90.67357512953367%, and both overall and new-code duplication were 0.0%. The PR remains draft while the remaining production controls are open.
+The completed CI baseline before TLS regression hardening is [run 40136441774](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/40136441774) for `4a4d69f`: both Windows and Linux jobs and SonarCloud passed, production coverage was 93.52%, overall Sonar coverage 90.6%, new-code coverage 90.82901554404145%, and both overall and new-code duplication were 0.0%. Fresh results for later changes are recorded in PR #2. The PR remains draft while the remaining production controls are open.
 
 The last completed CI at `14d2a65` is [run 39659108678](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39659108678); both jobs and the SonarCloud Quality Gate passed. Actions resumed without changing the owner's $0 budget. SonarCloud previously found 18 duplicated lines in each of the two PowerShell provisioning tests; their shared helper reduced overall and new-code duplication to 0.0%. The Windows job ran the Core security tests with the actual ACL checks. Local SonarQube Community Build scans of `ad4271b` and the subsequent Windows Agent ACL changes each passed their own Quality Gate with 90.7% overall coverage and 0.0% overall duplication. The latter also reported zero bugs, vulnerabilities, code smells and security hotspots. These local scans cannot substitute for a current SonarCloud PR analysis because the server, rules and new-code baseline differ. A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The pipeline passed again on 19 October using the new dedicated immudb account. The PowerShell provisioning test runs in CI and remains under Sonar static analysis; it is excluded from the .NET coverage denominator because `dotnet-coverage` cannot instrument PowerShell. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
 
