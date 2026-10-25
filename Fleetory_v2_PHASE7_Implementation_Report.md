@@ -72,13 +72,15 @@
 
 - The OpenBao Transit command signer now enforces a ten-second total operation deadline through headers, body reads and envelope release, propagates caller cancellation, validates bounded visible-ASCII credentials before creating headers, and disables inherited proxies/cookies. HTTP status, JSON and signature-encoding failures use fixed messages without untrusted response text. Tests reproduce remote reason-phrase disclosure, reject malformed inputs and exercise stalled headers/body plus cancellation over real loopback HTTP. This hardens the existing signing library; isolated service deployment and authenticated approval remain open.
 
+- Signer caller authorization now pins each configured client certificate to an identity, explicit DeviceIds and a bounded UTC grant window. It validates client EKU/key usage and a custom-root chain locally without downloads, copies trust/target inputs, and denies unregistered or out-of-scope clients before Transit. The authorization wrapper rechecks expiry after signing before releasing an envelope. Tests cover certificate validity/purpose/trust, target scope, input mutation, grant boundaries, leaf rotation and denied-call non-delivery. This is a library prerequisite for the separate mTLS host, not a deployed service or authenticated approval workflow.
+
 ## Verification snapshot
 
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local tests after Transit client hardening | 227/227 passed |
-| Local production coverage after Transit client hardening | 93.78% |
+| Local tests after signer caller authorization | 257/257 passed |
+| Local production coverage after signer caller authorization | 93.81% |
 | Local scope reparenting mutation and preflight tests | 2/2 passed |
 | Local SonarQube Community Build at `ad4271b` | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0% |
 | Local SonarQube Community Build after Windows Agent ACL hardening | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0%; 0 bugs, vulnerabilities, code smells and hotspots |
@@ -103,6 +105,7 @@
 | Production certificate lifecycle runbook | Issuance, custody, physical-device verification, rotation, recovery and rollback evidence documented |
 | Protected command signer runbook | Non-exportable key custody, isolated mTLS signer, two-person approvals and trust rotation documented |
 | Transit signing client regression checks | 28/28 passed: bounded headers/body lifetime, caller cancellation, rejected credentials, safe errors and signature verification |
+| Signer caller authorization checks | 30/30 passed: pinned client identity, custom trust, purpose/validity, exact target, immutable inputs, rotation and no Transit call on denial |
 | Privileged change evidence runbook | Approval identities, impact hashes, audit/WORM links, retention and recovery evidence documented |
 | PHASE 7 readiness record verifier | Current UTC validity, distinct normalized actors, strict JSON flags, finite coverage, per-control object references and exact record SHA-256 checked |
 | Self-hosted PHASE 7 evidence record | Signer, least-privilege audit pipeline, TLS, backup/restore and readiness checks recorded with production limitations |

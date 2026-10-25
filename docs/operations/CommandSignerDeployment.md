@@ -31,6 +31,39 @@ their explicit test-only HTTP setting does not permit production HTTP. These
 client checks do not establish the isolated signer service or approval workflow
 required below.
 
+## Implemented caller authorization component
+
+`SigningClientAuthorizationPolicy` and `AuthorizedCommandSigner` provide the
+input authorization layer for the future isolated host. The host must first
+prove possession of the client key through an actual mTLS handshake and pass
+that connection's certificate. A certificate supplied in JSON, an HTTP header
+or a forwarded-certificate header is not authentication and must not be used.
+
+Each protected `SigningClientGrant` binds a configured caller ID to one exact
+DER SHA-256 fingerprint, explicit DeviceIds and a UTC half-open validity window
+`[NotBefore, ExpiresAt)`, at most 24 hours long. Policy creation rejects duplicate
+fingerprints, duplicate/empty DeviceIds and malformed grants. It copies public
+CA certificates and target sets, so later mutation or disposal of input objects
+does not widen trust. Limits are two roots, three intermediates, 64 grants and
+1024 explicit DeviceIds per grant; there is no wildcard target.
+
+Authorization requires the pinned leaf, digital-signature usage, explicit
+client-authentication EKU, a currently valid chain to an approved custom root,
+a current grant and the exact target. System roots and downloaded intermediates
+do not grant trust. An unregistered Server or Agent certificate is denied even
+when its chain is trusted. The wrapper checks authorization before Transit
+access and again before releasing the signed envelope, and returns the configured
+caller identity for the future audit record. Its only operation remains empty
+`Inventory.Refresh`; high-risk and bulk signing are unavailable.
+
+This component performs no CRL/OCSP lookup. Revocation currently means replacing
+the protected policy snapshot without the old leaf grant; rotation may allow
+two explicit leaf grants during overlap. Online revocation, atomic host reload,
+the mTLS listener, request limits, durable audit and authenticated approval
+service integration still require host implementation and deployment tests.
+The component alone does not prove client-key possession or constitute a
+deployed signing service.
+
 ## Key and service isolation
 
 1. Create a non-exportable P-256 signing key in the approved HSM or Transit
