@@ -44,10 +44,50 @@ run establishes only structural/chain consistency: the corresponding
 transfer, use both independently approved inputs and retain both true flags
 and the exact `exportSha256` from the deterministic verification summary.
 
+## Previously approved checkpoint
+
+To detect rollback of both a candidate package and its matching local anchor,
+retain a previously verified cumulative export in the independent WORM system.
+Record its exact `exportSha256` in the approved change record. On the next run,
+retrieve that specific retained version and pass the separately approved digest:
+
+```powershell
+./eng/verify-immudb-receipt-export.ps1 `
+  -ExportPath C:\ProgramData\Fleetory\audit-state\outbox\receipts-export.json `
+  -AnchorPath C:\ProgramData\Fleetory\audit-state\receipts.ndjson `
+  -PublicKeyPath C:\ProgramData\Fleetory\trust\immudb-state-public.pem `
+  -CheckpointPath C:\ProgramData\Fleetory\independent-evidence\previous-export.json `
+  -ExpectedCheckpointSha256 '<SHA-256 from the independent approval record>'
+```
+
+Checkpoint mode requires both checkpoint arguments and the pinned public key.
+It checks the checkpoint's exact file digest, schema, chain and every signature,
+then requires the candidate to use the same database and retain the entire
+checkpoint receipt sequence as its unchanged prefix. A shorter history, a
+rewritten state at the same transaction, a higher transaction with rewritten
+earlier history, or changed observation metadata fails. The identical approved
+package is idempotent; a valid append-only extension is accepted.
+
+The summary adds `checkpointVerified=true`, `checkpointExportSha256`,
+`checkpointReceiptCount` and `checkpointLastTxId`. Without checkpoint inputs,
+`checkpointVerified` is explicitly false. Validation never updates the retained
+checkpoint. After independent review, copy the newly verified export to a new
+immutable object version and record its SHA-256 for the next run; retain the
+previous approved versions.
+The first checkpoint requires independent source/signature review and explicit
+approval; without a predecessor the tool cannot establish earlier history.
+
+Do not recompute the expected digest from a suspect checkpoint file or obtain
+both inputs from an untrusted candidate host. The independent system must supply
+the latest approved checkpoint identity and digest. The check establishes
+preservation of that receipt history, not global freshness or an immudb Merkle
+consistency proof for later transactions. It does not fetch WORM objects,
+authenticate approvals or enforce retention.
+
 The source anchor and pinned key must be independently trusted. Matching a
-package to a local file cannot prove freshness or detect replacement of both
-with an older valid snapshot; off-host retention and approved transaction-tip
-records provide that boundary. Keep input directories protected and coordinate
+package to a local file alone cannot prove freshness or detect replacement of
+both with an older valid snapshot; the independently identified checkpoint and
+off-host retention provide that boundary. Keep input directories protected and coordinate
 export with the receipt writer; one read buffer is not a filesystem snapshot
 against an untrusted concurrent writer.
 
@@ -55,5 +95,8 @@ The CI tests cover a valid signed prefix, rebased suffix, extension, substituted
 signed state with unchanged count/range, changed observation metadata, a source
 file changed after reading, size/UTF-8 failures and equivalent formatting. Both
 export and independent verification run on Linux and Windows PowerShell 5.1.
+Checkpoint tests cover joint candidate/anchor rollback, signed historical forks,
+database mismatch, changed metadata, wrong or missing digest, invalid checkpoint
+signatures, and valid idempotent/forward histories on both runtimes.
 The scripts never contact the external destination. Production WORM retention,
 custody, legal hold and transfer evidence remain deployment controls.

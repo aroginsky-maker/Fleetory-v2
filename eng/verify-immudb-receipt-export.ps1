@@ -4,7 +4,9 @@
 param(
     [Parameter(Mandatory)][string] $ExportPath,
     [string] $AnchorPath,
-    [string] $PublicKeyPath
+    [string] $PublicKeyPath,
+    [string] $CheckpointPath,
+    [ValidatePattern('^[0-9A-Fa-f]{64}$')][string] $ExpectedCheckpointSha256
 )
 
 $ErrorActionPreference = 'Stop'
@@ -109,10 +111,57 @@ function Test-ReceiptExportPackage(
     }
 }
 
+function Test-ReceiptExportCheckpoint(
+    $CurrentPackage, [string] $Path, [string] $ExpectedSha256, [string] $PinnedKeyPath) {
+    $checkpoint = Get-ReceiptExportAbsolutePath $Path 'Checkpoint path'
+    $read = Read-ReceiptExport $checkpoint
+    $digest = Get-ReceiptExportFileSha256 $read.Bytes
+    if ($digest -cne $ExpectedSha256.ToUpperInvariant()) {
+        throw 'The checkpoint hash does not match the independently approved digest.'
+    }
+    # A pinned file digest identifies the approved package. Verify its state
+    # signatures as well; a new package must retain its complete receipt prefix.
+    $prior = Test-ReceiptExportPackage $read.Package '' $PinnedKeyPath $read.Bytes
+    if ($CurrentPackage.database -cne $prior.database) {
+        throw 'The receipt export database differs from the approved checkpoint.'
+    }
+    $before = @($read.Package.receipts)
+    $after = @($CurrentPackage.receipts)
+    if ($after.Count -lt $before.Count -or [long]$CurrentPackage.lastTxId -lt $prior.lastTxId) {
+        throw 'The receipt export rolls back the approved checkpoint.'
+    }
+    for ($index = 0; $index -lt $before.Count; $index++) {
+        if ((Get-ReceiptExportComparableJson $before[$index]) -cne
+            (Get-ReceiptExportComparableJson $after[$index])) {
+            throw 'The receipt export rewrites the approved checkpoint history.'
+        }
+    }
+    return [ordered]@{
+        checkpointVerified = $true
+        checkpointExportSha256 = $digest
+        checkpointReceiptCount = $before.Count
+        checkpointLastTxId = $prior.lastTxId
+    }
+}
+
+$hasCheckpoint = -not [string]::IsNullOrWhiteSpace($CheckpointPath)
+$hasCheckpointDigest = -not [string]::IsNullOrWhiteSpace($ExpectedCheckpointSha256)
+if ($hasCheckpoint -ne $hasCheckpointDigest) {
+    throw 'A checkpoint requires both its path and independently approved SHA-256.'
+}
+if ($hasCheckpoint -and [string]::IsNullOrWhiteSpace($PublicKeyPath)) {
+    throw 'Checkpoint verification requires the independently pinned public key.'
+}
 $export = Get-ReceiptExportAbsolutePath $ExportPath 'Export path'
 if (-not (Test-Path -LiteralPath $export -PathType Leaf)) {
     throw 'The receipt export does not exist.'
 }
 $read = Read-ReceiptExport $export
 $result = Test-ReceiptExportPackage $read.Package $AnchorPath $PublicKeyPath $read.Bytes
+$result['checkpointVerified'] = $false
+if ($hasCheckpoint) {
+    $verifiedCheckpoint = Test-ReceiptExportCheckpoint $read.Package $CheckpointPath `
+        $ExpectedCheckpointSha256 $PublicKeyPath
+    foreach ($name in $verifiedCheckpoint.Keys) { $result[$name] = $verifiedCheckpoint[$name] }
+}
 $result | ConvertTo-Json -Compress -Depth 4

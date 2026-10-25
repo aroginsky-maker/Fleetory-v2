@@ -1,4 +1,4 @@
-param(
+﻿param(
     [Parameter(Mandatory)][string] $Source,
     [Parameter(Mandatory)][string[]] $Names
 )
@@ -84,4 +84,31 @@ function ConvertTo-DerEcdsaSignature([byte[]] $P1363) {
     [Buffer]::BlockCopy($components[1], 0, $der, 2 + $components[0].Length,
         $components[1].Length)
     return $der
+}
+
+function New-SignedReceipt(
+    [Security.Cryptography.ECDsa] $Key,
+    [byte[]] $PublicPoint,
+    [long] $TxId,
+    [string] $Previous,
+    [byte] $HashSeed = 0,
+    [string] $Database = 'defaultdb') {
+    $hash = [byte[]](1..32)
+    $hash[0] = [byte](($TxId + 1 + $HashSeed) % 255)
+    $receipt = [pscustomobject][ordered]@{
+        schema = 'fleetory.immudb-state-receipt.v1'
+        database = $Database
+        txId = $TxId
+        txHash = [Convert]::ToBase64String($hash)
+        signature = ''
+        publicKeySha256 = ConvertTo-ImmudbUpperHex (Get-ImmudbSha256 $PublicPoint)
+        observedAt = [DateTimeOffset]::UtcNow.ToString('O')
+        previousReceiptSha256 = $Previous
+    }
+    $payload = New-ImmudbStateSigningPayload $receipt.database $TxId $hash
+    $receipt.signature = [Convert]::ToBase64String((ConvertTo-DerEcdsaSignature (
+        $Key.SignHash((Get-ImmudbSha256 $payload)))))
+    $receipt | Add-Member -NotePropertyName receiptSha256 -NotePropertyValue (
+        Get-ImmudbReceiptSha256 $receipt)
+    return $receipt
 }

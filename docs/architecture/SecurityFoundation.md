@@ -194,6 +194,15 @@ The Agent command policy now exposes a risk decision before dispatch. The only e
 
 The `export-immudb-receipt-anchor.ps1` operation re-validates the receipt chain and writes a deterministic, atomic export package containing the database, transaction range, receipt count and source-anchor SHA-256. The read-only `verify-immudb-receipt-export.ps1` operation independently checks that package. When an anchor is supplied, both its exact byte hash and each receipt's content/order must match the package; matching only the claimed hash is insufficient. Export and verification hash and parse one bounded 8 MiB buffer, and the verifier can additionally check every receipt signature against the independently pinned P-256 key. Neither operation contacts the external destination; operators retain the successful comparison and signature flags and copy the verified package to the independently administered WORM/SIEM destination. A trusted external anchor/tip is still needed to detect replacement of both local inputs with an older snapshot.
 
+The verifier also accepts a previously approved export with its independently
+retained SHA-256 as a checkpoint. With the pinned key, it verifies that package
+and requires its complete receipt history to remain an unchanged prefix of the
+candidate. Joint rollback of the candidate and local anchor, a signed historical
+fork or a database mismatch fails. `checkpointVerified` remains false when the
+optional checkpoint inputs are absent. The operation is read-only; checkpoint
+selection, latest-version custody and WORM retention remain independent
+deployment responsibilities, as documented in [ImmudbReceiptExport](../operations/ImmudbReceiptExport.md).
+
 ## Scope hierarchy change preflight
 
 The read-only [scope reparenting preflight](ScopeReparenting.md) reports both candidate ancestor grants and actual actor/permission/descendant access changes when a subtree changes parent and rejects missing scopes, missing parents, existing hierarchy cycles and no-op moves. Its PostgreSQL test verifies the output and confirms the hierarchy is unchanged. After independent impact review, [reparent-scope.sql](../../eng/reparent-scope.sql) applies the change only with a distinct operator and approver reference, an incident ID and an expected revision; its update, version snapshot and audit/outbox entry commit together. No parent mutation route is exposed over HTTP.
