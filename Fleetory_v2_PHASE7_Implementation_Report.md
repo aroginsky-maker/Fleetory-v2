@@ -78,6 +78,8 @@
 
 - Authorized command signing now requires a durable RequestId reservation before Transit access and a committed result before envelope release. The independent signer PostgreSQL journal records caller/certificate/target metadata and a canonical envelope/signature digest with synchronous commit, rejects duplicate requests and conflicting completions, and works with SELECT/INSERT-only privileges. Pending attempts are retained without automatic retries; authorization and cancellation are rechecked after result commit. Real PostgreSQL tests cover persistence, concurrency, identity binding, result conflicts, narrow-role denial and forced durable commit. Host denial audit, delivery reconciliation and independent WORM export remain open.
 
+- CI now selects the exact SDK from `eng/global.ci.json` and pins the setup action revision. This addresses a failed environment setup in which the floating .NET channel selected unavailable SDK/runtime downloads (HTTP 409); SDK 10.0.402 was verified in the preceding successful CI and its Windows/Linux archives were available. The CI-only SDK selection does not change local developer SDK selection.
+
 ## Verification snapshot
 
 | Check | Latest verified result |
