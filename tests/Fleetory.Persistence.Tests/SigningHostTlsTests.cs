@@ -73,6 +73,7 @@ public sealed class SigningHostTlsTests(PostgreSqlTestFixture fixture)
     [InlineData("empty", HttpStatusCode.BadRequest)]
     [InlineData("oversized", HttpStatusCode.BadRequest)]
     [InlineData("unsupported-command", HttpStatusCode.NotFound)]
+    [InlineData("unsupported-dotted-command", HttpStatusCode.NotFound)]
     public async Task Rejected_http_requests_are_audited_without_transit_access(string kind, HttpStatusCode expected)
     {
         await using var lab = await HostLab.CreateAsync(fixture);
@@ -87,7 +88,12 @@ public sealed class SigningHostTlsTests(PostgreSqlTestFixture fixture)
             "oversized" => new string('x', 2048),
             _ => JsonSerializer.Serialize(new { requestId = id, deviceId = lab.Device.Value })
         };
-        var path = kind == "unsupported-command" ? "/signing/bulk-reboot" : "/signing/inventory-refresh";
+        var path = kind switch
+        {
+            "unsupported-command" => "/signing/bulk-reboot",
+            "unsupported-dotted-command" => "/signing/Fleet.Bulk.Reboot",
+            _ => "/signing/inventory-refresh"
+        };
         using var response = await client.PostAsync(lab.Url + path, new StringContent(json, Encoding.UTF8, "application/json"));
         Assert.Equal(expected, response.StatusCode);
         Assert.True(Guid.TryParseExact(response.Headers.GetValues("X-Fleetory-Audit-Id").Single(), "N", out _));
@@ -128,11 +134,16 @@ public sealed class SigningHostTlsTests(PostgreSqlTestFixture fixture)
         Assert.DoesNotContain("Password", await response.Content.ReadAsStringAsync(), StringComparison.OrdinalIgnoreCase);
     }
 
-    [Fact]
-    public async Task Startup_rejects_a_database_owner_instead_of_a_narrow_runtime_login()
+    [Theory]
+    [InlineData("owner")]
+    [InlineData("replication")]
+    [InlineData("membership")]
+    public async Task Startup_rejects_privileged_database_credentials(string kind)
     {
         await using var lab = await HostLab.CreateAsync(fixture);
-        lab.Secrets.Write("signer-postgresql", fixture.ConnectionString);
+        if (kind == "owner") { lab.Secrets.Write("signer-postgresql", fixture.ConnectionString); }
+        else if (kind == "replication") { await lab.ExecuteOwnerAsync($"ALTER ROLE {lab.Role} REPLICATION"); }
+        else { await lab.ExecuteOwnerAsync($"GRANT pg_read_all_data TO {lab.Role}"); }
         await using var unsafeApp = SigningHostApplication.Build(lab.Arguments());
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() => unsafeApp.StartAsync());
         Assert.Contains("runtime permissions", error.Message);

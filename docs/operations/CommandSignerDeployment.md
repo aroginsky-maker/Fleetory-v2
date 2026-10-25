@@ -49,8 +49,9 @@ as described in the Windows preflight runbook.
 Provision journal schema v2 with `eng/provision-signing-journal.sql`. Grant the
 runtime login only CONNECT, schema USAGE and SELECT/INSERT on all three signer
 tables, including `signing_rejections`. Startup and `/health/ready` check these
-rights, deny UPDATE/DELETE/TRUNCATE/schema CREATE and reject privileged or
-session-role-switched connections. Database credentials must not be shared with
+rights, deny UPDATE/DELETE/TRUNCATE/schema CREATE and reject privileged,
+replication-capable or session-role-switched connections. Use direct grants;
+runtime login membership in other roles is rejected. Database credentials must not be shared with
 Fleetory Server. `/health/live` and `/health/ready` require registered mTLS too;
 readiness verifies the journal, while Transit failures are reported by signing
 requests and must be monitored separately.
@@ -60,7 +61,8 @@ as UUID JSON strings. The certificate must come from the TLS connection;
 forwarded-certificate headers cannot supply authentication. TLS 1.2/1.3 and
 client certificates are mandatory. The host permits at most four in-flight
 requests, defaults to ten requests/minute globally (configurable 1–60), rejects
-bodies above 1 KiB and applies a twenty-second application deadline. Limits
+bodies above 1 KiB and applies a twenty-second application deadline, with up to
+five additional seconds for denial-audit cleanup after cancellation. Limits
 also apply to health probes. There is no HTTP listener, general command API,
 cookie login, forwarded-header trust or public command execution route.
 

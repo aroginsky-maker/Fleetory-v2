@@ -10,8 +10,10 @@ internal sealed class SigningJournalReadiness(NpgsqlDataSource source) : IHosted
         {
             await using var command = source.CreateCommand("""
                 SELECT current_user = session_user
-                    AND NOT (SELECT rolsuper OR rolcreaterole OR rolcreatedb OR rolbypassrls
+                    AND NOT (SELECT rolsuper OR rolcreaterole OR rolcreatedb OR rolbypassrls OR rolreplication
                              FROM pg_roles WHERE rolname = current_user)
+                    AND NOT EXISTS (SELECT 1 FROM pg_auth_members
+                                    WHERE member = (SELECT oid FROM pg_roles WHERE rolname = current_user))
                     AND NOT has_schema_privilege(current_user, 'signer', 'CREATE')
                     AND bool_and(has_table_privilege(current_user, relation, 'SELECT')
                         AND has_table_privilege(current_user, relation, 'INSERT')
