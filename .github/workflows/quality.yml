@@ -50,6 +50,10 @@ jobs:
         shell: powershell
         run: ./tests/Fleetory.Tools.Tests/ImmudbTlsProbe.Tests.ps1
 
+      - name: Verify PHASE 7 readiness on Windows PowerShell 5.1
+        shell: powershell
+        run: ./tests/Fleetory.Tools.Tests/Phase7Readiness.Tests.ps1
+
   quality:
     name: Strict build, tests, coverage and Sonar
     runs-on: ubuntu-latest

@@ -64,14 +64,15 @@
 - The signed-state receipt anchor now carries a SHA-256 chain across stable receipt fields. A changed, reordered or truncated receipt fails closed before append; PowerShell tests cover initialization, idempotence, rollback, conflict and tampering.
 - The two PowerShell provisioning checks now share their function-import and safe artifact-cleanup helper. Windows CI also runs the Agent security tests, including the protected-directory ACL checks, on a Windows runner.
 - The immudb TLS preflight now requires a credential-free HTTPS origin and HTTP 2xx, rejects redirects and HTTP errors, disables user curl defaults and proxies, and bounds its connection and request time. A real loopback TLS fixture tests explicit trust, foreign certificates, hostname mismatch, redirect non-delivery and non-2xx responses on PowerShell 7 and Windows PowerShell 5.1 without modifying system trust. This corrects the earlier input-only tests, which did not exercise the previously missing 3xx rejection. The fixture pins a self-signed leaf; production chain, custody and rotation records remain required.
+- The final readiness-record verifier now enforces current validity as well as UTC ordering, compares normalized actor identifiers without case sensitivity, requires actual JSON booleans, rejects non-finite coverage and unsafe/non-run CI URLs, and requires hashed object references for each of the five controls. Its summary binds the result to the exact record bytes with SHA-256 and includes check/expiry times. Regression tests exercise clock boundaries and malformed/coerced input on Linux, PowerShell 7 and Windows PowerShell 5.1. This verifies local record consistency; authentic approvals, external CI results, evidence hashes and immutable retention still require independent deployment validation.
 
 ## Verification snapshot
 
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local tests after immudb TLS preflight hardening | 206/206 passed |
-| Local production coverage after immudb TLS preflight hardening | 93.68% |
+| Local tests after readiness-verifier hardening | 206/206 passed |
+| Local production coverage after readiness-verifier hardening | 93.68% |
 | Local scope reparenting mutation and preflight tests | 2/2 passed |
 | Local SonarQube Community Build at `ad4271b` | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0% |
 | Local SonarQube Community Build after Windows Agent ACL hardening | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0%; 0 bugs, vulnerabilities, code smells and hotspots |
@@ -93,7 +94,7 @@
 | Production certificate lifecycle runbook | Issuance, custody, physical-device verification, rotation, recovery and rollback evidence documented |
 | Protected command signer runbook | Non-exportable key custody, isolated mTLS signer, two-person approvals and trust rotation documented |
 | Privileged change evidence runbook | Approval identities, impact hashes, audit/WORM links, retention and recovery evidence documented |
-| PHASE 7 readiness record verifier | Final control flags, approval actors, CI/Sonar, WORM reference and rollback evidence validated |
+| PHASE 7 readiness record verifier | Current UTC validity, distinct normalized actors, strict JSON flags, finite coverage, per-control object references and exact record SHA-256 checked |
 | Self-hosted PHASE 7 evidence record | Signer, least-privilege audit pipeline, TLS, backup/restore and readiness checks recorded with production limitations |
 | immudb TLS probe validation | Real TLS on PowerShell 7 and Windows PowerShell 5.1: trust, hostname, redirect non-delivery, HTTP errors and curl defaults checked |
 | Local WebAuthn/OIDC with real Admin mTLS | 401 without token; 403 with WebAuthn token at RBAC |

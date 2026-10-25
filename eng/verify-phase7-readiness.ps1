@@ -1,4 +1,4 @@
-# Fleetory PHASE 7 deployment-readiness record verifier.
+﻿# Fleetory PHASE 7 deployment-readiness record verifier.
 # This operation is read-only and does not contact external systems.
 [CmdletBinding()]
 param(
@@ -29,105 +29,192 @@ function Read-ReadinessRecord([string] $Path) {
     if ($item.Length -le 0 -or $item.Length -gt 64KB) {
         throw 'The readiness record size is outside the permitted range.'
     }
-    try {
-        return ([Text.UTF8Encoding]::new($false, $true).GetString(
-            [IO.File]::ReadAllBytes($fullPath)) | ConvertFrom-Json)
+    $bytes = [IO.File]::ReadAllBytes($fullPath)
+    if ($bytes.Length -le 0 -or $bytes.Length -gt 64KB) {
+        throw 'The readiness record size is outside the permitted range.'
     }
-    catch { throw 'The readiness record is not valid UTF-8 JSON.' }
+    try {
+        $json = [Text.UTF8Encoding]::new($false, $true).GetString($bytes).TrimStart([char]0xFEFF)
+        if ($json -notmatch '^\s*\{') { throw 'Expected a JSON object.' }
+        $options = @{ InputObject = $json; ErrorAction = 'Stop' }
+        # Preserve timestamp lexemes so automatic JSON date conversion cannot
+        # normalize a non-UTC or non-ISO input before policy validation.
+        if ((Get-Command ConvertFrom-Json).Parameters.ContainsKey('DateKind')) {
+            $options.DateKind = 'String'
+        }
+        $record = ConvertFrom-Json @options
+        if (-not $options.ContainsKey('DateKind') -and $PSVersionTable.PSVersion.Major -ge 6) {
+            # Older PowerShell Core bundles Json.NET but has no -DateKind.
+            $textReader = [IO.StringReader]::new($json)
+            $reader = [Newtonsoft.Json.JsonTextReader]::new($textReader)
+            try {
+                $reader.DateParseHandling = [Newtonsoft.Json.DateParseHandling]::None
+                $tokens = [Newtonsoft.Json.Linq.JObject]::Load($reader)
+                foreach ($name in @('approvedAt', 'validatedAt', 'expiresAt')) {
+                    $token = $tokens.GetValue($name, [StringComparison]::OrdinalIgnoreCase)
+                    if ($null -ne $token -and $token.Type -eq [Newtonsoft.Json.Linq.JTokenType]::String) {
+                        $record.PSObject.Properties[$name].Value = [string]$token.Value
+                    }
+                }
+            }
+            finally { $reader.Close(); $textReader.Dispose() }
+        }
+    }
+    catch { throw 'The readiness record is not a UTF-8 JSON object.' }
+    $sha256 = [Security.Cryptography.SHA256]::Create()
+    try { $digest = [BitConverter]::ToString($sha256.ComputeHash($bytes)).Replace('-', '') }
+    finally { $sha256.Dispose() }
+    return [pscustomobject]@{ Record = $record; Sha256 = $digest }
+}
+
+function Get-ReadinessProperty($Object, [string] $Name) {
+    if ($Object -isnot [pscustomobject]) { throw 'Readiness fields must belong to a JSON object.' }
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        throw "The readiness record field '$Name' is required."
+    }
+    return $property
 }
 
 function Get-RequiredString($Object, [string] $Name) {
-    $property = $Object.PSObject.Properties[$Name]
-    if ($null -eq $property -or [string]::IsNullOrWhiteSpace([string]$property.Value)) {
-        throw "The readiness record field '$Name' is required."
+    $value = (Get-ReadinessProperty $Object $Name).Value
+    if ($value -isnot [string] -or [string]::IsNullOrWhiteSpace($value)) {
+        throw "The readiness record field '$Name' must be a non-empty string."
     }
-    return [string]$property.Value
+    return $value.Trim()
 }
 
-function Get-RequiredUtc([string] $Value, [string] $Name) {
-    try {
-        $parsed = [DateTimeOffset]::Parse($Value,
+function Get-RequiredObject($Object, [string] $Name) {
+    $value = (Get-ReadinessProperty $Object $Name).Value
+    if ($value -isnot [pscustomobject]) { throw "The readiness field '$Name' must be a JSON object." }
+    return $value
+}
+
+function Assert-ReadinessConfirmation($Object, [string] $Name) {
+    $value = (Get-ReadinessProperty $Object $Name).Value
+    if ($value -isnot [bool] -or -not $value) {
+        throw "The readiness confirmation '$Name' must be JSON true."
+    }
+}
+
+function Get-RequiredActor($Object, [string] $Name) {
+    $value = Get-RequiredString $Object $Name
+    if ($value -notmatch '^[A-Za-z0-9][A-Za-z0-9._:@/\\-]{0,255}$') {
+        throw 'Readiness identities must be stable ASCII identifiers, not display names.'
+    }
+    return $value
+}
+
+function Get-RequiredUtc($Object, [string] $Name) {
+    $value = (Get-ReadinessProperty $Object $Name).Value
+    $parsed = [DateTimeOffset]::MinValue
+    $formats = [string[]]@("yyyy-MM-dd'T'HH:mm:ss'Z'", "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'")
+    if ($value -isnot [string] -or
+        $value -cnotmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?Z$' -or
+        -not [DateTimeOffset]::TryParseExact($value, $formats,
             [Globalization.CultureInfo]::InvariantCulture,
-            ([Globalization.DateTimeStyles]::AssumeUniversal -bor
-             [Globalization.DateTimeStyles]::AdjustToUniversal))
-    }
-    catch {
-        throw "$Name must be an ISO-8601 UTC timestamp."
-    }
-    if ($parsed.Offset -ne [TimeSpan]::Zero) {
-        throw "$Name must be an ISO-8601 UTC timestamp."
+            [Globalization.DateTimeStyles]::AssumeUniversal, [ref]$parsed)) {
+        throw "$Name must be an ISO-8601 UTC timestamp ending in Z."
     }
     return $parsed
 }
 
-function Test-Phase7Readiness($Record) {
-    if ([string]$Record.schema -cne 'fleetory.phase7-readiness.v1') {
+function Get-RequiredReadinessUri($Object, [string] $Name, [string[]] $Schemes) {
+    $text = Get-RequiredString $Object $Name
+    $uri = $null
+    if (-not [uri]::TryCreate($text, [UriKind]::Absolute, [ref]$uri) -or
+        $Schemes -notcontains $uri.Scheme -or [string]::IsNullOrEmpty($uri.Host) -or
+        -not [string]::IsNullOrEmpty($uri.UserInfo) -or
+        -not [string]::IsNullOrEmpty($uri.Query) -or
+        -not [string]::IsNullOrEmpty($uri.Fragment)) {
+        throw "The readiness URI '$Name' must be absolute and contain no credentials, query or fragment."
+    }
+    return $uri
+}
+
+function Get-ReadinessCoverage($Object) {
+    $value = (Get-ReadinessProperty $Object 'coveragePercent').Value
+    $coverage = 0.0
+    $numeric = $value -is [int] -or $value -is [long] -or
+        $value -is [double] -or $value -is [decimal]
+    if ((-not $numeric -and $value -isnot [string]) -or
+        -not [double]::TryParse([Convert]::ToString($value, [Globalization.CultureInfo]::InvariantCulture),
+            [Globalization.NumberStyles]::Float, [Globalization.CultureInfo]::InvariantCulture,
+            [ref]$coverage) -or [double]::IsNaN($coverage) -or [double]::IsInfinity($coverage) -or
+        $coverage -lt 80.0 -or $coverage -gt 100.0) {
+        throw 'The CI coverage percentage must be a finite number between 80 and 100.'
+    }
+    return $coverage
+}
+
+function Test-Phase7Readiness($Record, [DateTimeOffset] $Now = [DateTimeOffset]::UtcNow) {
+    if ((Get-RequiredString $Record 'schema') -cne 'fleetory.phase7-readiness.v1') {
         throw 'The readiness record schema is invalid.'
     }
     $environment = Get-RequiredString $Record 'environment'
     $changeReference = Get-RequiredString $Record 'changeReference'
-    $requestedBy = Get-RequiredString $Record 'requestedBy'
-    $approvedBy = Get-RequiredString $Record 'approvedBy'
-    $deployedBy = Get-RequiredString $Record 'deployedBy'
-    if ($requestedBy -ceq $approvedBy -or $approvedBy -ceq $deployedBy -or
-        $requestedBy -ceq $deployedBy) {
+    $requestedBy = Get-RequiredActor $Record 'requestedBy'
+    $approvedBy = Get-RequiredActor $Record 'approvedBy'
+    $deployedBy = Get-RequiredActor $Record 'deployedBy'
+    if ([string]::Equals($requestedBy, $approvedBy, [StringComparison]::OrdinalIgnoreCase) -or
+        [string]::Equals($approvedBy, $deployedBy, [StringComparison]::OrdinalIgnoreCase) -or
+        [string]::Equals($requestedBy, $deployedBy, [StringComparison]::OrdinalIgnoreCase)) {
         throw 'Requester, approver and operator must be distinct identities.'
     }
-    $approvedAt = Get-RequiredUtc (Get-RequiredString $Record 'approvedAt') 'approvedAt'
-    $validatedAt = Get-RequiredUtc (Get-RequiredString $Record 'validatedAt') 'validatedAt'
-    $expiresAt = Get-RequiredUtc (Get-RequiredString $Record 'expiresAt') 'expiresAt'
+    $approvedAt = Get-RequiredUtc $Record 'approvedAt'
+    $validatedAt = Get-RequiredUtc $Record 'validatedAt'
+    $expiresAt = Get-RequiredUtc $Record 'expiresAt'
     if ($approvedAt -gt $validatedAt -or $validatedAt -ge $expiresAt) {
         throw 'Readiness record timestamps are not monotonic.'
     }
-
-    $controls = $Record.PSObject.Properties['controls'].Value
-    if ($null -eq $controls) { throw 'The readiness controls object is required.' }
-    foreach ($name in @('caPki', 'signer', 'immudbTls', 'wormAnchor', 'recovery')) {
-        $property = $controls.PSObject.Properties[$name]
-        if ($null -eq $property -or $property.Value -ne $true) {
-            throw "The readiness control '$name' is not confirmed."
-        }
+    $checkedAt = $Now.ToUniversalTime()
+    if ($validatedAt -gt $checkedAt -or $expiresAt -le $checkedAt) {
+        throw 'The readiness record is not currently valid.'
     }
 
-    $ci = $Record.PSObject.Properties['ci'].Value
-    if ($null -eq $ci) { throw 'The CI evidence object is required.' }
+    $controlNames = @('caPki', 'signer', 'immudbTls', 'wormAnchor', 'recovery')
+    $controls = Get-RequiredObject $Record 'controls'
+    foreach ($name in $controlNames) {
+        Assert-ReadinessConfirmation $controls $name
+    }
+
+    $ci = Get-RequiredObject $Record 'ci'
     $runUrl = Get-RequiredString $ci 'runUrl'
-    $runUri = [uri]$runUrl
-    if ($runUri.Scheme -ne 'https' -or $runUri.Host -ne 'github.com') {
-        throw 'The CI run URL must be an HTTPS GitHub URL.'
+    $runUri = Get-RequiredReadinessUri $ci 'runUrl' @('https')
+    if ($runUri.Host -ne 'github.com' -or -not $runUri.IsDefaultPort -or
+        $runUri.AbsolutePath -cnotmatch '^/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/actions/runs/[1-9][0-9]*$') {
+        throw 'The CI run URL must identify a GitHub Actions run.'
     }
     if ((Get-RequiredString $ci 'sonarQualityGate') -cne 'PASS') {
         throw 'The Sonar Quality Gate is not PASS.'
     }
-    try {
-        $coverage = [double]::Parse((Get-RequiredString $ci 'coveragePercent'),
-            [Globalization.NumberStyles]::Float,
-            [Globalization.CultureInfo]::InvariantCulture)
-    }
-    catch {
-        throw 'The CI coverage percentage is outside the permitted range.'
-    }
-    if ($coverage -lt 80.0 -or $coverage -gt 100.0) {
-        throw 'The CI coverage percentage is outside the permitted range.'
-    }
+    $coverage = Get-ReadinessCoverage $ci
 
-    $evidence = @($Record.PSObject.Properties['evidence'].Value)
-    if ($evidence.Count -eq 0) { throw 'At least one evidence item is required.' }
+    $evidence = (Get-ReadinessProperty $Record 'evidence').Value
+    if ($evidence -isnot [array] -or $evidence.Count -eq 0) {
+        throw 'A non-empty evidence array is required.'
+    }
+    $coveredControls = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     foreach ($item in $evidence) {
-        [void](Get-RequiredString $item 'kind')
+        $kind = Get-RequiredString $item 'kind'
+        if ($controlNames -cnotcontains $kind) { throw 'Evidence kind must name a required readiness control.' }
+        [void]$coveredControls.Add($kind)
         $hash = Get-RequiredString $item 'sha256'
         if ($hash -notmatch '^[0-9A-Fa-f]{64}$') {
             throw 'Evidence SHA-256 must contain exactly 64 hexadecimal characters.'
         }
-        [void](Get-RequiredString $item 'reference')
+        $reference = Get-RequiredReadinessUri $item 'reference' @('https', 'worm', 'siem', 's3', 'gs', 'azblob')
+        if ($reference.AbsolutePath -eq '/') { throw 'Evidence reference must identify an object.' }
+    }
+    foreach ($name in $controlNames) {
+        if (-not $coveredControls.Contains($name)) { throw "Evidence for '$name' is required." }
     }
 
-    $rollback = $Record.PSObject.Properties['rollback'].Value
-    if ($null -eq $rollback -or
-        (Get-RequiredString $rollback 'plan').Length -lt 16 -or
-        $rollback.PSObject.Properties['validated'].Value -ne $true) {
+    $rollback = Get-RequiredObject $Record 'rollback'
+    if ((Get-RequiredString $rollback 'plan').Length -lt 16) {
         throw 'The rollback plan must be present and validated.'
     }
+    Assert-ReadinessConfirmation $rollback 'validated'
 
     return [ordered]@{
         schema = 'fleetory.phase7-readiness-verification.v1'
@@ -136,6 +223,8 @@ function Test-Phase7Readiness($Record) {
         requestedBy = $requestedBy
         approvedBy = $approvedBy
         deployedBy = $deployedBy
+        checkedAt = $checkedAt.UtcDateTime.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+        expiresAt = $expiresAt.UtcDateTime.ToString('o', [Globalization.CultureInfo]::InvariantCulture)
         evidenceCount = $evidence.Count
         ciRunUrl = $runUrl
         coveragePercent = $coverage
@@ -144,5 +233,7 @@ function Test-Phase7Readiness($Record) {
     }
 }
 
-$record = Read-ReadinessRecord $RecordPath
-Test-Phase7Readiness $record | ConvertTo-Json -Compress -Depth 5
+$document = Read-ReadinessRecord $RecordPath
+$verification = Test-Phase7Readiness $document.Record
+$verification['recordSha256'] = $document.Sha256
+$verification | ConvertTo-Json -Compress -Depth 5
