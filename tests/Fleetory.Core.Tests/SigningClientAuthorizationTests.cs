@@ -91,8 +91,10 @@ public sealed class SigningClientAuthorizationTests
         Assert.Null(policy.GetAuthorizedInventoryRefreshCaller(client, unauthorized));
     }
 
-    [Fact]
-    public void Explicit_intermediate_and_second_root_are_supported_without_downloads()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Same_subject_root_rollover_and_explicit_intermediate_are_supported_without_downloads(bool reverseRoots)
     {
         using var first = new Certificates();
         using var second = new Certificates();
@@ -101,8 +103,10 @@ public sealed class SigningClientAuthorizationTests
             .Create(second.Root, Now.AddDays(-1), Now.AddDays(1), RandomNumberGenerator.GetBytes(16));
         using var intermediate = intermediatePublic.CopyWithPrivateKey(intermediateKey);
         using var client = second.Issue(issuer: intermediate);
+        // Equal CA subject names reproduce OpenSSL choosing the wrong key from a combined trust bundle.
         using var policy = new SigningClientAuthorizationPolicy(
-            [first.Root, second.Root], [intermediate], [Grant(client)], new MutableTime(Now));
+            reverseRoots ? [second.Root, first.Root] : [first.Root, second.Root],
+            [intermediate], [Grant(client)], new MutableTime(Now));
         Assert.Equal("approval-service", policy.GetAuthorizedInventoryRefreshCaller(client, Device));
         using var missingIntermediate = CreatePolicy(second.Root, Grant(client));
         Assert.Null(missingIntermediate.GetAuthorizedInventoryRefreshCaller(client, Device));

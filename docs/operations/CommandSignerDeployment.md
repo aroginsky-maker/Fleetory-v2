@@ -50,7 +50,9 @@ does not widen trust. Limits are two roots, three intermediates, 64 grants and
 Authorization requires the pinned leaf, digital-signature usage, explicit
 client-authentication EKU, a currently valid chain to an approved custom root,
 a current grant and the exact target. System roots and downloaded intermediates
-do not grant trust. An unregistered Server or Agent certificate is denied even
+do not grant trust. Each approved root is checked separately so rollover also
+works when the old and new CAs have the same subject name and different keys.
+An unregistered Server or Agent certificate is denied even
 when its chain is trusted. The wrapper checks authorization before Transit
 access and again before releasing the signed envelope, and returns the configured
 caller identity for the future audit record. Its only operation remains empty

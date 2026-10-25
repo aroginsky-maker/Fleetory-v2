@@ -70,7 +70,8 @@ public sealed class SigningClientAuthorizationPolicy : IDisposable
                 return null;
             }
 
-            return BuildTrustedChain(certificate, now) ? grant.CallerId : null;
+            return _roots.Cast<X509Certificate2>().Any(root => BuildTrustedChain(certificate, root, now))
+                ? grant.CallerId : null;
         }
         catch (Exception exception) when (exception is CryptographicException or ArgumentException or InvalidOperationException)
         {
@@ -83,11 +84,11 @@ public sealed class SigningClientAuthorizationPolicy : IDisposable
         certificate.Extensions.OfType<X509EnhancedKeyUsageExtension>().SingleOrDefault()
             ?.EnhancedKeyUsages.Cast<Oid>().Any(oid => oid.Value == ClientAuthenticationOid) == true;
 
-    private bool BuildTrustedChain(X509Certificate2 certificate, DateTimeOffset now)
+    private bool BuildTrustedChain(X509Certificate2 certificate, X509Certificate2 root, DateTimeOffset now)
     {
         using var chain = new X509Chain();
         chain.ChainPolicy.TrustMode = X509ChainTrustMode.CustomRootTrust;
-        chain.ChainPolicy.CustomTrustStore.AddRange(_roots);
+        chain.ChainPolicy.CustomTrustStore.Add(root);
         chain.ChainPolicy.ExtraStore.AddRange(_intermediates);
         chain.ChainPolicy.DisableCertificateDownloads = true;
         chain.ChainPolicy.RevocationMode = X509RevocationMode.NoCheck;
@@ -95,8 +96,7 @@ public sealed class SigningClientAuthorizationPolicy : IDisposable
         chain.ChainPolicy.VerificationTime = now.UtcDateTime;
         chain.ChainPolicy.ApplicationPolicy.Add(new Oid(ClientAuthenticationOid));
         return chain.Build(certificate) && chain.ChainElements.Count is >= 2 and <= 5 &&
-            _roots.Cast<X509Certificate2>().Any(root => root.RawData.AsSpan().SequenceEqual(
-                chain.ChainElements[^1].Certificate.RawData));
+            root.RawData.AsSpan().SequenceEqual(chain.ChainElements[^1].Certificate.RawData);
     }
 
     public void Dispose()

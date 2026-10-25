@@ -74,12 +74,14 @@
 
 - Signer caller authorization now pins each configured client certificate to an identity, explicit DeviceIds and a bounded UTC grant window. It validates client EKU/key usage and a custom-root chain locally without downloads, copies trust/target inputs, and denies unregistered or out-of-scope clients before Transit. The authorization wrapper rechecks expiry after signing before releasing an envelope. Tests cover certificate validity/purpose/trust, target scope, input mutation, grant boundaries, leaf rotation and denied-call non-delivery. This is a library prerequisite for the separate mTLS host, not a deployed service or authenticated approval workflow.
 
+- The caller-policy rollover regression exposed an OpenSSL difference: a combined trust store with same-subject CAs can choose the wrong public key. The policy now validates independently against each pinned root, preserving signature and chain checks. Equal-subject/different-key roots in both orders and an explicit intermediate are covered by the regression suite; the original difference was reproduced on Windows and in Linux Docker.
+
 ## Verification snapshot
 
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local tests after signer caller authorization | 257/257 passed |
+| Local tests after signer caller authorization | 258/258 passed |
 | Local production coverage after signer caller authorization | 93.81% |
 | Local scope reparenting mutation and preflight tests | 2/2 passed |
 | Local SonarQube Community Build at `ad4271b` | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0% |
@@ -105,7 +107,7 @@
 | Production certificate lifecycle runbook | Issuance, custody, physical-device verification, rotation, recovery and rollback evidence documented |
 | Protected command signer runbook | Non-exportable key custody, isolated mTLS signer, two-person approvals and trust rotation documented |
 | Transit signing client regression checks | 28/28 passed: bounded headers/body lifetime, caller cancellation, rejected credentials, safe errors and signature verification |
-| Signer caller authorization checks | 30/30 passed: pinned client identity, custom trust, purpose/validity, exact target, immutable inputs, rotation and no Transit call on denial |
+| Signer caller authorization checks | 31/31 passed: pinned client identity, custom trust, purpose/validity, exact target, immutable inputs, same-subject CA rollover, leaf rotation and no Transit call on denial |
 | Privileged change evidence runbook | Approval identities, impact hashes, audit/WORM links, retention and recovery evidence documented |
 | PHASE 7 readiness record verifier | Current UTC validity, distinct normalized actors, strict JSON flags, finite coverage, per-control object references and exact record SHA-256 checked |
 | Self-hosted PHASE 7 evidence record | Signer, least-privilege audit pipeline, TLS, backup/restore and readiness checks recorded with production limitations |
