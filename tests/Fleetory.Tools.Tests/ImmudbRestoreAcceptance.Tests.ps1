@@ -10,7 +10,7 @@ $source = Join-Path $repoRoot 'eng/verify-immudb-restore.ps1'
         'ConvertTo-ImmudbRestoreEventKey', 'ConvertFrom-ImmudbRestoreBase64Strict',
         'Invoke-ImmudbRestoreGetJson', 'Get-ImmudbRestoreDatabaseToken',
         'Get-ImmudbAuditReadback',
-        'Test-ImmudbRestoredEvent', 'Invoke-ImmudbRestoreAcceptance')
+        'Test-ImmudbRestoredEvent', 'Get-ImmudbRestorePoint', 'Invoke-ImmudbRestoreAcceptance')
 . (Join-Path $PSScriptRoot 'TestProvisionerHelpers.ps1') `
     -Source (Join-Path $repoRoot 'eng/verify-immudb-state.ps1') `
     -Names @('Get-ImmudbSha256', 'ConvertTo-ImmudbUpperHex')
@@ -37,16 +37,21 @@ try {
     $script:seenToken = $null
     $script:seenDatabase = $null
     $script:seenStateArgs = $null
-    function Invoke-ImmudbStateVerification(
+    function Get-VerifiedImmudbStateReceipt(
         [uri] $Origin,
         [string] $PublicKeyPath,
-        [string] $AnchorPath,
         [string] $ExpectedDatabase,
         [string] $Token) {
         $script:seenStateArgs = @($Origin.AbsoluteUri, $PublicKeyPath,
-            $AnchorPath, $ExpectedDatabase)
+            $ExpectedDatabase)
         $script:seenToken = $Token
-        return [pscustomobject]@{ txId = 77 }
+        return [pscustomobject]@{ txId = 77; txHash = 'pinned-state-hash'; publicKeySha256 = ('A' * 64) }
+    }
+    $script:anchorWrites = 0
+    function Write-ImmudbStateReceipt($Receipt, [string] $Path) {
+        if ($Path -cne $anchor) { throw 'The acceptance anchor path changed.' }
+        $script:anchorWrites++
+        return $true
     }
     function Get-ImmudbRestoreDatabaseToken(
         [uri] $Origin, [string] $Token, [string] $Database) {
@@ -70,12 +75,13 @@ try {
         $keyPath $anchor 'defaultdb' $eventId 1 $valueHash 'read-only-restore-token'
     if ($result.schema -ne 'fleetory.immudb-restore-acceptance.v1' -or
         $result.receiptTxId -ne 77 -or $result.knownEventId -ne $eventId.ToString('N') -or
-        $result.revision -ne 1 -or $result.valueSha256 -ne $valueHash) {
+        $result.revision -ne 1 -or $result.valueSha256 -ne $valueHash -or
+        $result.checkpointVerified -ne $false -or $script:anchorWrites -ne 1) {
         throw 'Restore acceptance result normalization failed.'
     }
     if ($script:seenToken -ne 'selected-restore-token' -or
         $script:seenDatabase -cne 'defaultdb' -or
-        $script:seenStateArgs[3] -cne 'defaultdb') {
+        $script:seenStateArgs[2] -cne 'defaultdb') {
         throw 'Restore acceptance did not select and use the database-scoped token.'
     }
 

@@ -14,7 +14,7 @@ $source = Join-Path $repoRoot 'eng/verify-immudb-state.ps1'
         'New-ImmudbStateReceipt', 'Get-ExistingImmudbReceipts',
         'Get-ImmudbReceiptCanonicalJson', 'Get-ImmudbReceiptSha256',
         'Test-ImmudbReceiptChain',
-        'Write-ImmudbStateReceipt', 'Invoke-ImmudbStateVerification')
+        'Write-ImmudbStateReceipt', 'Get-VerifiedImmudbStateReceipt', 'Invoke-ImmudbStateVerification')
 
 $work = Join-Path $repoRoot ('artifacts/immudb-state-test-' +
     [Guid]::NewGuid().ToString('N'))
@@ -67,6 +67,25 @@ try {
     if (Write-ImmudbStateReceipt $receipt $anchor) {
         throw 'An identical receipt was appended twice.'
     }
+
+    # Exercise the real ordered-dictionary receipt returned by live state
+    # verification, then validate the persisted chain after a forward append.
+    $signedNext = New-SignedReceipt $key $publicKey 43 $firstLine.receiptSha256
+    $nextState = [pscustomobject]@{
+        db = 'defaultdb'; txId = 43; txHash = $signedNext.txHash
+        signature = [pscustomobject]@{
+            publicKey = [Convert]::ToBase64String($publicKey); signature = $signedNext.signature
+        }
+    }
+    $nextReceipt = New-ImmudbStateReceipt $nextState 'defaultdb' $keyPath
+    if (-not (Write-ImmudbStateReceipt $nextReceipt $anchor)) { throw 'A forward state receipt was not appended.' }
+    $persisted = @(Get-ExistingImmudbReceipts $anchor)
+    if ($persisted.Count -ne 2 -or
+        (Test-ImmudbReceiptChain $persisted) -cne $persisted[-1].receiptSha256 -or
+        (Write-ImmudbStateReceipt $nextReceipt $anchor)) {
+        throw 'Forward state receipt chain or idempotence failed.'
+    }
+    [IO.File]::WriteAllText($anchor, $originalLine + [Environment]::NewLine, [Text.UTF8Encoding]::new($false))
 
     $tampered = $firstLine.PSObject.Copy()
     $tampered.txHash = [Convert]::ToBase64String([byte[]](32..63))

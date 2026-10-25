@@ -68,6 +68,12 @@ jobs:
         shell: powershell
         run: ./tests/Fleetory.Tools.Tests/ImmudbReceiptCheckpoint.Tests.ps1
 
+      - name: Verify restore point and deferred anchor on Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          ./tests/Fleetory.Tools.Tests/ImmudbStateVerification.Tests.ps1
+          ./tests/Fleetory.Tools.Tests/ImmudbRestoreCheckpoint.Tests.ps1
+
   quality:
     name: Strict build, tests, coverage and Sonar
     runs-on: ubuntu-latest
@@ -128,6 +134,10 @@ jobs:
       - name: Verify immudb restore acceptance
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/ImmudbRestoreAcceptance.Tests.ps1
+
+      - name: Verify restore point and deferred anchor
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ImmudbRestoreCheckpoint.Tests.ps1
 
       - name: Verify immudb authenticated TLS transport
         shell: pwsh

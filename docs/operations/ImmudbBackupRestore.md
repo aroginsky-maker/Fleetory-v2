@@ -35,6 +35,32 @@ Remove-Item Env:FLEETORY_IMMUDB_RESTORE_READ_TOKEN
 
 The expected value hash is calculated from the decoded `value` returned by immudb for the selected `fleetory/audit/v1/{EventId:N}` key. Store that hash in the approved change record before the restore check. The script refuses HTTP, redirects, a wrong key, a wrong revision, a changed value, an invalid signed state, a rollback or a fork. It appends a local receipt only as a verification trace; copy that receipt to the independent WORM/SIEM destination before destroying the disposable instance.
 
+For acceptance of an exact approved backup point, also supply
+`-CheckpointPath <retained-export.json>` and
+`-ExpectedCheckpointSha256 <digest-from-independent-change-record>`. Both
+arguments are required together. The shared receipt verifier checks the exact
+checkpoint bytes, schema, chain and every P-256 state signature against
+`-PublicKeyPath`, before any remote request. The checkpoint database must match
+`-ExpectedDatabase`. The restored transaction ID **and** transaction hash must
+equal its final receipt; both older and newer states are rejected. Capture this
+checkpoint at the approved backup boundary and retain its exact object version
+and digest independently, as described in [ImmudbReceiptExport](ImmudbReceiptExport.md).
+
+Acceptance reads and verifies the signed state, checks the known EventId, then
+reads/verifies the signed state again. A changed transaction, hash or key
+fingerprint rejects the run. Keep the disposable restore isolated and quiescent;
+these checks are not a Merkle inclusion/consistency proof for the readback value.
+The local anchor is appended only after all state, checkpoint and event checks
+pass. Failed checks neither create nor advance it, and repeating a successful
+acceptance is idempotent. Persisted state receipts include the preceding receipt
+hash correctly when the live verifier returns an ordered dictionary.
+
+The summary includes `receiptTxHash`, `checkpointVerified` and
+`checkpointExportSha256`. Without checkpoint inputs, the flag is explicitly
+false: local monotonicity and known-event checking alone do not prove that an
+empty or jointly rolled-back local environment reached the independently
+approved backup point. The verifier never updates the approved checkpoint.
+
 Database selection, signed-state retrieval and audit readback use the same
 HTTPS transport. Each read has a 20-second total deadline and a 16 KiB body
 limit enforced during streaming, including responses without Content-Length.

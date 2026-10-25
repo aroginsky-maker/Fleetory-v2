@@ -68,20 +68,22 @@
 - Authenticated immudb state and restore checks now share a bounded HTTPS transport. It rejects redirects before forwarding any request, validates the origin and relative API path, disables cookies/proxy inheritance, and preserves TLS/hostname/revocation checks. A 20-second total deadline includes body reads, and the 16 KiB limit is enforced while streaming rather than after an unbounded download. Real TLS tests check token non-delivery to redirect targets, untrusted peers and wrong hostnames, exact-size acceptance, oversized/chunked/lengthless responses, malformed UTF-8/JSON and a stalled body without exposing credentials.
 - Independent receipt-export verification now binds all receipt contents to the supplied anchor, including count/order, signed state, chain fields and observation instant. A regression reproduced acceptance of a signed prefix with the full anchor's claimed hash; prefix/suffix/extension and same-range substitution now fail closed. Export and verification parse/hash one bounded byte buffer, enforce 8 MiB limits and receipt field types, and run on PowerShell 7 and Windows PowerShell 5.1. Tests cover a source file changed after buffer acquisition, equivalent JSON/timezone formatting, no-overwrite behavior and malformed/oversized inputs. External anchor custody, freshness and WORM retention remain deployment controls.
 - Receipt export verification now supports an independently approved predecessor package and exact SHA-256 checkpoint. The mode requires a pinned public key, verifies every predecessor signature and rejects joint local rollback, rewritten signed history, changed metadata and database mismatch while accepting identical or cumulative forward histories. The summary explicitly reports checkpoint verification, and no checkpoint file is updated. Twelve negative scenarios plus positive histories pass on Linux and Windows PowerShell 7/5.1; selection and retention of the latest independent checkpoint remain operational controls.
+- Restore acceptance now optionally verifies the exact transaction/hash of an independently approved checkpoint before reading the known event. It verifies signed state again after readback and appends the local acceptance receipt only after all checks pass. Real-cryptography tests reproduced and fixed premature anchor mutation, broken previous-hash canonicalization for ordered-dictionary forward receipts, and invalid database-name character validation. Fifteen negative cases preserve existing/absent anchors; exact-point acceptance, scoped-token use, forward chain validation and idempotence are tested on Linux and Windows PowerShell 7/5.1. Receipt-package verification is shared by export and restore without copying its implementation.
 
 ## Verification snapshot
 
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local tests after receipt-checkpoint guard | 206/206 passed |
-| Local production coverage after receipt-checkpoint guard | 93.68% |
+| Local tests after restore-point acceptance hardening | 206/206 passed |
+| Local production coverage after restore-point acceptance hardening | 93.68% |
 | Local scope reparenting mutation and preflight tests | 2/2 passed |
 | Local SonarQube Community Build at `ad4271b` | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0% |
 | Local SonarQube Community Build after Windows Agent ACL hardening | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0%; 0 bugs, vulnerabilities, code smells and hotspots |
 | Completed CI baseline before TLS regression hardening, `4a4d69f` / run `40136441774` | 93.52% |
 | Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
 | Local immudb restore acceptance | Read-only token separation, known EventId revision/hash and fail-closed validation passed |
+| Restore-point acceptance | Exact independently approved transaction/hash, stable signed state, 15 failures without anchor mutation, valid chain append and idempotence passed on Linux and Windows PowerShell 7/5.1 |
 | Local disposable immudb backup/restore drill | Hot backup transactions 1–33 restored into an isolated replica database; final state reported 33 transactions |
 | Local full audit pipeline | PostgreSQL outbox → Fleetory worker → immudb readback with dedicated account passed |
 | Local command-signing lab after Windows ACL hardening | OpenBao Transit v2 signature accepted once; replay rejected; Server token denied (403) |

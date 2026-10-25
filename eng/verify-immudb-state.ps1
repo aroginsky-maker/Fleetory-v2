@@ -252,7 +252,9 @@ function Get-ExistingImmudbReceipts([string] $Path) {
 
 function Get-ImmudbReceiptCanonicalJson($Receipt) {
     $previousProperty = $Receipt.PSObject.Properties['previousReceiptSha256']
-    $previousReceiptHash = if ($null -eq $previousProperty) { '' } else {
+    $previousReceiptHash = if ($Receipt -is [Collections.IDictionary] -and
+        $Receipt.Contains('previousReceiptSha256')) { [string]$Receipt['previousReceiptSha256'] }
+    elseif ($null -eq $previousProperty) { '' } else {
         [string]$previousProperty.Value
     }
     $canonical = [ordered]@{
@@ -343,14 +345,22 @@ function Write-ImmudbStateReceipt($Receipt, [string] $AnchorPath) {
     return $true
 }
 
+function Get-VerifiedImmudbStateReceipt(
+    [uri] $Origin,
+    [string] $PublicKeyPath,
+    [string] $ExpectedDatabase,
+    [string] $Token) {
+    $state = Get-ImmudbState $Origin $Token
+    return New-ImmudbStateReceipt $state $ExpectedDatabase $PublicKeyPath
+}
+
 function Invoke-ImmudbStateVerification(
     [uri] $Origin,
     [string] $PublicKeyPath,
     [string] $AnchorPath,
     [string] $ExpectedDatabase,
     [string] $Token) {
-    $state = Get-ImmudbState $Origin $Token
-    $receipt = New-ImmudbStateReceipt $state $ExpectedDatabase $PublicKeyPath
+    $receipt = Get-VerifiedImmudbStateReceipt $Origin $PublicKeyPath $ExpectedDatabase $Token
     [void](Write-ImmudbStateReceipt $receipt $AnchorPath)
     return $receipt
 }

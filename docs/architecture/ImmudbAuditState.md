@@ -35,7 +35,15 @@ The verifier writes newline-delimited canonical JSON receipts to an absolute anc
 - a changed hash at an existing transaction is rejected as a fork/conflict;
 - a symbolic-link anchor and a relative path are rejected;
 - malformed existing receipts stop the run before any append.
-- every receipt carries the previous receipt hash and its own canonical content hash; a changed, reordered or truncated chain fails closed before append.
+- every receipt carries the previous receipt hash and its own canonical content hash; changed or reordered receipts fail closed before append. Detecting removal of a complete valid suffix requires an independently approved checkpoint.
+
+Canonical hashing accepts both parsed JSON objects and the ordered dictionaries
+returned by live verification, so a forward append preserves the previous-hash
+link. Restore acceptance uses the same cryptographic receipt builder without
+appending immediately: it verifies the known event and a second stable signed
+state before committing its local trace. An optional independently pinned
+checkpoint requires the exact approved restore transaction/hash. Existing
+invalid chains are rejected; the tools never silently repair retained evidence.
 
 A local file is only a tamper-evident operational receipt. Production must send the receipt to a separate administrator-controlled WORM/object-lock or SIEM destination and retain the public-key fingerprint in a second control plane. The local path must not be treated as independent evidence when the Fleetory host and anchor share the same administrator.
 
