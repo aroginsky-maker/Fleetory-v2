@@ -52,4 +52,3 @@ internal sealed class TransitTestHandler(ECDsa key) : HttpMessageHandler
         };
     }
 }
-
