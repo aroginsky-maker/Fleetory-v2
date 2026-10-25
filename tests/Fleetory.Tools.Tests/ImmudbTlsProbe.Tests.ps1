@@ -24,7 +24,11 @@ function Assert-Throws([scriptblock] $Action, [string] $Message, [string] $Expec
 try {
     New-Item -ItemType Directory -Path $work -Force | Out-Null
     $root = Join-Path $work 'root.pem'
-    Add-Type -Path (Join-Path $PSScriptRoot 'TlsProbeTestServer.cs')
+    $compiler = @{ Path = (Join-Path $PSScriptRoot 'TlsProbeTestServer.cs') }
+    if ($PSVersionTable.PSVersion.Major -lt 6) {
+        $compiler.ReferencedAssemblies = @('System.dll', 'System.Core.dll', 'System.Net.Http.dll')
+    }
+    Add-Type @compiler
     $authority = [TlsProbeTestServer]::CreateCertificate()
     $otherAuthority = [TlsProbeTestServer]::CreateCertificate()
     $wrongRoot = Join-Path $work 'wrong-root.pem'

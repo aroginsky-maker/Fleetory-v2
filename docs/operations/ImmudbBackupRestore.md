@@ -35,6 +35,15 @@ Remove-Item Env:FLEETORY_IMMUDB_RESTORE_READ_TOKEN
 
 The expected value hash is calculated from the decoded `value` returned by immudb for the selected `fleetory/audit/v1/{EventId:N}` key. Store that hash in the approved change record before the restore check. The script refuses HTTP, redirects, a wrong key, a wrong revision, a changed value, an invalid signed state, a rollback or a fork. It appends a local receipt only as a verification trace; copy that receipt to the independent WORM/SIEM destination before destroying the disposable instance.
 
+Database selection, signed-state retrieval and audit readback use the same
+HTTPS transport. Each read has a 20-second total deadline and a 16 KiB body
+limit enforced during streaming, including responses without Content-Length.
+Redirects are rejected before any request to the new address, and failure
+messages include neither the read-only token nor remote response content.
+Cookies and environment proxies are disabled. The operator host must trust the
+approved CA and satisfy OS certificate/hostname/revocation checks; production
+verification has no option to disable these checks.
+
 6. Confirm the script output contains `fleetory.immudb-restore-acceptance.v1`, the expected database, the restored signed-state transaction and the expected EventId/revision/hash. Capture the output and the WORM object identifier in the change record.
 7. Revoke the read-only token, destroy the disposable instance and retain the backup, restore log, acceptance output and WORM receipt for the approved retention period.
 

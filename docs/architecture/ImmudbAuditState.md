@@ -8,6 +8,24 @@ The verifier reads `GET /api/db/state` from an HTTPS origin. immudb exposes this
 
 The `/api/db/state` endpoint is not an audit writer API and must be reachable only through the restricted immudb network path. The verifier never sends a write request and never receives the Fleetory audit-writer secret. A bearer token can be supplied for deployments that protect the endpoint even though the upstream REST schema marks CurrentState as unauthenticated.
 
+State and restore verification share `eng/immudb-http.ps1`. It accepts only an
+HTTPS origin with no credentials, path other than `/`, query or fragment, and
+sends only GET requests under `/api/db/`. Its client disables redirects,
+cookies and environment proxies, requires TLS 1.2 or later, and keeps OS
+certificate, hostname and revocation validation enabled. Configure approved CA
+trust and usable revocation information on the operator host; the operational
+scripts expose no certificate-validation bypass.
+
+Every read has a 20-second total deadline covering headers and the streamed
+body. Both an advertised length over 16 KiB and an actual body over 16,384
+bytes fail before JSON parsing, including chunked or lengthless responses.
+Invalid UTF-8, malformed JSON, non-object JSON and HTTP errors fail with
+sanitized messages; response bodies, bearer tokens and remote error details
+are not printed. TLS-loopback tests verify that redirect targets receive no
+request and that an untrusted certificate or wrong hostname receives no HTTP
+authorization header. Only the test fixture pins its disposable certificate;
+it does not modify system trust.
+
 ## Receipt anchor
 
 The verifier writes newline-delimited canonical JSON receipts to an absolute anchor path. Each receipt has schema `fleetory.immudb-state-receipt.v1`, database, `txId`, base64 `txHash`, base64 state signature, SHA-256 of the pinned 65-byte public point, UTC observation time and a SHA-256-linked anchor chain (`previousReceiptSha256` and `receiptSha256`). The chain covers the stable identity and cryptographic fields; `observedAt` remains display metadata. The append operation has these invariants:

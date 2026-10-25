@@ -1,6 +1,8 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Net;
+using System.Net.Http;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Security.Authentication;
@@ -20,8 +22,24 @@ public sealed class TlsProbeTestServer : IDisposable
     public int Status = 200;
     public string Location = "";
     public string LastError = "";
+    public string LastAuthorization = "";
+    public string LastPath = "";
+    public byte[] Body = new byte[0];
+    public bool Chunked;
+    public bool OmitContentLength;
+    public int DelayBodyMilliseconds;
     public readonly int Port;
     public int Requests { get { return Interlocked.CompareExchange(ref requests, 0, 0); } }
+
+    // Only test clients use this exact-certificate pin; production transport
+    // retains normal OS trust, hostname and revocation validation.
+    public static void PinClient(HttpClientHandler handler, X509Certificate2 expected)
+    {
+        byte[] der = expected.RawData;
+        handler.ServerCertificateCustomValidationCallback = (request, peer, chain, errors) =>
+            peer != null && (errors & SslPolicyErrors.RemoteCertificateNameMismatch) == 0 &&
+            der.SequenceEqual(peer.RawData);
+    }
 
     public static X509Certificate2 CreateCertificate()
     {
@@ -74,22 +92,40 @@ public sealed class TlsProbeTestServer : IDisposable
                     using (var reader = new StreamReader(tls, Encoding.ASCII, false, 1024, true))
                     {
                         string requestLine = reader.ReadLine();
-                        if (requestLine == null || !requestLine.StartsWith("HEAD / HTTP/1.1", StringComparison.Ordinal))
-                            throw new IOException("Expected an HTTP HEAD request.");
+                        if (requestLine == null ||
+                            !(requestLine.StartsWith("HEAD /", StringComparison.Ordinal) ||
+                              requestLine.StartsWith("GET /", StringComparison.Ordinal)))
+                            throw new IOException("Expected an HTTP HEAD or GET request.");
+                        LastPath = requestLine.Split(' ')[1];
+                        LastAuthorization = "";
                         string line = null;
                         int length = requestLine.Length;
                         while ((line = reader.ReadLine()) != null && line.Length != 0)
                         {
                             length += line.Length;
                             if (length > 4096) throw new IOException("Request headers are too large.");
+                            if (line.StartsWith("Authorization:", StringComparison.OrdinalIgnoreCase))
+                                LastAuthorization = line.Substring("Authorization:".Length).Trim();
                         }
                         if (line == null) throw new IOException("Incomplete HTTP headers.");
                     }
                     Interlocked.Increment(ref requests);
-                    string headers = "HTTP/1.1 " + Status + " Test\r\nContent-Length: 0\r\nConnection: close\r\n";
+                    string headers = "HTTP/1.1 " + Status + " Test\r\nConnection: close\r\nContent-Type: application/json\r\n";
+                    if (Chunked) headers += "Transfer-Encoding: chunked\r\n";
+                    else if (!OmitContentLength) headers += "Content-Length: " + Body.Length + "\r\n";
                     if (Location.Length != 0) headers += "Location: " + Location + "\r\n";
                     byte[] response = Encoding.ASCII.GetBytes(headers + "\r\n");
                     tls.Write(response, 0, response.Length);
+                    if (DelayBodyMilliseconds > 0) Thread.Sleep(DelayBodyMilliseconds);
+                    if (Chunked)
+                    {
+                        byte[] size = Encoding.ASCII.GetBytes(Body.Length.ToString("X") + "\r\n");
+                        tls.Write(size, 0, size.Length);
+                        tls.Write(Body, 0, Body.Length);
+                        byte[] end = Encoding.ASCII.GetBytes("\r\n0\r\n\r\n");
+                        tls.Write(end, 0, end.Length);
+                    }
+                    else tls.Write(Body, 0, Body.Length);
                 }
             }
             catch (SocketException error) { LastError = error.Message; return; }

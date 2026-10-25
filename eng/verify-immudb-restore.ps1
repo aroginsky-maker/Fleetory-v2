@@ -1,4 +1,4 @@
-# Fleetory immudb restore acceptance verifier.
+﻿# Fleetory immudb restore acceptance verifier.
 # Backup and restore are performed by a separately privileged immudb operator.
 # This script only reads the restored endpoint with a read-only bearer token.
 [CmdletBinding()]
@@ -40,43 +40,10 @@ function ConvertFrom-ImmudbRestoreBase64Strict([string] $Value, [string] $Name) 
 
 function Invoke-ImmudbRestoreGetJson(
     [uri] $Origin, [string] $Token, [string] $Path, [string] $FailureMessage) {
-    if ($Origin.Scheme -ne 'https') {
-        throw 'immudb restore acceptance requires HTTPS.'
-    }
     if ([string]::IsNullOrWhiteSpace($Token)) {
         throw 'The read-only immudb bearer token is missing.'
     }
-    $handler = [Net.Http.HttpClientHandler]::new()
-    $handler.AllowAutoRedirect = $false
-    $client = [Net.Http.HttpClient]::new($handler)
-    $client.Timeout = [TimeSpan]::FromSeconds(20)
-    try {
-        $uri = [uri]::new($Origin, $Path)
-        $request = [Net.Http.HttpRequestMessage]::new([Net.Http.HttpMethod]::Get, $uri)
-        $request.Headers.Authorization = [Net.Http.Headers.AuthenticationHeaderValue]::new(
-            'Bearer', $Token)
-        try {
-            $response = $client.SendAsync($request,
-                [Net.Http.HttpCompletionOption]::ResponseHeadersRead).GetAwaiter().GetResult()
-            if ([int]$response.StatusCode -ge 300 -and [int]$response.StatusCode -lt 400) {
-                throw 'The immudb database-selection endpoint returned a redirect.'
-            }
-            if (-not $response.IsSuccessStatusCode) {
-                throw $FailureMessage
-            }
-            $body = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
-            if ([Text.Encoding]::UTF8.GetByteCount($body) -gt 16KB) {
-                throw 'The restored immudb response is too large.'
-            }
-            try { return $body | ConvertFrom-Json }
-            catch { throw 'The restored immudb response is invalid JSON.' }
-        }
-        finally { $request.Dispose() }
-    }
-    finally {
-        $client.Dispose()
-        $handler.Dispose()
-    }
+    return Invoke-ImmudbGetJson $Origin $Token $Path $FailureMessage
 }
 
 function Get-ImmudbRestoreDatabaseToken([uri] $Origin, [string] $Token, [string] $Database) {

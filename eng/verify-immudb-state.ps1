@@ -1,4 +1,4 @@
-# Fleetory immudb signed-state receipt verifier.
+﻿# Fleetory immudb signed-state receipt verifier.
 # This script is an operational verifier; it never writes to immudb.
 [CmdletBinding()]
 param(
@@ -11,6 +11,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'immudb-http.ps1')
 
 function ConvertFrom-Base64Strict([string] $Value, [string] $Name) {
     if ([string]::IsNullOrWhiteSpace($Value)) {
@@ -49,20 +50,8 @@ function Test-ImmudbAbsolutePath([string] $Path) {
 }
 
 function Get-ImmudbState([uri] $Origin, [string] $Token) {
-    if ($Origin.Scheme -ne 'https') {
-        throw 'immudb state verification requires HTTPS.'
-    }
-    $uri = [uri]::new($Origin, 'api/db/state')
-    $headers = @{}
-    if (-not [string]::IsNullOrWhiteSpace($Token)) {
-        $headers.Authorization = "Bearer $Token"
-    }
-    try {
-        return Invoke-RestMethod -Method Get -Uri $uri -Headers $headers -TimeoutSec 20
-    }
-    catch {
-        throw 'Could not read the immudb signed state.'
-    }
+    return Invoke-ImmudbGetJson $Origin $Token 'api/db/state' `
+        'Could not read the immudb signed state.'
 }
 
 function New-ImmudbStateSigningPayload(

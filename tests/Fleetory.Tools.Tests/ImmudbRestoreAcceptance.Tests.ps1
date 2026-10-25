@@ -1,9 +1,10 @@
-# UTF-8 with BOM keeps this PowerShell test usable on Windows PowerShell 5.1.
+﻿# UTF-8 with BOM keeps this PowerShell test usable on Windows PowerShell 5.1.
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $source = Join-Path $repoRoot 'eng/verify-immudb-restore.ps1'
+. (Join-Path $repoRoot 'eng/immudb-http.ps1')
 . (Join-Path $PSScriptRoot 'TestProvisionerHelpers.ps1') -Source $source `
     -Names @(
         'ConvertTo-ImmudbRestoreEventKey', 'ConvertFrom-ImmudbRestoreBase64Strict',

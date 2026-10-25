@@ -54,6 +54,10 @@ jobs:
         shell: powershell
         run: ./tests/Fleetory.Tools.Tests/Phase7Readiness.Tests.ps1
 
+      - name: Verify immudb authenticated TLS transport on Windows PowerShell 5.1
+        shell: powershell
+        run: ./tests/Fleetory.Tools.Tests/ImmudbHttpTransport.Tests.ps1
+
   quality:
     name: Strict build, tests, coverage and Sonar
     runs-on: ubuntu-latest
@@ -114,6 +118,10 @@ jobs:
       - name: Verify immudb restore acceptance
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/ImmudbRestoreAcceptance.Tests.ps1
+
+      - name: Verify immudb authenticated TLS transport
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ImmudbHttpTransport.Tests.ps1
 
       - name: Verify immudb receipt export package
         shell: pwsh
