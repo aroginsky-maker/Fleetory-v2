@@ -133,6 +133,12 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/CertificateProvisioning.Tests.ps1
 
+      - name: Verify secret scan gate and committed history
+        shell: pwsh
+        run: |
+          ./tests/Fleetory.Tools.Tests/SecretScan.Tests.ps1
+          ./eng/verify-secret-scan.ps1
+
       - name: Verify Windows gateway PKI policy
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/WindowsPkiProvisioning.Tests.ps1

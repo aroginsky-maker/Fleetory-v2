@@ -216,6 +216,15 @@ At `9b1de04`, [run 39668272054](https://github.com/aroginsky-maker/Fleetory-v2/a
 
 ## Required before completion
 
+The Baseline section 20 secret-scanning gate now uses the pinned, MIT-licensed
+Gitleaks CLI against committed HEAD and all ancestors in a restricted Linux
+container. The policy retains all upstream default rules and refuses inline,
+fingerprint and repository-config suppressions. A real-scanner regression suite
+checks clean history, historical/merge-only token detection, redaction and ten
+failure/bypass cases. Linux CI runs both that suite and the repository scan;
+details and scope limits are in [SecretScanning.md](docs/quality/SecretScanning.md).
+This adds source-history evidence without closing the production controls below.
+
 - Run the approved Windows host PKI preflight during each production provisioning and renewal. The script and ephemeral root-only wire test are implemented, but production installation, custody, renewal approval and rollback evidence still need deployment records; the earlier local machine without those store entries still needs its own provisioning before that probe can pass.
 - Validate the controlled Admin recovery runbook with production incident approval and credential custody; validate production retention of the scope-reparenting approval and impact records before allowing hierarchy changes.
 - CA issuance and renewal policy, secure root distribution, grant delivery, production validation of Admin registration/rotation and verified physical-device approval for certificate replacement or lost-key recovery; production custody and retention of recovery evidence. The two-root rollover mechanism is implemented, but operator validation remains.

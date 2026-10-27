@@ -92,6 +92,16 @@ for packaging, runtime limits and the exact process-isolation checks.
 
 ## Verification
 
+The security gate also scans committed Git history with the pinned Gitleaks CLI:
+
+```powershell
+pwsh -File ./eng/verify-secret-scan.ps1
+```
+
+This requires complete Git history, PowerShell 7.2+ and Docker with Linux
+containers. Linux CI runs this gate and its negative tests before build/Sonar.
+See [secret scanning](docs/quality/SecretScanning.md) for scope and redacted reports.
+
 Windows:
 
 ```powershell

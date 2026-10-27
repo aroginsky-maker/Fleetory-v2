@@ -4,7 +4,8 @@ Baseline section 20 includes dependency scanning in the security gate. Fleetory
 now records explicit solution-wide NuGet audit coverage alongside the existing
 strict build and Sonar analysis. This checks known package advisories for the
 resolved `Fleetory.sln` graph; runtime/OS images, separate tools outside that
-solution, source-code SAST and secret scanning have their own scopes.
+solution and source-code SAST have their own scopes. The separate
+[secret scan gate](SecretScanning.md) checks committed Git history.
 
 Run the normal `eng/verify-quality.ps1` entry point. Its first step forces solution
 restore with `NuGetAudit=true`, `NuGetAuditMode=all`, `NuGetAuditLevel=low`, static

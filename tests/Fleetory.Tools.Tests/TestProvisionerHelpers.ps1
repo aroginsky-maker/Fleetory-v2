@@ -1,6 +1,6 @@
 ﻿param(
     [Parameter(Mandatory)][string] $Source,
-    [Parameter(Mandatory)][string[]] $Names
+    [Parameter(Mandatory)][AllowEmptyCollection()][string[]] $Names
 )
 
 $syntaxErrors = $null
