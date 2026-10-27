@@ -2,6 +2,7 @@
 -- The runtime role needs USAGE on signer and SELECT, INSERT on these three tables.
 -- Keep UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, schema CREATE and ownership away from that role.
 -- Grant only SELECT on client_certificate_revocations; an independent operator writes revocations.
+-- Limit operator INSERT to the five evidence/input columns; database-generated metadata is protected.
 BEGIN;
 CREATE SCHEMA IF NOT EXISTS signer;
 REVOKE ALL ON SCHEMA signer FROM PUBLIC;

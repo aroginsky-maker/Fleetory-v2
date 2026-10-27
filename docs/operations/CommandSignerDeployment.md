@@ -155,9 +155,13 @@ certificate and request limits; the library alone does not prove key possession.
 
 Use an independently approved incident/evidence bundle and exact DER SHA-256.
 In the separate signer database, give the operator a dedicated login with CONNECT,
-schema USAGE and SELECT/INSERT on `signer.client_certificate_revocations` only;
-it needs no ownership, memberships, UPDATE, DELETE, TRUNCATE or signing-journal
-write privileges. The signer runtime must have SELECT only on this table.
+schema USAGE, table SELECT and column INSERT on `certificate_sha256`,
+`incident_reference`, `operator_reference`, `approver_reference` and `evidence_sha256`
+in `signer.client_certificate_revocations` only. Do not grant table-wide INSERT:
+the operator must not supply database-generated event ID, session identity or time.
+It needs no ownership, memberships, UPDATE, DELETE, TRUNCATE or signing-journal
+write privileges. The signer runtime must have SELECT only on this table;
+startup rejects both table and individual-column write grants.
 Upgrade existing deployments with the idempotent schema v3 provisioning script
 and explicit SELECT grant before replacing the host binary; an old schema or
 missing/excessive denylist permissions fail startup.

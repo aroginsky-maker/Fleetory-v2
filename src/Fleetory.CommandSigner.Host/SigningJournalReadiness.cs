@@ -17,6 +17,7 @@ internal sealed class SigningJournalReadiness(NpgsqlDataSource source) : IHosted
                     AND NOT has_schema_privilege(current_user, 'signer', 'CREATE')
                     AND has_table_privilege(current_user, 'signer.client_certificate_revocations', 'SELECT')
                     AND NOT has_table_privilege(current_user, 'signer.client_certificate_revocations', 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+                    AND NOT has_any_column_privilege(current_user, 'signer.client_certificate_revocations', 'INSERT,UPDATE,REFERENCES')
                     AND bool_and(has_table_privilege(current_user, relation, 'SELECT')
                         AND has_table_privilege(current_user, relation, 'INSERT')
                         AND NOT has_table_privilege(current_user, relation, 'UPDATE')

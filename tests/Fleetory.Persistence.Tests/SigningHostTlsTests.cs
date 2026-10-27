@@ -358,7 +358,10 @@ public sealed partial class SigningHostTlsTests(PostgreSqlTestFixture fixture)
                     CREATE ROLE {OperatorRole} LOGIN PASSWORD '{_password}-operator';
                     GRANT CONNECT ON DATABASE {new NpgsqlConnectionStringBuilder(_fixture.ConnectionString).Database} TO {OperatorRole};
                     GRANT USAGE ON SCHEMA signer TO {OperatorRole};
-                    GRANT SELECT, INSERT ON signer.client_certificate_revocations TO {OperatorRole};
+                    GRANT SELECT ON signer.client_certificate_revocations TO {OperatorRole};
+                    GRANT INSERT (certificate_sha256, incident_reference, operator_reference,
+                                  approver_reference, evidence_sha256)
+                        ON signer.client_certificate_revocations TO {OperatorRole};
                     """);
                 _operatorProvisioned = true;
             }
@@ -375,11 +378,7 @@ public sealed partial class SigningHostTlsTests(PostgreSqlTestFixture fixture)
                 case "oversized": values[1] = new string('x', 129); break;
                 case "control": values[1] = "INC\nforged"; break;
             }
-            var settings = new NpgsqlConnectionStringBuilder(_fixture.ConnectionString)
-            {
-                Username = OperatorRole, Password = _password + "-operator", Pooling = false
-            };
-            await using var source = NpgsqlDataSource.Create(settings.ConnectionString);
+            await using var source = CreateOperatorSource();
             await using var connection = await source.OpenConnectionAsync();
             await using var transaction = await connection.BeginTransactionAsync();
             await using var configure = new NpgsqlCommand("""
@@ -399,6 +398,19 @@ public sealed partial class SigningHostTlsTests(PostgreSqlTestFixture fixture)
             Assert.Equal("on", await sync.ExecuteScalarAsync());
             await transaction.CommitAsync();
         }
+
+        public async Task ExecuteOperatorAsync(string sql)
+        {
+            await using var source = CreateOperatorSource();
+            await using var command = source.CreateCommand(sql);
+            await command.ExecuteNonQueryAsync();
+        }
+
+        private NpgsqlDataSource CreateOperatorSource() => NpgsqlDataSource.Create(
+            new NpgsqlConnectionStringBuilder(_fixture.ConnectionString)
+            {
+                Username = OperatorRole, Password = _password + "-operator", Pooling = false
+            }.ConnectionString);
 
         public async Task<long> CountAsync(string table)
         {

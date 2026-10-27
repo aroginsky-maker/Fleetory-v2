@@ -92,12 +92,16 @@ public sealed partial class SigningHostTlsTests
     [Theory]
     [InlineData("missing-read")]
     [InlineData("runtime-write")]
+    [InlineData("column-write")]
     public async Task Startup_rejects_missing_or_excessive_revocation_permissions(string kind)
     {
         await using var lab = await HostLab.CreateAsync(fixture);
-        await lab.ExecuteOwnerAsync(kind == "missing-read"
-            ? $"REVOKE SELECT ON signer.client_certificate_revocations FROM {lab.Role}"
-            : $"GRANT INSERT ON signer.client_certificate_revocations TO {lab.Role}");
+        await lab.ExecuteOwnerAsync(kind switch
+        {
+            "missing-read" => $"REVOKE SELECT ON signer.client_certificate_revocations FROM {lab.Role}",
+            "column-write" => $"GRANT INSERT (certificate_sha256) ON signer.client_certificate_revocations TO {lab.Role}",
+            _ => $"GRANT INSERT ON signer.client_certificate_revocations TO {lab.Role}"
+        });
         await using var app = SigningHostApplication.Build(lab.Arguments());
         await Assert.ThrowsAsync<InvalidOperationException>(() => app.StartAsync());
     }
@@ -143,6 +147,23 @@ public sealed partial class SigningHostTlsTests
         await using var reopened = NpgsqlDataSource.Create(fixture.ConnectionString);
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => new PostgreSqlSigningClientRevocations(reopened)
             .EnsureNotRevokedAsync(lab.Pki.Client.GetCertHashString(HashAlgorithmName.SHA256).ToLowerInvariant()));
+    }
+
+    [Theory]
+    [InlineData("database_operator", "'forged'")]
+    [InlineData("event_id", "gen_random_uuid()")]
+    [InlineData("revoked_at", "clock_timestamp() - interval '1 year'")]
+    public async Task Operator_cannot_override_database_audit_metadata(string column, string expression)
+    {
+        await using var lab = await HostLab.CreateAsync(fixture);
+        await lab.RevokeAsync();
+        // Both SQL fragments are fixed test cases, never operator/request input.
+        var error = await Assert.ThrowsAsync<PostgresException>(() => lab.ExecuteOperatorAsync($"""
+            INSERT INTO signer.client_certificate_revocations
+                (certificate_sha256, incident_reference, operator_reference, approver_reference, evidence_sha256, {column})
+            VALUES (repeat('B', 64), 'INC-test', 'operator', 'approver', repeat('A', 64), {expression});
+            """));
+        Assert.Equal(PostgresErrorCodes.InsufficientPrivilege, error.SqlState);
     }
 
     [Theory]
