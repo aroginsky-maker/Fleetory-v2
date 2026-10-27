@@ -15,6 +15,7 @@ $CoverageDirectory = Split-Path -Parent $CoveragePath
 $Phase6PersistenceTestProject = Join-Path $RepoRoot 'tests/Fleetory.Persistence.Tests/Fleetory.Persistence.Tests.csproj'
 
 $StrictBuildStatus = 'NOT RUN'
+$DependencyAuditStatus = 'NOT RUN'
 $TestsStatus = 'NOT RUN'
 $ArchitectureTestsStatus = 'NOT RUN'
 $CoverageStatus = 'NOT RUN'
@@ -27,6 +28,7 @@ function Write-Summary {
     Write-Host 'Fleetory quality verification summary'
     Write-Host '-------------------------------------'
     Write-Host ("STRICT BUILD        {0}" -f $StrictBuildStatus)
+    Write-Host ("DEPENDENCY AUDIT    {0}" -f $DependencyAuditStatus)
     Write-Host ("TESTS               {0}" -f $TestsStatus)
     Write-Host ("ARCHITECTURE TESTS  {0}" -f $ArchitectureTestsStatus)
     Write-Host ("COVERAGE            {0} / {1}" -f $CoverageDisplay, $CoverageStatus)
@@ -120,11 +122,18 @@ if (Test-Path -LiteralPath $Phase6PersistenceTestProject -PathType Leaf) {
 
 Push-Location $RepoRoot
 try {
-    if ((Invoke-DotnetStep @('restore', 'Fleetory.sln')) -ne 0) {
-        $StrictBuildStatus = 'FAIL (restore)'
+    if ((Invoke-DotnetStep @(
+        'restore', 'Fleetory.sln', '--force', '-warnaserror',
+        '-p:FleetoryRequireDependencyAudit=true', '-p:NuGetAudit=true',
+        '-p:NuGetAuditMode=all', '-p:NuGetAuditLevel=low', '-p:RestoreUseStaticGraphEvaluation=false'
+    )) -ne 0) {
+        $StrictBuildStatus = 'FAIL (restore/dependency audit)'
+        $DependencyAuditStatus = 'FAIL'
         Write-Summary
         exit 1
     }
+
+    $DependencyAuditStatus = 'PASS'
 
     if ((Invoke-DotnetStep @('build', 'Fleetory.sln', '-c', 'Release', '--no-restore')) -ne 0) {
         $StrictBuildStatus = 'FAIL'

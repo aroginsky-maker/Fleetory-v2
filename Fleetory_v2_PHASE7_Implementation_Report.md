@@ -84,6 +84,15 @@
 
 ## Verification snapshot
 
+The dependency security gate now explicitly audits direct/transitive NuGet
+dependencies at every severity, requires successful access to the configured
+advisory source and verifies that forced restore audited every solution project.
+Missing coverage, skipped projects, weak settings and all NuGet audit warning
+classes fail. The real local restore covered 26/26 projects; a supplementary
+native vulnerability report returned no vulnerable packages. Actual MSBuild
+gate tests cover full coverage, 13 rejected configurations and six warning codes.
+See [DependencyAudit](docs/quality/DependencyAudit.md) for scope and limitations.
+
 The signer snapshot verifier now supports an independently approved checkpoint
 file/digest pair. It preserves every known request/result/rejection/revocation
 row, permits appended data and late completion, and rejects known-history
@@ -185,6 +194,7 @@ Policy additions/CA reload and production approval/custody remain open.
 | Signer journal evidence extract | 20 real PostgreSQL cases passed: prior 18 cases plus native psql with inherited LATIN1/WIN1251, multilingual metadata and one UTF-8 JSON observation |
 | Independent signer snapshot verification | Exact retained digest, six acceptance scenarios, 33 rejection scenarios on Windows PowerShell 7, strict UUID/digest/date boundaries, unchanged source bytes and real PostgreSQL/psql-to-verifier integration passed; shared receipt regressions passed on PowerShell 7/5.1 |
 | Signer snapshot checkpoint continuity | Four acceptance and 18 rejection scenarios passed: unchanged/forward history, pending completion, equivalent representations, missing/changed/duplicate rows, old history with fresh metadata and incomplete/unapproved checkpoint inputs |
+| Dependency audit coverage | Forced solution restore audited 26/26 projects (100%); no vulnerable packages reported; 13 weakened/incomplete configurations and six synthetic NuGet warning-code cases failed as required |
 | Privileged change evidence runbook | Approval identities, impact hashes, audit/WORM links, retention and recovery evidence documented |
 | PHASE 7 readiness record verifier | Current UTC validity, distinct normalized actors, strict JSON flags, finite coverage, per-control object references and exact record SHA-256 checked |
 | Self-hosted PHASE 7 evidence record | Signer, least-privilege audit pipeline, TLS, backup/restore and readiness checks recorded with production limitations |

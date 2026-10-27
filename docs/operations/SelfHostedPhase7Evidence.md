@@ -67,6 +67,13 @@ review evidence for the implemented behavior and is not production custody.
   rejection scenarios including whitespace-contaminated UUID/digest/date values.
   Both real psql-to-verifier cases remained successful. Neither input artifact
   was changed, and no trust anchor or production recovery approval was created.
+- Explicit NuGet audit coverage checked all 26/26 solution projects during forced
+  restore, including direct/transitive dependencies at every advisory severity.
+  The supplementary native vulnerability report found no vulnerable packages.
+  Actual MSBuild gate tests accepted full coverage and rejected 13 incomplete or
+  weakened configurations plus all six audit warning classes. Full local strict
+  build/tests remained 401/401 with 93.68% production coverage. This is a known
+  package-advisory check, not a production deployment or an OS/image scan.
 
 Production completion still requires independent CA/key custody, signer
 deployment, TLS/firewall records, WORM/SIEM object identifiers, retention/legal

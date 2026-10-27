@@ -293,6 +293,13 @@ continuity check supports recovery review without advancing local trust state.
 Latest checkpoint custody, new-row authenticity and actual database/backup
 lineage remain independently verified deployment inputs.
 
+The quality entry point now enforces explicit all-severity NuGet auditing for
+direct/transitive dependencies and verifies actual coverage of every solution
+project during forced restore. Missing advisory data, incomplete counters,
+skipped projects and weak audit modes fail rather than producing a successful
+quality result. This package-advisory check complements source SAST; see the
+[dependency audit gate](../quality/DependencyAudit.md) for its exact scope.
+
 ## Remaining PHASE 7 work
 
 - External Agent CA issuance and grant delivery, CA lifecycle, full rotation administration with physical device verification, Admin certificate lifecycle, and revocation propagation to future long-lived Agent streams. The [production certificate lifecycle runbook](../operations/CertificateLifecycle.md) defines the required issuance, custody, rotation, recovery and rollback evidence.
