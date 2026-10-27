@@ -232,11 +232,65 @@ errors and cancellation require reconciliation rather than another signature.
 
 This implements durable records for authorized signing attempts. The host also
 records HTTP denials in `signing_rejections`; TLS negotiation failures happen
-before HTTP and require retained TLS operational diagnostics. Read-only
-reconciliation and delivery acknowledgement correlation remain open. The
+before HTTP and require retained TLS operational diagnostics. The read-only
+operator reconciliation described below is implemented; delivery acknowledgement
+correlation remains open. The
 separate WORM/SIEM export, immutable retention and independent administrator
 custody remain deployment/integration requirements; database append permissions
 alone do not establish those controls.
+
+## Reconcile a signing request after a lost response
+
+Use `eng/reconcile-signing-request.sql` in the independent signer database, under
+an approved incident. Give the reconciliation operator a separate direct login
+with CONNECT, schema USAGE and SELECT on `signer.signing_requests` and
+`signer.signing_results` only. No signer/Transit credential, schema ownership,
+role membership or journal write privileges are needed. Keep the PostgreSQL
+service profile/password file protected outside Fleetory Server and the repository;
+never put a database password in the command line.
+
+Stop further upstream dispatch for the affected request and confirm the approved
+database/restore lineage first. In a **fresh** PostgreSQL session, set the known
+canonical nonzero UUID:
+
+```sql
+SET fleetory.signer_reconcile.request_id = '9ade91ca-6ec3-48e6-886f-2396fde9549a';
+```
+
+Then execute `eng/reconcile-signing-request.sql` with stop-on-error enabled.
+For psql, use the approved service profile with `-X -q -A -t -v ON_ERROR_STOP=1`
+and load the file using `\i`. Retain its single JSON result in a new protected
+incident artifact. Record the exact artifact hash in the independently retained
+incident/evidence bundle. The script sets a read-only transaction, UTC output,
+a five-second statement timeout and two-second lock timeout. It rejects role
+switching and any already assigned transaction, so it cannot accidentally commit
+earlier writes. Do not run it inside an existing transaction.
+
+The observation records schema `fleetory.signing-reconciliation.v1`, RequestId,
+database name, actual operator login, observation time, the authorized request
+metadata and any committed CommandId/key ID/envelope SHA-256. A single SELECT
+joins the reservation/result under one database snapshot. It returns no raw
+signature, private key, bearer token or signing credential and changes no rows.
+
+| Status | Meaning and incident action |
+| --- | --- |
+| `NotFound` | No reservation is visible in this snapshot. Check pending work, the exact RequestId and database/restore freshness; absence does not authorize a retry. |
+| `Pending` | Reservation exists without a committed result. Transit may already have signed; reconcile independently and preserve the row. |
+| `SigningRecorded` | A signing result was committed. The host may still have withheld it or lost the response; correlate with independent delivery evidence. |
+
+Every observation reports `automaticRetryAllowed`, `deliveryVerified` and
+`executionVerified` as false. A permission failure, lock timeout or database
+failure produces an error, not `NotFound`. A later observation may see a newly
+committed result; observation time is not an immutable global cutoff.
+
+If an envelope was actually retained, compare its DeviceId, CommandId and key ID
+with this record and compare SHA-256 of its canonical `GetSigningBytes()` followed
+by the 64-byte signature with `envelopeSha256`. Also verify its signature using
+the approved device-bound public key. This comparison does not authorize delivery,
+re-signing or bypassing Agent expiry/replay checks. The tool neither regenerates
+a signature nor authorizes a new RequestId. Production operator approvals, latest
+database custody, delivery acknowledgements and WORM retention remain separate
+controls.
 
 ## Key and service isolation
 

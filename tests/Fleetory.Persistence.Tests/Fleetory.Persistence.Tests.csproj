@@ -26,6 +26,9 @@
     <ProjectReference Include="../../src/Fleetory.Server/Fleetory.Server.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="../../eng/reconcile-signing-request.sql"
+          Link="reconcile-signing-request.sql"
+          CopyToOutputDirectory="PreserveNewest" />
     <None Include="../../eng/revoke-signing-client.sql"
           Link="revoke-signing-client.sql"
           CopyToOutputDirectory="PreserveNewest" />

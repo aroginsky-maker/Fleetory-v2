@@ -56,6 +56,16 @@ and event UUID with synchronous commit. These references still require external
 approval/custody validation. CA/grant policy reload, recalling already returned
 envelopes and independent WORM export are separate controls.
 
+Lost-response incidents can now use `eng/reconcile-signing-request.sql` under
+an independent SELECT-only operator login. Its bounded read-only transaction
+returns one request/result snapshot and distinguishes missing reservation,
+pending reservation and committed signing result without returning signatures
+or authorizing a retry. It retains the exact certificate/caller/DeviceId binding
+and canonical envelope digest for external evidence comparison. Role switching,
+invalid UUIDs, prior transaction writes, lost read privileges and blocked reads
+fail closed. The JSON observation still needs independent custody and delivery
+correlation; signing recorded in the journal is not Agent delivery or execution.
+
 ## Implemented local audit persistence
 
 Platform now registers `IAuditWriter` backed by PostgreSQL. A write inserts an append-only `platform.audit_events` row and a matching `platform.audit_export_queue` row in the same transaction. The method returns only after commit. A database or transaction failure propagates to the caller; critical call sites must not swallow it. Both tables and their indexes are created by Platform migration `202610160001_AddPlatformAuditOutbox`. No foreign key crosses a module schema.
