@@ -19,7 +19,7 @@ using TestSecrets = Fleetory.Persistence.Tests.AgentGatewayTlsTests.TestSecretDi
 namespace Fleetory.Persistence.Tests;
 
 [Collection(PostgreSqlTestCollection.Name)]
-public sealed class SigningHostTlsTests(PostgreSqlTestFixture fixture)
+public sealed partial class SigningHostTlsTests(PostgreSqlTestFixture fixture)
 {
     [Fact]
     public async Task Real_mtls_signing_journals_once_and_returns_a_valid_signature()
@@ -247,16 +247,19 @@ public sealed class SigningHostTlsTests(PostgreSqlTestFixture fixture)
         private WebApplication? _transit;
         private WebApplication? _host;
         private string _transitUrl = "";
+        private bool _operatorProvisioned;
         public DeviceId Device { get; } = new(Guid.NewGuid());
         public TestPki Pki { get; }
         public TestSecrets Secrets { get; } = new();
         public ECDsa Key { get; } = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         public string Role { get; } = "signer_host_" + Guid.NewGuid().ToString("N");
+        public string OperatorRole => Role + "_operator";
         private int _transitCalls;
         public int TransitCalls => Volatile.Read(ref _transitCalls);
         public bool TransitUnavailable { get; set; }
         public TaskCompletionSource? TransitRelease { get; set; }
         public TaskCompletionSource FourTransitCalls { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource FirstTransitCall { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public string Url => Address(_host!);
 
         private HostLab(PostgreSqlTestFixture fixture)
@@ -265,14 +268,14 @@ public sealed class SigningHostTlsTests(PostgreSqlTestFixture fixture)
             Pki = new TestPki(Device);
         }
 
-        public static async Task<HostLab> CreateAsync(PostgreSqlTestFixture fixture, int rate = 30)
+        public static async Task<HostLab> CreateAsync(PostgreSqlTestFixture fixture, int rate = 30, bool replacement = false)
         {
             var lab = new HostLab(fixture);
-            try { await lab.StartAsync(rate); return lab; }
+            try { await lab.StartAsync(rate, replacement); return lab; }
             catch { await lab.DisposeAsync(); throw; }
         }
 
-        private async Task StartAsync(int rate)
+        private async Task StartAsync(int rate, bool replacement)
         {
             await ExecuteOwnerAsync(await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "provision-signing-journal.sql")));
             await ExecuteOwnerAsync($"""
@@ -280,6 +283,7 @@ public sealed class SigningHostTlsTests(PostgreSqlTestFixture fixture)
                 GRANT CONNECT ON DATABASE {new NpgsqlConnectionStringBuilder(_fixture.ConnectionString).Database} TO {Role};
                 GRANT USAGE ON SCHEMA signer TO {Role};
                 GRANT SELECT, INSERT ON signer.signing_requests, signer.signing_results, signer.signing_rejections TO {Role};
+                GRANT SELECT ON signer.client_certificate_revocations TO {Role};
                 """);
             var settings = new NpgsqlConnectionStringBuilder(_fixture.ConnectionString)
             {
@@ -294,12 +298,12 @@ public sealed class SigningHostTlsTests(PostgreSqlTestFixture fixture)
             Secrets.Write("signer-policy", JsonSerializer.Serialize(new
             {
                 rootsPem = Pki.Root.ExportCertificatePem(), intermediatesPem = "",
-                callers = new[] { new
+                callers = (replacement ? new[] { Pki.Client, Pki.UnregisteredClient } : new[] { Pki.Client }).Select(certificate => new
                 {
-                    callerId = "approval-service", certificateSha256 = Pki.Client.GetCertHashString(HashAlgorithmName.SHA256),
+                    callerId = "approval-service", certificateSha256 = certificate.GetCertHashString(HashAlgorithmName.SHA256),
                     deviceIds = new[] { Device.Value }, notBefore = DateTimeOffset.UtcNow.AddMinutes(-1),
                     expiresAt = DateTimeOffset.UtcNow.AddMinutes(10)
-                } }
+                }).ToArray()
             }));
             var builder = WebApplication.CreateSlimBuilder();
             builder.Logging.ClearProviders();
@@ -309,6 +313,7 @@ public sealed class SigningHostTlsTests(PostgreSqlTestFixture fixture)
             {
                 Assert.Equal("disposable-host-token", context.Request.Headers["X-Vault-Token"]);
                 if (Interlocked.Increment(ref _transitCalls) == 4) { FourTransitCalls.TrySetResult(); }
+                FirstTransitCall.TrySetResult();
                 if (TransitUnavailable) { return Microsoft.AspNetCore.Http.Results.StatusCode(503); }
                 if (TransitRelease is not null) { await TransitRelease.Task.WaitAsync(context.RequestAborted); }
                 using var body = await JsonDocument.ParseAsync(context.Request.Body);
@@ -334,6 +339,67 @@ public sealed class SigningHostTlsTests(PostgreSqlTestFixture fixture)
             await command.ExecuteNonQueryAsync();
         }
 
+        public async Task ExecuteRuntimeAsync(string sql)
+        {
+            var settings = new NpgsqlConnectionStringBuilder(_fixture.ConnectionString)
+            {
+                Username = Role, Password = _password, Pooling = false
+            };
+            await using var source = NpgsqlDataSource.Create(settings.ConnectionString);
+            await using var command = source.CreateCommand(sql);
+            await command.ExecuteNonQueryAsync();
+        }
+
+        public async Task RevokeAsync(string? invalid = null)
+        {
+            if (!_operatorProvisioned)
+            {
+                await ExecuteOwnerAsync($"""
+                    CREATE ROLE {OperatorRole} LOGIN PASSWORD '{_password}-operator';
+                    GRANT CONNECT ON DATABASE {new NpgsqlConnectionStringBuilder(_fixture.ConnectionString).Database} TO {OperatorRole};
+                    GRANT USAGE ON SCHEMA signer TO {OperatorRole};
+                    GRANT SELECT, INSERT ON signer.client_certificate_revocations TO {OperatorRole};
+                    """);
+                _operatorProvisioned = true;
+            }
+            var fingerprint = Pki.Client.GetCertHashString(HashAlgorithmName.SHA256);
+            var values = new[] { fingerprint, "INC-signer-test", "operator", "approver", new string('A', 64) };
+            switch (invalid)
+            {
+                case "fingerprint": values[0] = "invalid"; break;
+                case "evidence": values[4] = "invalid"; break;
+                case "incident": values[1] = " "; break;
+                case "operator": values[2] = ""; break;
+                case "approver": values[3] = ""; break;
+                case "same-actor": values[3] = " OPERATOR "; break;
+                case "oversized": values[1] = new string('x', 129); break;
+                case "control": values[1] = "INC\nforged"; break;
+            }
+            var settings = new NpgsqlConnectionStringBuilder(_fixture.ConnectionString)
+            {
+                Username = OperatorRole, Password = _password + "-operator", Pooling = false
+            };
+            await using var source = NpgsqlDataSource.Create(settings.ConnectionString);
+            await using var connection = await source.OpenConnectionAsync();
+            await using var transaction = await connection.BeginTransactionAsync();
+            await using var configure = new NpgsqlCommand("""
+                SELECT set_config('synchronous_commit', 'off', true),
+                       set_config('fleetory.signer_revoke.certificate_sha256', $1, true),
+                       set_config('fleetory.signer_revoke.incident_reference', $2, true),
+                       set_config('fleetory.signer_revoke.operator_reference', $3, true),
+                       set_config('fleetory.signer_revoke.approver_reference', $4, true),
+                       set_config('fleetory.signer_revoke.evidence_sha256', $5, true);
+                """, connection, transaction);
+            foreach (var value in values) { configure.Parameters.AddWithValue(value); }
+            await configure.ExecuteNonQueryAsync();
+            await using var revoke = new NpgsqlCommand(await File.ReadAllTextAsync(
+                Path.Combine(AppContext.BaseDirectory, "revoke-signing-client.sql")), connection, transaction);
+            await revoke.ExecuteNonQueryAsync();
+            await using var sync = new NpgsqlCommand("SHOW synchronous_commit", connection, transaction);
+            Assert.Equal("on", await sync.ExecuteScalarAsync());
+            await transaction.CommitAsync();
+        }
+
         public async Task<long> CountAsync(string table)
         {
             // The table name is a test-owned constant, never an HTTP input.
@@ -354,6 +420,7 @@ public sealed class SigningHostTlsTests(PostgreSqlTestFixture fixture)
         {
             if (_host is not null) { await _host.DisposeAsync(); }
             if (_transit is not null) { await _transit.DisposeAsync(); }
+            if (_operatorProvisioned) { await ExecuteOwnerAsync($"DROP OWNED BY {OperatorRole}; DROP ROLE {OperatorRole};"); }
             await ExecuteOwnerAsync($"DROP OWNED BY {Role}; DROP ROLE IF EXISTS {Role};");
             Key.Dispose(); Pki.Dispose(); Secrets.Dispose();
         }

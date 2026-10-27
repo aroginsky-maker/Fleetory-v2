@@ -45,6 +45,17 @@ implementations, and remain covered by existing Server tests. Production
 isolation/custody, handshake-log retention, policy reload and external approvals
 are still separate controls; see [the signer runbook](../operations/CommandSignerDeployment.md).
 
+Signer-client emergency revocation is now an independently written, append-only
+PostgreSQL denylist keyed by the exact client leaf SHA-256. The runtime has only
+SELECT on that table; startup rejects missing reads or write privileges. Every
+HTTP request and each signing boundary performs a fresh read, including after
+Transit and after result commit. Revocation or lookup failure withholds the
+envelope even on existing TLS connections. The operator procedure records the
+incident, distinct operator/approver references, evidence digest, database identity
+and event UUID with synchronous commit. These references still require external
+approval/custody validation. CA/grant policy reload, recalling already returned
+envelopes and independent WORM export are separate controls.
+
 ## Implemented local audit persistence
 
 Platform now registers `IAuditWriter` backed by PostgreSQL. A write inserts an append-only `platform.audit_events` row and a matching `platform.audit_export_queue` row in the same transaction. The method returns only after commit. A database or transaction failure propagates to the caller; critical call sites must not swallow it. Both tables and their indexes are created by Platform migration `202610160001_AddPlatformAuditOutbox`. No foreign key crosses a module schema.
@@ -229,7 +240,7 @@ The read-only [scope reparenting preflight](ScopeReparenting.md) reports both ca
 ## Remaining PHASE 7 work
 
 - External Agent CA issuance and grant delivery, CA lifecycle, full rotation administration with physical device verification, Admin certificate lifecycle, and revocation propagation to future long-lived Agent streams. The [production certificate lifecycle runbook](../operations/CertificateLifecycle.md) defines the required issuance, custody, rotation, recovery and rollback evidence.
-- A separately deployed protected signing service with authenticated requests, auditable approvals and secure trust-file distribution, plus integration of the execution gate into the future Agent host before any command transport is enabled. High-risk and bulk command types require an approval protocol before they can be enabled. The current isolated signer component supports only `Inventory.Refresh` and has no service endpoint or command dispatch. The [signer deployment runbook](../operations/CommandSignerDeployment.md) defines the production key custody, mTLS, two-person approval and trust-rotation evidence.
+- A separately deployed protected signing service with authenticated requests, auditable approvals and secure trust-file distribution, plus integration of the execution gate into the future Agent host before any command transport is enabled. High-risk and bulk command types require an approval protocol before they can be enabled. The current isolated mTLS host supports only `Inventory.Refresh` signing and exposes no Agent command dispatch. The [signer deployment runbook](../operations/CommandSignerDeployment.md) defines the production key custody, mTLS, two-person approval and trust-rotation evidence.
 - Production approval records, impact-review retention and enforcement at future privileged routes. The first-admin bootstrap, controlled recovery, scope reparenting procedure and last-global-grant safeguard are tested; the [privileged change evidence runbook](../operations/PrivilegedChangeEvidence.md) defines the independent approval, retention, WORM/SIEM and recovery records still required from deployment.
 - Maintain Windows host CA-store provisioning and root-only wire-chain regression checks alongside the existing Linux result; verify the production certificate-management procedure during deployment.
 - Production immudb hardening: the local lab now uses dedicated read/write credentials limited to `defaultdb`; [the TLS deployment runbook](../operations/ImmudbTlsDeployment.md) defines root-only wire validation, network isolation and rotation evidence. Production still needs the operator's TLS, retention/backup and independently anchored records. Wire audited security call sites as those flows are implemented.

@@ -50,6 +50,7 @@ public static class SigningHostApplication
             builder.Services.AddSingleton(_ => transit);
             builder.Services.AddSingleton<PostgreSqlSigningRequestJournal>();
             builder.Services.AddSingleton<ISigningRequestJournal>(services => services.GetRequiredService<PostgreSqlSigningRequestJournal>());
+            builder.Services.AddSingleton<ISigningClientRevocations, PostgreSqlSigningClientRevocations>();
             builder.Services.AddSingleton<AuthorizedCommandSigner>();
             builder.Services.AddSingleton<SigningJournalReadiness>();
             builder.Services.AddHostedService(services => services.GetRequiredService<SigningJournalReadiness>());
@@ -117,6 +118,8 @@ public static class SigningHostApplication
                     await RejectAsync(context, 403, SigningRejectionReason.Forbidden);
                     return;
                 }
+                await context.RequestServices.GetRequiredService<ISigningClientRevocations>().EnsureNotRevokedAsync(
+                    certificate!.GetCertHashString(HashAlgorithmName.SHA256), lifetime.Token);
                 await next(context);
             }
             catch (SigningRequestConflictException) { await RejectAsync(context, 409, SigningRejectionReason.Duplicate); }

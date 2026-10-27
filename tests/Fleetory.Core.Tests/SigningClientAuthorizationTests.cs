@@ -194,7 +194,7 @@ public sealed class SigningClientAuthorizationTests
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         using var transit = new TransitTestHandler(key);
         using var signer = CreateTransitSigner(transit, key);
-        var service = new AuthorizedCommandSigner(policy, signer, new MemorySigningJournal());
+        var service = new AuthorizedCommandSigner(policy, signer, new MemorySigningJournal(), new MemorySigningRevocations());
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.SignInventoryRefreshAsync(Guid.NewGuid(), null, Device));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.SignInventoryRefreshAsync(Guid.NewGuid(), client, new DeviceId(Guid.NewGuid())));
         using var cancelled = new CancellationTokenSource();
@@ -212,7 +212,7 @@ public sealed class SigningClientAuthorizationTests
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         using var transit = new TransitTestHandler(key);
         using var signer = CreateTransitSigner(transit, key);
-        var signed = await new AuthorizedCommandSigner(policy, signer, new MemorySigningJournal()).SignInventoryRefreshAsync(Guid.NewGuid(), client, Device);
+        var signed = await new AuthorizedCommandSigner(policy, signer, new MemorySigningJournal(), new MemorySigningRevocations()).SignInventoryRefreshAsync(Guid.NewGuid(), client, Device);
         Assert.Equal("approval-service", signed.CallerId);
         Assert.Equal(Device, signed.Envelope.TargetDeviceId);
         Assert.Equal(AgentCommandTypes.InventoryRefresh, signed.Envelope.CommandType);
@@ -231,7 +231,7 @@ public sealed class SigningClientAuthorizationTests
         using var transit = new TransitTestHandler(key) { OnSigning = () => clock.UtcNow = Now.AddHours(1) };
         using var signer = CreateTransitSigner(transit, key);
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
-            new AuthorizedCommandSigner(policy, signer, new MemorySigningJournal()).SignInventoryRefreshAsync(Guid.NewGuid(), client, Device));
+            new AuthorizedCommandSigner(policy, signer, new MemorySigningJournal(), new MemorySigningRevocations()).SignInventoryRefreshAsync(Guid.NewGuid(), client, Device));
         Assert.Equal(1, transit.CallCount);
     }
 
@@ -342,6 +342,60 @@ public sealed class SigningClientAuthorizationTests
         Assert.Equal(0, scenario.Transit.CallCount);
     }
 
+    [Theory]
+    [InlineData("before", 0, 0, 0)]
+    [InlineData("reservation", 0, 1, 0)]
+    [InlineData("transit", 1, 1, 0)]
+    [InlineData("completion", 1, 1, 1)]
+    public async Task Revocation_at_each_boundary_withholds_the_envelope(string stage, int transitCalls, int requests, int results)
+    {
+        using var scenario = new JournalScenario();
+        void Revoke() => scenario.Revocations.IsRevoked = true;
+        switch (stage)
+        {
+            case "before": Revoke(); break;
+            case "reservation": scenario.Journal.OnBeginning = Revoke; break;
+            case "transit": scenario.Transit.OnSigning = Revoke; break;
+            case "completion": scenario.Journal.OnCompleting = Revoke; break;
+        }
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            scenario.Service.SignInventoryRefreshAsync(Guid.NewGuid(), scenario.Client, Device));
+        Assert.Equal(transitCalls, scenario.Transit.CallCount);
+        Assert.Equal(requests, scenario.Journal.Requests.Count);
+        Assert.Equal(results, scenario.Journal.Results.Count);
+    }
+
+    [Theory]
+    [InlineData(1, 0, 0)]
+    [InlineData(2, 0, 1)]
+    [InlineData(3, 1, 1)]
+    [InlineData(4, 1, 1)]
+    public async Task Revocation_read_failure_at_each_boundary_withholds_the_envelope(int check, int transitCalls, int requests)
+    {
+        using var scenario = new JournalScenario();
+        scenario.Revocations.FailOnCheck = check;
+        await Assert.ThrowsAsync<IOException>(() =>
+            scenario.Service.SignInventoryRefreshAsync(Guid.NewGuid(), scenario.Client, Device));
+        Assert.Equal(transitCalls, scenario.Transit.CallCount);
+        Assert.Equal(requests, scenario.Journal.Requests.Count);
+        Assert.Equal(check == 4 ? 1 : 0, scenario.Journal.Results.Count);
+    }
+
+    private sealed class MemorySigningRevocations : ISigningClientRevocations
+    {
+        private int _checks;
+        public bool IsRevoked { get; set; }
+        public int FailOnCheck { get; set; }
+
+        public Task EnsureNotRevokedAsync(string certificateSha256, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (++_checks == FailOnCheck) { throw new IOException("Revocation store unavailable."); }
+            if (IsRevoked) { throw new UnauthorizedAccessException("Client revoked."); }
+            return Task.CompletedTask;
+        }
+    }
+
     private static SigningClientGrant Grant(X509Certificate2 certificate) =>
         new("approval-service", certificate.GetCertHashString(HashAlgorithmName.SHA256), [Device], Now.AddMinutes(-5), Now.AddMinutes(5));
 
@@ -358,13 +412,16 @@ public sealed class SigningClientAuthorizationTests
         public ConcurrentDictionary<Guid, SignedCommandEnvelope> Results { get; } = new();
         public bool FailBegin { get; set; }
         public bool FailCompletion { get; set; }
+        public Action? OnBeginning { get; set; }
         public Action? OnCompleting { get; set; }
 
         public Task<bool> TryBeginAsync(SigningRequest request, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (FailBegin) { throw new IOException("Reservation unavailable."); }
-            return Task.FromResult(Requests.TryAdd(request.RequestId, request));
+            var inserted = Requests.TryAdd(request.RequestId, request);
+            OnBeginning?.Invoke();
+            return Task.FromResult(inserted);
         }
 
         public Task CompleteAsync(SigningRequest request, SignedCommandEnvelope envelope, CancellationToken cancellationToken = default)
@@ -385,6 +442,7 @@ public sealed class SigningClientAuthorizationTests
         private readonly SigningClientAuthorizationPolicy _policy;
         public MutableTime Clock { get; } = new(Now);
         public MemorySigningJournal Journal { get; } = new();
+        public MemorySigningRevocations Revocations { get; } = new();
         public X509Certificate2 Client { get; }
         public TransitTestHandler Transit { get; }
         public AuthorizedCommandSigner Service { get; }
@@ -395,7 +453,7 @@ public sealed class SigningClientAuthorizationTests
             Transit = new TransitTestHandler(_key);
             _signer = CreateTransitSigner(Transit, _key);
             _policy = CreatePolicy(_certificates.Root, Grant(Client), Clock);
-            Service = new AuthorizedCommandSigner(_policy, _signer, Journal);
+            Service = new AuthorizedCommandSigner(_policy, _signer, Journal, Revocations);
         }
 
         public void Dispose()

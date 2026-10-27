@@ -46,9 +46,10 @@ service/System/Administrators ACLs. The shared loader rejects links and bounded
 UTF-8 violations. Windows TLS deployments must also perform host PKI provisioning
 as described in the Windows preflight runbook.
 
-Provision journal schema v2 with `eng/provision-signing-journal.sql`. Grant the
+Provision journal schema v3 with `eng/provision-signing-journal.sql`. Grant the
 runtime login only CONNECT, schema USAGE and SELECT/INSERT on all three signer
-tables, including `signing_rejections`. Startup and `/health/ready` check these
+request/result/rejection tables, and only SELECT on `client_certificate_revocations`.
+Keep the revocation writer on an independent operator identity. Startup and `/health/ready` check these
 rights, deny UPDATE/DELETE/TRUNCATE/schema CREATE and reject privileged,
 replication-capable or session-role-switched connections. Use direct grants;
 runtime login membership in other roles is rejected. Database credentials must not be shared with
@@ -79,8 +80,9 @@ responses and do not return backend exceptions or credentials.
 For disposable local tests only, Development plus explicit
 `Signer:AllowLoopbackHttpTransit=true` allows loopback HTTP Transit. Production
 rejects it even when the flag is supplied. The signer listener always remains
-HTTPS/mTLS. Policy changes/revocation currently require a controlled restart;
-atomic reload, production custody, TLS-handshake audit retention, delivery
+HTTPS/mTLS. Grant/CA additions and other policy changes require a controlled restart;
+certificate revocations take effect through the database without restart, as below.
+Atomic policy reload, production custody, TLS-handshake audit retention, delivery
 reconciliation and WORM/SIEM export remain deployment/integration controls.
 
 ## Implemented Transit client contract
@@ -136,16 +138,58 @@ access and again before releasing the signed envelope, and returns the configure
 caller identity for the durable request record. Its only operation remains empty
 `Inventory.Refresh`; high-risk and bulk signing are unavailable.
 
-This component performs no CRL/OCSP lookup. Revocation currently means replacing
-the protected policy snapshot without the old leaf grant; rotation may allow
-two explicit leaf grants during overlap. Online revocation, atomic host reload,
-authenticated approval integration and production deployment still require
-independent evidence. The host now supplies the actual mTLS connection
+This component performs no CRL/OCSP lookup. Rotation may allow two explicit leaf
+grants during overlap. The required `ISigningClientRevocations` additionally reads
+the exact leaf denylist, without caching, before reservation, after reservation,
+after Transit and after the result commit. The host also checks it on each HTTP
+request, including health probes and requests on an already established TLS
+connection. Read failure withholds the signature; HTTP returns 503 with a durable
+denial record when that journal remains available. A revoked leaf returns 403.
+TLS admission still uses the protected static CA/grant policy; revocation denial
+happens at HTTP authorization and does not terminate every idle TLS connection.
+Atomic host reload, authenticated approval integration and production deployment
+still require independent evidence. The host supplies the actual mTLS connection
 certificate and request limits; the library alone does not prove key possession.
+
+## Revoke a signer client certificate
+
+Use an independently approved incident/evidence bundle and exact DER SHA-256.
+In the separate signer database, give the operator a dedicated login with CONNECT,
+schema USAGE and SELECT/INSERT on `signer.client_certificate_revocations` only;
+it needs no ownership, memberships, UPDATE, DELETE, TRUNCATE or signing-journal
+write privileges. The signer runtime must have SELECT only on this table.
+Upgrade existing deployments with the idempotent schema v3 provisioning script
+and explicit SELECT grant before replacing the host binary; an old schema or
+missing/excessive denylist permissions fail startup.
+
+In one operator session, set the five `fleetory.signer_revoke.*` settings documented
+in `eng/revoke-signing-client.sql`, then execute that script with `ON_ERROR_STOP`.
+Inputs are `certificate_sha256`, `incident_reference`, `operator_reference`,
+`approver_reference` and `evidence_sha256`. Fingerprint and evidence digest must
+be uppercase 64-character SHA-256; references are bounded, nonempty, control-free
+and operator/approver must differ after trimming and case normalization.
+
+The single statement forces `synchronous_commit=on` and atomically appends the
+certificate fingerprint, event UUID, evidence pointers, database `session_user`
+and recording time. Read back that row and retain its event UUID with the approved
+bundle. Duplicate revocation refuses to replace the first record. Reference
+strings do not authenticate people or verify the evidence bundle; independent
+approval, digest/custody validation and WORM/SIEM retention remain operator duties.
+
+After commit, make an authenticated probe with the revoked leaf and verify 403
+with its denial audit ID, then use a separately authorized replacement leaf to
+verify continued scoped service. There is no unrevocation operation: replacement
+requires a newly issued and explicitly granted certificate. Revocation during
+Transit or result commit withholds the envelope on the following current read;
+pending/completed journal rows remain for reconciliation. A completed row alone
+does not prove delivery. Revocation cannot recall an envelope already returned
+or a response that has passed the final check; stop downstream dispatch and
+rotate affected Agent trust separately when the incident requires it.
 
 ## Implemented durable request journal
 
-`AuthorizedCommandSigner` now requires an `ISigningRequestJournal` and a nonempty
+`AuthorizedCommandSigner` requires an `ISigningRequestJournal`, current
+`ISigningClientRevocations` and a nonempty
 RequestId. `PostgreSqlSigningRequestJournal` uses the independent `signer` schema;
 provision it with `eng/provision-signing-journal.sql` under a deployment owner in
 the separate signer database. Supply its data source from the protected signer

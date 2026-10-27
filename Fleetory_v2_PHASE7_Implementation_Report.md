@@ -1,6 +1,6 @@
 # Fleetory v2 — PHASE 7 Security Foundation progress report
 
-**Status:** IN PROGRESS, 25 October 2026. PHASE 6 is complete; PHASE 8 has not started. Draft [PR #2](https://github.com/aroginsky-maker/Fleetory-v2/pull/2) contains the current implementation. The detailed controls and limits are maintained in [SecurityFoundation](docs/architecture/SecurityFoundation.md) and the [local lab guide](docs/architecture/SecurityLab.md).
+**Status:** IN PROGRESS, 27 October 2026. PHASE 6 is complete; PHASE 8 has not started. Draft [PR #2](https://github.com/aroginsky-maker/Fleetory-v2/pull/2) contains the current implementation. The detailed controls and limits are maintained in [SecurityFoundation](docs/architecture/SecurityFoundation.md) and the [local lab guide](docs/architecture/SecurityLab.md).
 
 ## Implemented
 
@@ -84,11 +84,20 @@
 
 ## Verification snapshot
 
+Signer-client emergency revocation is implemented without a service restart.
+The required revocation reader checks the exact certificate before reservation,
+before Transit, after Transit and after the result commit; the host also checks
+each HTTP request. Independent operator SQL appends approved evidence references,
+event UUID and database identity with synchronous commit. The runtime can only
+read that table. Revocation/read failure withholds the signature, including on
+an existing TLS connection; replacement leaves remain independently authorized.
+Policy additions/CA reload and production approval/custody remain open.
+
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local tests after mTLS signer host | 316/316 passed |
-| Local production coverage after mTLS signer host | 93.53% |
+| Local tests after signer-client revocation | 345/345 passed |
+| Local production coverage after signer-client revocation | 93.62% |
 | Local scope reparenting mutation and preflight tests | 2/2 passed |
 | Local SonarQube Community Build at `ad4271b` | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0% |
 | Local SonarQube Community Build after Windows Agent ACL hardening | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0%; 0 bugs, vulnerabilities, code smells and hotspots |
@@ -115,6 +124,7 @@
 | Transit signing client regression checks | 28/28 passed: bounded headers/body lifetime, caller cancellation, rejected credentials, safe errors and signature verification |
 | Signer caller authorization checks | 31/31 passed: pinned client identity, custom trust, purpose/validity, exact target, immutable inputs, same-subject CA rollover, leaf rotation and no Transit call on denial |
 | Durable signer journal checks | 20 PostgreSQL cases and 9 orchestration cases passed: persistence, concurrent reservation, immutable completion, narrow permissions, forced synchronous commit and failure/cancellation/expiry without release |
+| Signer-client emergency revocation | 21 real PostgreSQL/mTLS cases and 8 orchestration cases passed: retained connections, revocation/read failure during signing, distinct replacement leaf, operator evidence, narrow permissions and no envelope release |
 | Standalone signer mTLS host | 28 real HTTPS/PostgreSQL cases passed: key possession, scoped signing, strict JSON, duplicate/rate/concurrency denial, dotted-route audit, journal safety and rejection of elevated database roles |
 | Privileged change evidence runbook | Approval identities, impact hashes, audit/WORM links, retention and recovery evidence documented |
 | PHASE 7 readiness record verifier | Current UTC validity, distinct normalized actors, strict JSON flags, finite coverage, per-control object references and exact record SHA-256 checked |

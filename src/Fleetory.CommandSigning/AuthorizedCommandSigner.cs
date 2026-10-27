@@ -10,7 +10,8 @@ public sealed record AuthorizedCommandSignature(string CallerId, SignedCommandEn
 public sealed class AuthorizedCommandSigner(
     SigningClientAuthorizationPolicy authorization,
     OpenBaoCommandSigner signer,
-    ISigningRequestJournal journal)
+    ISigningRequestJournal journal,
+    ISigningClientRevocations revocations)
 {
     public async Task<AuthorizedCommandSignature> SignInventoryRefreshAsync(
         Guid requestId,
@@ -27,24 +28,28 @@ public sealed class AuthorizedCommandSigner(
             ?? throw new UnauthorizedAccessException("Signing caller or target is not authorized.");
         var request = new SigningRequest(requestId, caller,
             authenticatedClientCertificate!.GetCertHashString(HashAlgorithmName.SHA256), targetDeviceId);
+        await revocations.EnsureNotRevokedAsync(request.ClientCertificateSha256, cancellationToken);
         if (!await journal.TryBeginAsync(request, cancellationToken))
         {
             throw new SigningRequestConflictException();
         }
+        await EnsureAuthorizedAsync(authenticatedClientCertificate, request, cancellationToken);
         var envelope = await signer.SignInventoryRefreshAsync(targetDeviceId, cancellationToken);
-        EnsureAuthorized(authenticatedClientCertificate, targetDeviceId, caller);
+        await EnsureAuthorizedAsync(authenticatedClientCertificate, request, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         await journal.CompleteAsync(request, envelope, cancellationToken);
-        EnsureAuthorized(authenticatedClientCertificate, targetDeviceId, caller);
+        await EnsureAuthorizedAsync(authenticatedClientCertificate, request, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         return new AuthorizedCommandSignature(caller, envelope);
     }
 
-    private void EnsureAuthorized(X509Certificate2? certificate, DeviceId deviceId, string caller)
+    private async Task EnsureAuthorizedAsync(X509Certificate2? certificate, SigningRequest request,
+        CancellationToken cancellationToken)
     {
-        if (authorization.GetAuthorizedInventoryRefreshCaller(certificate, deviceId) != caller)
+        if (authorization.GetAuthorizedInventoryRefreshCaller(certificate, request.TargetDeviceId) != request.CallerId)
         {
             throw new UnauthorizedAccessException("Signing authorization expired before envelope release.");
         }
+        await revocations.EnsureNotRevokedAsync(request.ClientCertificateSha256, cancellationToken);
     }
 }

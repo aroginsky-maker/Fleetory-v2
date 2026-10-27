@@ -1,6 +1,7 @@
--- Signer journal schema v2. Run as deployment owner in the separate signer database.
+-- Signer journal schema v3. Run as deployment owner in the separate signer database.
 -- The runtime role needs USAGE on signer and SELECT, INSERT on these three tables.
 -- Keep UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER, schema CREATE and ownership away from that role.
+-- Grant only SELECT on client_certificate_revocations; an independent operator writes revocations.
 BEGIN;
 CREATE SCHEMA IF NOT EXISTS signer;
 REVOKE ALL ON SCHEMA signer FROM PUBLIC;
@@ -29,4 +30,16 @@ CREATE TABLE IF NOT EXISTS signer.signing_rejections (
     recorded_at timestamptz NOT NULL DEFAULT clock_timestamp()
 );
 REVOKE ALL ON signer.signing_rejections FROM PUBLIC;
+CREATE TABLE IF NOT EXISTS signer.client_certificate_revocations (
+    certificate_sha256 char(64) PRIMARY KEY CHECK (certificate_sha256 ~ '^[0-9A-F]{64}$'),
+    event_id uuid NOT NULL UNIQUE DEFAULT gen_random_uuid(),
+    incident_reference varchar(128) NOT NULL CHECK (length(btrim(incident_reference)) > 0),
+    operator_reference varchar(128) NOT NULL CHECK (length(btrim(operator_reference)) > 0),
+    approver_reference varchar(128) NOT NULL CHECK (length(btrim(approver_reference)) > 0),
+    evidence_sha256 char(64) NOT NULL CHECK (evidence_sha256 ~ '^[0-9A-F]{64}$'),
+    database_operator name NOT NULL DEFAULT session_user,
+    revoked_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    CHECK (lower(btrim(operator_reference)) <> lower(btrim(approver_reference)))
+);
+REVOKE ALL ON signer.client_certificate_revocations FROM PUBLIC;
 COMMIT;

@@ -7,7 +7,7 @@ namespace Fleetory.Core.Tests;
 
 internal sealed class TransitTestHandler(ECDsa key) : HttpMessageHandler
 {
-    public Action? OnSigning { get; init; }
+    public Action? OnSigning { get; set; }
     public string? Replacement { get; set; }
     public bool Redirect { get; set; }
     public HttpStatusCode? FailureStatus { get; set; }

@@ -15,6 +15,8 @@ internal sealed class SigningJournalReadiness(NpgsqlDataSource source) : IHosted
                     AND NOT EXISTS (SELECT 1 FROM pg_auth_members
                                     WHERE member = (SELECT oid FROM pg_roles WHERE rolname = current_user))
                     AND NOT has_schema_privilege(current_user, 'signer', 'CREATE')
+                    AND has_table_privilege(current_user, 'signer.client_certificate_revocations', 'SELECT')
+                    AND NOT has_table_privilege(current_user, 'signer.client_certificate_revocations', 'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
                     AND bool_and(has_table_privilege(current_user, relation, 'SELECT')
                         AND has_table_privilege(current_user, relation, 'INSERT')
                         AND NOT has_table_privilege(current_user, relation, 'UPDATE')
