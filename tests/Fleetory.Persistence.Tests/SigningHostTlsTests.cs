@@ -74,6 +74,7 @@ public sealed partial class SigningHostTlsTests(PostgreSqlTestFixture fixture)
     [InlineData("oversized", HttpStatusCode.BadRequest)]
     [InlineData("unsupported-command", HttpStatusCode.NotFound)]
     [InlineData("unsupported-dotted-command", HttpStatusCode.NotFound)]
+    [InlineData("unsupported-root", HttpStatusCode.NotFound)]
     public async Task Rejected_http_requests_are_audited_without_transit_access(string kind, HttpStatusCode expected)
     {
         await using var lab = await HostLab.CreateAsync(fixture);
@@ -92,6 +93,7 @@ public sealed partial class SigningHostTlsTests(PostgreSqlTestFixture fixture)
         {
             "unsupported-command" => "/signing/bulk-reboot",
             "unsupported-dotted-command" => "/signing/Fleet.Bulk.Reboot",
+            "unsupported-root" => "/",
             _ => "/signing/inventory-refresh"
         };
         using var response = await client.PostAsync(lab.Url + path, new StringContent(json, Encoding.UTF8, "application/json"));

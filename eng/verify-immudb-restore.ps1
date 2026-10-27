@@ -141,7 +141,7 @@ function Invoke-ImmudbRestoreAcceptance(
     }
     $key = ConvertTo-ImmudbRestoreEventKey $EventId
     $response = Get-ImmudbAuditReadback $Origin $databaseToken $key
-    $event = Test-ImmudbRestoredEvent $response $EventId $ExpectedRevision `
+    $restoredEvent = Test-ImmudbRestoredEvent $response $EventId $ExpectedRevision `
         $ExpectedValueSha256
     $confirmed = Get-VerifiedImmudbStateReceipt $Origin $PublicKeyPath $ExpectedDatabase $databaseToken
     if ($confirmed.txId -ne $receipt.txId -or $confirmed.txHash -cne $receipt.txHash -or
@@ -157,9 +157,9 @@ function Invoke-ImmudbRestoreAcceptance(
         receiptTxHash = $receipt.txHash
         checkpointVerified = $null -ne $point
         checkpointExportSha256 = if ($null -ne $point) { $point.Sha256 } else { $null }
-        knownEventId = $event.eventId
-        revision = $event.revision
-        valueSha256 = $event.valueSha256
+        knownEventId = $restoredEvent.eventId
+        revision = $restoredEvent.revision
+        valueSha256 = $restoredEvent.valueSha256
         acceptedAt = [DateTimeOffset]::UtcNow.ToString('O',
             [Globalization.CultureInfo]::InvariantCulture)
     }

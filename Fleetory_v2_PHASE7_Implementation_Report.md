@@ -126,7 +126,7 @@ Policy additions/CA reload and production approval/custody remain open.
 | Signer caller authorization checks | 31/31 passed: pinned client identity, custom trust, purpose/validity, exact target, immutable inputs, same-subject CA rollover, leaf rotation and no Transit call on denial |
 | Durable signer journal checks | 20 PostgreSQL cases and 9 orchestration cases passed: persistence, concurrent reservation, immutable completion, narrow permissions, forced synchronous commit and failure/cancellation/expiry without release |
 | Signer-client emergency revocation | 26 real PostgreSQL/mTLS cases and 8 orchestration cases passed: retained connections, revocation/read failure during signing, distinct replacement leaf, operator evidence, narrow permissions and no envelope release |
-| Standalone signer mTLS host | 28 real HTTPS/PostgreSQL cases passed: key possession, scoped signing, strict JSON, duplicate/rate/concurrency denial, dotted-route audit, journal safety and rejection of elevated database roles |
+| Standalone signer mTLS host | 29 real HTTPS/PostgreSQL cases passed: key possession, scoped signing, strict JSON, duplicate/rate/concurrency denial, dotted-route audit, journal safety and rejection of elevated database roles |
 | Privileged change evidence runbook | Approval identities, impact hashes, audit/WORM links, retention and recovery evidence documented |
 | PHASE 7 readiness record verifier | Current UTC validity, distinct normalized actors, strict JSON flags, finite coverage, per-control object references and exact record SHA-256 checked |
 | Self-hosted PHASE 7 evidence record | Signer, least-privilege audit pipeline, TLS, backup/restore and readiness checks recorded with production limitations |

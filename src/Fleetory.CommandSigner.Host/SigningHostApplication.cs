@@ -138,7 +138,8 @@ public static class SigningHostApplication
         app.MapGet("/health/ready", async (SigningJournalReadiness readiness, HttpContext context) =>
             Results.StatusCode(await readiness.IsReadyAsync(context.RequestAborted) ? 204 : 503));
         app.MapPost("/signing/inventory-refresh", SignInventoryRefreshAsync);
-        app.MapFallback("/{**path}", async context => await RejectAsync(context, 404, SigningRejectionReason.InvalidRequest));
+        app.Map("/{**path}", (string? path, HttpContext context) =>
+            RejectAsync(context, 404, SigningRejectionReason.InvalidRequest)).WithOrder(int.MaxValue);
     }
 
     private static async Task<IResult> SignInventoryRefreshAsync(HttpContext context, AuthorizedCommandSigner signer)
