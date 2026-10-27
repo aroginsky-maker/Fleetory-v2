@@ -59,6 +59,14 @@ review evidence for the implemented behavior and is not production custody.
   PowerShell 7 and Windows PowerShell 5.1. Full .NET verification remained
   401/401 with 93.68% local production coverage. External approval authenticity,
   database freshness and WORM custody were not inferred from file verification.
+- Signer checkpoint continuity passed four acceptance and 18 rejection scenarios:
+  identical/forward data, late pending completion, equivalent UUID/UTC spelling,
+  missing/changed/duplicate row identities, different database/older observation,
+  old history resubmitted with a fresh timestamp and matching digest, and invalid
+  checkpoint inputs. The original verifier suite also passed, now with 33 common
+  rejection scenarios including whitespace-contaminated UUID/digest/date values.
+  Both real psql-to-verifier cases remained successful. Neither input artifact
+  was changed, and no trust anchor or production recovery approval was created.
 
 Production completion still requires independent CA/key custody, signer
 deployment, TLS/firewall records, WORM/SIEM object identifiers, retention/legal

@@ -48,7 +48,9 @@ jobs:
 
       - name: Verify signer evidence snapshot on Windows
         shell: pwsh
-        run: ./tests/Fleetory.Tools.Tests/SigningJournalSnapshot.Tests.ps1
+        run: |
+          ./tests/Fleetory.Tools.Tests/SigningJournalSnapshot.Tests.ps1
+          ./tests/Fleetory.Tools.Tests/SigningJournalCheckpoint.Tests.ps1
 
       - name: Verify root-only Windows TLS chain
         shell: pwsh
@@ -177,7 +179,9 @@ jobs:
 
       - name: Verify retained signer evidence snapshot
         shell: pwsh
-        run: ./tests/Fleetory.Tools.Tests/SigningJournalSnapshot.Tests.ps1
+        run: |
+          ./tests/Fleetory.Tools.Tests/SigningJournalSnapshot.Tests.ps1
+          ./tests/Fleetory.Tools.Tests/SigningJournalCheckpoint.Tests.ps1
 
       - name: Run Fleetory quality verification
         shell: pwsh

@@ -284,6 +284,15 @@ The shared evidence-file reader also serves immudb receipt tools. This establish
 file/digest consistency; original database authenticity, historical completeness,
 latest evidence selection and independent retention still need external controls.
 
+Signer snapshot verification can additionally pin an independently retained
+previous snapshot and its digest. It rejects lost/changed known journal rows,
+duplicate primary identities, different database names and earlier observations;
+new records and late result completion remain allowed. UUID/UTC representation
+differences and exporter-login rotation preserve row meaning. This read-only
+continuity check supports recovery review without advancing local trust state.
+Latest checkpoint custody, new-row authenticity and actual database/backup
+lineage remain independently verified deployment inputs.
+
 ## Remaining PHASE 7 work
 
 - External Agent CA issuance and grant delivery, CA lifecycle, full rotation administration with physical device verification, Admin certificate lifecycle, and revocation propagation to future long-lived Agent streams. The [production certificate lifecycle runbook](../operations/CertificateLifecycle.md) defines the required issuance, custody, rotation, recovery and rollback evidence.

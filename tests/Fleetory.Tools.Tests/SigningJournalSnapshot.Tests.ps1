@@ -97,6 +97,9 @@ try {
         @{ name = 'wrong digest'; change = { param($v) $v.results[0].envelope_sha256 = 'not-a-digest' } }
         @{ name = 'UUID'; change = { param($v) $v.results[0].command_id = 'not-a-uuid' } }
         @{ name = 'row date'; change = { param($v) $v.results[0].recorded_at = 'yesterday' } }
+        @{ name = 'digest newline'; change = { param($v) $v.results[0].envelope_sha256 += "`n" } }
+        @{ name = 'UUID whitespace'; change = { param($v) $v.results[0].command_id = ' ' + $v.results[0].command_id + ' ' } }
+        @{ name = 'date newline'; change = { param($v) $v.observedAt += "`n" } }
     )
     foreach ($case in $cases) {
         $fixture = New-SnapshotFixture

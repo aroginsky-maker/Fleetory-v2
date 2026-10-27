@@ -486,10 +486,35 @@ It emits no incident references or row contents and leaves the input unchanged.
 `approvedDigestMatched` means the supplied expected digest matched the captured
 bytes. The tool cannot authenticate the approval record, original database,
 operator identity or restore lineage, and does not validate every database
-business constraint or cross-row relationship. An old artifact with its old
-approved digest can pass; independent latest-evidence selection remains required.
+business constraint or cross-row relationship. Without checkpoint mode, an old
+artifact with its old approved digest can pass; independent latest-evidence
+selection remains required.
 Delivery, execution and independent-custody flags remain false. File verification
 does not create external retention, an object lock or a WORM acknowledgement.
+
+For a restore/continuity review, also supply `-CheckpointPath` and
+`-CheckpointSha256` together, identifying the latest independently retained and
+approved earlier snapshot. Both files undergo the same bounded digest/schema
+verification. The candidate must use the same database name, have an equal or
+later UTC observation time and preserve every known request, result, rejection
+and revocation row under its primary identity. A removed row or changed known
+row fails, even when the candidate has its own matching digest and a fresh
+observation timestamp. Duplicate primary identities are rejected in either mode.
+
+New rows are allowed, including a result completing an earlier pending request.
+A rotated export login, array/property order, equivalent UTC spelling and UUID
+letter case do not change the retained row meaning. Comparison normalizes those
+representations; other string metadata remains exact. The summary adds
+`checkpointVerified` and the actual `checkpointSha256`. It never replaces either
+input file or advances a trust anchor automatically.
+
+This checks preservation of the known row set. It does not prove authenticity of
+new rows, identify a database server from its name, establish physical backup
+lineage or ensure that the supplied checkpoint is the latest approved one. Keep
+that checkpoint and its digest outside the potentially restored/compromised
+database. After validation, retain the result in the independent recovery record
+before approving any restored signer startup. An operator decision and the
+remaining production recovery controls still apply.
 
 The bounded reader is shared with immudb receipt tools; their PowerShell 5.1
 compatibility and existing size limit remain unchanged. The signer verifier uses

@@ -84,6 +84,14 @@
 
 ## Verification snapshot
 
+The signer snapshot verifier now supports an independently approved checkpoint
+file/digest pair. It preserves every known request/result/rejection/revocation
+row, permits appended data and late completion, and rejects known-history
+rollback/tampering, duplicate primary identities and conflicting database/time
+metadata. UTC/UUID spelling and exporter rotation are normalized appropriately.
+The comparison is read-only; independently retaining the latest checkpoint,
+authenticating new records and approving actual restore lineage remain open.
+
 The independently retained signer snapshot can now be checked against the
 approved exact-byte SHA-256 with a read-only PowerShell 7.2+ verifier. Strict
 UTF-8, duplicate/unknown fields, typed flags, UTC/digest/UUID shapes and row/byte
@@ -175,7 +183,8 @@ Policy additions/CA reload and production approval/custody remain open.
 | Signer container isolation | Actual restricted Linux process, read-only secret volume, unrelated process/database denial, verified PostgreSQL TLS, mTLS signature and restart/replay denial passed |
 | Signer package compatibility | PowerShell 7 and Windows PowerShell 5.1 produced the restricted runtime context; Server, application settings and debug symbols excluded |
 | Signer journal evidence extract | 20 real PostgreSQL cases passed: prior 18 cases plus native psql with inherited LATIN1/WIN1251, multilingual metadata and one UTF-8 JSON observation |
-| Independent signer snapshot verification | Exact retained digest, six acceptance scenarios, 30 rejection scenarios on Windows PowerShell 7, unchanged source bytes and real PostgreSQL/psql-to-verifier integration passed; shared receipt regressions passed on PowerShell 7/5.1 |
+| Independent signer snapshot verification | Exact retained digest, six acceptance scenarios, 33 rejection scenarios on Windows PowerShell 7, strict UUID/digest/date boundaries, unchanged source bytes and real PostgreSQL/psql-to-verifier integration passed; shared receipt regressions passed on PowerShell 7/5.1 |
+| Signer snapshot checkpoint continuity | Four acceptance and 18 rejection scenarios passed: unchanged/forward history, pending completion, equivalent representations, missing/changed/duplicate rows, old history with fresh metadata and incomplete/unapproved checkpoint inputs |
 | Privileged change evidence runbook | Approval identities, impact hashes, audit/WORM links, retention and recovery evidence documented |
 | PHASE 7 readiness record verifier | Current UTC validity, distinct normalized actors, strict JSON flags, finite coverage, per-control object references and exact record SHA-256 checked |
 | Self-hosted PHASE 7 evidence record | Signer, least-privilege audit pipeline, TLS, backup/restore and readiness checks recorded with production limitations |
