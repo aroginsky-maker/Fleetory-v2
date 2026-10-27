@@ -38,6 +38,12 @@ review evidence for the implemented behavior and is not production custody.
 - The HTTPS Transit endpoint in this process test was a disposable test backend
   with its signing key outside the signer container. Production HSM/Transit
   custody is not inferred from this check or from the separate local OpenBao lab.
+- The separate signer journal evidence extract passed 18 PostgreSQL scenarios:
+  complete/empty observations, stable snapshots during concurrent commits,
+  explicit future-column exclusion, row/byte bounds, narrow reader permissions,
+  prior-write rollback, role switching and lock deadline. Full local verification
+  passed 399/399 .NET tests with 93.68% production coverage. This extracts metadata
+  for reviewed archival; no external WORM/SIEM delivery or custody was claimed.
 
 Production completion still requires independent CA/key custody, signer
 deployment, TLS/firewall records, WORM/SIEM object identifiers, retention/legal

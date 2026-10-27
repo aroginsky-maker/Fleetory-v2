@@ -266,6 +266,16 @@ deployment responsibilities, as documented in [ImmudbReceiptExport](../operation
 
 The read-only [scope reparenting preflight](ScopeReparenting.md) reports both candidate ancestor grants and actual actor/permission/descendant access changes when a subtree changes parent and rejects missing scopes, missing parents, existing hierarchy cycles and no-op moves. Its PostgreSQL test verifies the output and confirms the hierarchy is unchanged. After independent impact review, [reparent-scope.sql](../../eng/reparent-scope.sql) applies the change only with a distinct operator and approver reference, an incident ID and an expected revision; its update, version snapshot and audit/outbox entry commit together. No parent mutation route is exposed over HTTP.
 
+The independent signer journal now has a bounded read-only evidence extract.
+`export-signing-journal.sql` observes requests, results, HTTP rejections and client
+revocations under one repeatable-read snapshot, with explicit column projection,
+5000-row-per-table and 8 MiB output limits. A dedicated SELECT-only operator can
+retain the single JSON observation for independent archival without signer
+credentials or journal writes. Concurrent commits cannot change the captured
+snapshot; limits and read failures produce errors rather than partial evidence.
+The extract neither proves external custody nor supplies incremental delivery or
+restore freshness. External WORM/SIEM transfer and retention remain open controls.
+
 ## Remaining PHASE 7 work
 
 - External Agent CA issuance and grant delivery, CA lifecycle, full rotation administration with physical device verification, Admin certificate lifecycle, and revocation propagation to future long-lived Agent streams. The [production certificate lifecycle runbook](../operations/CertificateLifecycle.md) defines the required issuance, custody, rotation, recovery and rollback evidence.

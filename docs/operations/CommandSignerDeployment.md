@@ -399,6 +399,57 @@ a signature nor authorizes a new RequestId. Production operator approvals, lates
 database custody, delivery acknowledgements and WORM retention remain separate
 controls.
 
+## Export a bounded signer journal observation
+
+`eng/export-signing-journal.sql` produces one JSON observation containing all
+visible request, result, HTTP-rejection and client-revocation records from the
+independent signer database. This supplies an extract for reviewed evidence
+retention; it is not an incremental delivery worker or a WORM acknowledgement.
+
+Use a dedicated direct login with CONNECT, USAGE on `signer` and SELECT on exactly
+`signer.signing_requests`, `signer.signing_results`, `signer.signing_rejections`
+and `signer.client_certificate_revocations`. It needs no ownership, memberships,
+journal mutation rights, Transit credential or access to Fleetory Server tables.
+Keep its PostgreSQL service/password files protected outside Git and the Server
+deployment. Run the script in a fresh session with stop-on-error enabled; for
+psql use the approved service profile with `-X -q -A -t -v ON_ERROR_STOP=1`
+and load the script with `--file` or `\i`. Credentials must not appear in arguments.
+
+Capture the single JSON result through the operator's approved mechanism into
+a new private incident artifact. Refuse an existing output path: psql's `--output`
+alone can overwrite a file and is not a no-overwrite capture mechanism. On any
+error discard an incomplete capture; do not archive it as a successful extract.
+Hash the exact retained UTF-8 bytes, including any final newline, and retain that
+digest and the actual object/version identifier in the independent incident
+record. Verify the received bytes and approved retention/object-lock controls
+at the external destination; the SQL script does not contact that destination.
+
+The `fleetory.signer-journal-snapshot.v1` observation includes database/operator
+identity, UTC observation time, `readOnly`, `snapshotComplete` and the four arrays
+`requests`, `results`, `rejections` and `revocations`. Row fields use their database
+column names. UUID/fingerprint/digest, scope, reason and revocation-evidence
+metadata are retained; private keys, bearer credentials, raw signatures and
+command payloads are not selected. Explicit column lists prevent a future schema
+column from silently entering the export. Treat identity and incident references
+as protected operational data.
+
+The script requires a fresh repeatable-read, read-only transaction. All four
+arrays share the same database snapshot even if another connection commits
+while the export is running. Each table is limited to 5000 visible rows and the
+rendered UTF-8 JSON to 8 MiB. Exceeding either bound fails without returning a
+truncated observation. Statement and lock deadlines are five and two seconds.
+The payload exists only in transaction-local memory, with no new database object
+or persistent setting. Previously pending writes or switched roles are refused.
+
+`snapshotComplete` refers only to the four tables visible in this one snapshot;
+it is not a freshness or historical-integrity guarantee. A later commit can appear
+in a later observation. This tool has no cursor and must not be used as an
+exactly-once incremental exporter. If the bounded snapshot cannot fit, use a
+separately reviewed scalable export/backup procedure; do not truncate or delete
+journal rows to make the limit pass. `deliveryVerified`, `executionVerified` and
+`independentCustodyVerified` remain false. Trusted database/restore lineage,
+independent retention and WORM/SIEM delivery remain deployment controls.
+
 ## Key and service isolation
 
 1. Create a non-exportable P-256 signing key in the approved HSM or Transit

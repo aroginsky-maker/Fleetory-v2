@@ -84,6 +84,14 @@
 
 ## Verification snapshot
 
+A bounded read-only signer journal extract now observes requests, results, HTTP
+rejections and client revocations in one repeatable-read snapshot, under a separate
+SELECT-only login. It selects explicit metadata fields and fails rather than
+truncating above 5000 rows per table or 8 MiB. Tests cover concurrent commits,
+future-column exclusion, prior-write rollback, missing privileges, read deadlines
+and output bounds. The extract prepares evidence for independent retention;
+external WORM/SIEM delivery, immutable custody and database freshness remain open.
+
 The signer now has a narrowly packaged Linux image and a repeatable actual-process
 isolation check. The test verifies UID 1654, read-only root and secret mounts,
 capability removal, no-new-privileges, no Docker socket, unrelated process/database
@@ -119,8 +127,8 @@ Policy additions/CA reload and production approval/custody remain open.
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local full tests after signer container isolation | 381/381 passed |
-| Local production coverage after signer container isolation | 93.68% |
+| Local full tests after signer journal evidence extract | 399/399 passed |
+| Local production coverage after signer journal evidence extract | 93.68% |
 | Local scope reparenting mutation and preflight tests | 2/2 passed |
 | Local SonarQube Community Build at `ad4271b` | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0% |
 | Local SonarQube Community Build after Windows Agent ACL hardening | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0%; 0 bugs, vulnerabilities, code smells and hotspots |
@@ -153,6 +161,7 @@ Policy additions/CA reload and production approval/custody remain open.
 | Signer TLS diagnostics | 7 real socket/mTLS scenarios (3 strengthened existing cases) and 5 metadata-sanitization cases passed: failed keys, stalled/plaintext traffic, successful-TLS HTTP denial separation, disabled generic logging and no exception/credential output |
 | Signer container isolation | Actual restricted Linux process, read-only secret volume, unrelated process/database denial, verified PostgreSQL TLS, mTLS signature and restart/replay denial passed |
 | Signer package compatibility | PowerShell 7 and Windows PowerShell 5.1 produced the restricted runtime context; Server, application settings and debug symbols excluded |
+| Signer journal evidence extract | 18 real PostgreSQL cases passed: complete/empty observations, stable concurrent snapshot, explicit fields, read-only privileges, bounded rows/bytes, fresh-session enforcement and lock deadline |
 | Privileged change evidence runbook | Approval identities, impact hashes, audit/WORM links, retention and recovery evidence documented |
 | PHASE 7 readiness record verifier | Current UTC validity, distinct normalized actors, strict JSON flags, finite coverage, per-control object references and exact record SHA-256 checked |
 | Self-hosted PHASE 7 evidence record | Signer, least-privilege audit pipeline, TLS, backup/restore and readiness checks recorded with production limitations |
