@@ -133,7 +133,7 @@ public sealed partial class SigningHostTlsTests
                 Func<TState, Exception?, string> formatter)
             {
                 if (!IsEnabled(logLevel)) { return; }
-                var fields = Assert.IsAssignableFrom<IEnumerable<KeyValuePair<string, object?>>>(state).ToDictionary();
+                var fields = Assert.IsType<IEnumerable<KeyValuePair<string, object?>>>(state, exactMatch: false).ToDictionary();
                 var record = new TlsAuditRecord(eventId, logLevel, fields, formatter(state, exception), exception);
                 owner.Records.Enqueue(record);
                 owner.First.TrySetResult(record);
