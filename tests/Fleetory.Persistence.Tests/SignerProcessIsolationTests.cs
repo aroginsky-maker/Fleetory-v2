@@ -30,7 +30,12 @@ public sealed class SignerProcessIsolationTests
     {
         var repo = FindRepository();
         var packageName = "isolation-" + Guid.NewGuid().ToString("N");
-        var context = Path.Combine(repo, "artifacts", "command-signer-container", packageName);
+        var cleanupPaths = new[]
+        {
+            CheckedPackagePath(repo, "command-signer-container", packageName),
+            CheckedPackagePath(repo, "command-signer-publish", packageName)
+        };
+        var context = cleanupPaths[0];
         try
         {
             await PublishAsync(repo, packageName);
@@ -64,7 +69,7 @@ public sealed class SignerProcessIsolationTests
             var builder = WebApplication.CreateSlimBuilder();
             builder.Configuration["AllowedHosts"] = "host.docker.internal";
             builder.Logging.ClearProviders();
-            builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.Any, 0,
+            builder.WebHost.ConfigureKestrel(options => options.Listen(IPAddress.IPv6Any, 0,
                 listen => listen.UseHttps(transitCertificate)));
             await using var transit = builder.Build();
             transit.MapPost("/v1/transit/sign/proof-key/sha2-256", async (Microsoft.AspNetCore.Http.HttpContext http) =>
@@ -184,14 +189,19 @@ public sealed class SignerProcessIsolationTests
         finally
         {
             await RunProcessAsync("docker", repo, ["image", "rm", "fleetory-signer-proof:" + packageName], TimeSpan.FromSeconds(30), requireSuccess: false);
-            foreach (var folder in new[] { "command-signer-container", "command-signer-publish" })
+            foreach (var target in cleanupPaths)
             {
-                var root = Path.GetFullPath(Path.Combine(repo, "artifacts", folder)) + Path.DirectorySeparatorChar;
-                var target = Path.GetFullPath(Path.Combine(root, packageName));
-                if (!target.StartsWith(root, StringComparison.OrdinalIgnoreCase)) { throw new InvalidOperationException("Unsafe package cleanup path."); }
                 if (Directory.Exists(target)) { Directory.Delete(target, true); }
             }
         }
+    }
+
+    private static string CheckedPackagePath(string repo, string folder, string name)
+    {
+        var root = Path.GetFullPath(Path.Combine(repo, "artifacts", folder)) + Path.DirectorySeparatorChar;
+        var target = Path.GetFullPath(Path.Combine(root, name));
+        if (!target.StartsWith(root, StringComparison.OrdinalIgnoreCase)) { throw new InvalidOperationException("Unsafe package cleanup path."); }
+        return target;
     }
 
     private static ContainerBuilder Restricted(string image) => new ContainerBuilder(image)
