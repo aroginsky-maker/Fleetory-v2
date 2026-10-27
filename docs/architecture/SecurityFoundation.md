@@ -276,6 +276,14 @@ snapshot; limits and read failures produce errors rather than partial evidence.
 The extract neither proves external custody nor supplies incremental delivery or
 restore freshness. External WORM/SIEM transfer and retention remain open controls.
 
+An independent read-only signer snapshot verifier now checks received artifact
+bytes against an externally supplied approved SHA-256, strict UTF-8/schema/field
+types, UTC/digest/UUID shapes and row/byte bounds. It hashes and parses the same
+bounded buffer, preserves native newline bytes and emits only compact metadata.
+The shared evidence-file reader also serves immudb receipt tools. This establishes
+file/digest consistency; original database authenticity, historical completeness,
+latest evidence selection and independent retention still need external controls.
+
 ## Remaining PHASE 7 work
 
 - External Agent CA issuance and grant delivery, CA lifecycle, full rotation administration with physical device verification, Admin certificate lifecycle, and revocation propagation to future long-lived Agent streams. The [production certificate lifecycle runbook](../operations/CertificateLifecycle.md) defines the required issuance, custody, rotation, recovery and rollback evidence.

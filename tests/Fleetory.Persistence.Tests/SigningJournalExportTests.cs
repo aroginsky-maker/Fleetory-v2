@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using DotNet.Testcontainers.Configurations;
 using Npgsql;
@@ -235,6 +237,40 @@ public sealed class SigningJournalExportTests(PostgreSqlTestFixture fixture) : I
         Assert.Equal("evidence_reader", snapshot.RootElement.GetProperty("databaseOperator").GetString());
         Assert.Equal("ИНЦИДЕНТ-漢字-é", snapshot.RootElement.GetProperty("revocations")[0].GetProperty("incident_reference").GetString());
         Assert.False(snapshot.RootElement.GetProperty("independentCustodyVerified").GetBoolean());
+        await VerifyRetainedSnapshotAsync(export.Stdout, deadline.Token);
+    }
+
+    private static async Task VerifyRetainedSnapshotAsync(string json, CancellationToken cancellationToken)
+    {
+        var path = Path.Combine(Path.GetTempPath(), "fleetory-signer-evidence-" + Guid.NewGuid().ToString("N") + ".json");
+        var bytes = Encoding.UTF8.GetBytes(json);
+        var digest = Convert.ToHexString(SHA256.HashData(bytes));
+        try
+        {
+            await using (var output = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+            {
+                await output.WriteAsync(bytes, cancellationToken);
+            }
+            var start = new ProcessStartInfo("pwsh")
+            {
+                UseShellExecute = false, RedirectStandardOutput = true, RedirectStandardError = true
+            };
+            foreach (var argument in new[] { "-NoProfile", "-File", Path.Combine(AppContext.BaseDirectory, "verify-signing-journal-snapshot.ps1"),
+                "-SnapshotPath", path, "-ExpectedSha256", digest }) { start.ArgumentList.Add(argument); }
+            using var process = Process.Start(start)!;
+            var stdout = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var stderr = process.StandardError.ReadToEndAsync(cancellationToken);
+            try { await process.WaitForExitAsync(cancellationToken); }
+            catch (OperationCanceledException) { process.Kill(entireProcessTree: true); throw; }
+            Assert.True(process.ExitCode == 0, await stderr);
+            using var verification = JsonDocument.Parse(await stdout);
+            Assert.Equal(digest, verification.RootElement.GetProperty("snapshotSha256").GetString());
+            Assert.True(verification.RootElement.GetProperty("approvedDigestMatched").GetBoolean());
+            Assert.Equal(1, verification.RootElement.GetProperty("rowCounts").GetProperty("revocations").GetInt32());
+            Assert.False(verification.RootElement.GetProperty("independentCustodyVerified").GetBoolean());
+            Assert.Equal(bytes, await File.ReadAllBytesAsync(path, cancellationToken));
+        }
+        finally { File.Delete(path); }
     }
 
     private async Task<string> ExportAsync(bool switchedRole = false, bool joinWriteTransaction = false)

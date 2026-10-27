@@ -46,6 +46,10 @@ jobs:
         shell: pwsh
         run: dotnet test tests/Fleetory.Core.Tests/Fleetory.Core.Tests.csproj -c Release --nologo --warnaserror
 
+      - name: Verify signer evidence snapshot on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/SigningJournalSnapshot.Tests.ps1
+
       - name: Verify root-only Windows TLS chain
         shell: pwsh
         run: ./eng/verify-windows-tls-chain.ps1
@@ -171,10 +175,13 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/ImmudbTlsProbe.Tests.ps1
 
+      - name: Verify retained signer evidence snapshot
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/SigningJournalSnapshot.Tests.ps1
+
       - name: Run Fleetory quality verification
         shell: pwsh
-        run: |
-          ./eng/verify-quality.ps1
+        run: ./eng/verify-quality.ps1
 
       - name: Report Sonar percentages
         if: always()

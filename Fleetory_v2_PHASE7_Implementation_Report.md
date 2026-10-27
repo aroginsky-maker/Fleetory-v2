@@ -84,6 +84,14 @@
 
 ## Verification snapshot
 
+The independently retained signer snapshot can now be checked against the
+approved exact-byte SHA-256 with a read-only PowerShell 7.2+ verifier. Strict
+UTF-8, duplicate/unknown fields, typed flags, UTC/digest/UUID shapes and row/byte
+limits are checked from the same bounded buffer. Native LF/CRLF bytes remain
+part of the digest. Real PostgreSQL/psql outputs are verified end to end; immudb
+tools reuse the bounded reader and retain PowerShell 5.1 compatibility. External
+approval authenticity, database freshness and WORM custody remain open.
+
 A bounded read-only signer journal extract now observes requests, results, HTTP
 rejections and client revocations in one repeatable-read snapshot, under a separate
 SELECT-only login. It selects explicit metadata fields and fails rather than
@@ -167,6 +175,7 @@ Policy additions/CA reload and production approval/custody remain open.
 | Signer container isolation | Actual restricted Linux process, read-only secret volume, unrelated process/database denial, verified PostgreSQL TLS, mTLS signature and restart/replay denial passed |
 | Signer package compatibility | PowerShell 7 and Windows PowerShell 5.1 produced the restricted runtime context; Server, application settings and debug symbols excluded |
 | Signer journal evidence extract | 20 real PostgreSQL cases passed: prior 18 cases plus native psql with inherited LATIN1/WIN1251, multilingual metadata and one UTF-8 JSON observation |
+| Independent signer snapshot verification | Exact retained digest, six acceptance scenarios, 30 rejection scenarios on Windows PowerShell 7, unchanged source bytes and real PostgreSQL/psql-to-verifier integration passed; shared receipt regressions passed on PowerShell 7/5.1 |
 | Privileged change evidence runbook | Approval identities, impact hashes, audit/WORM links, retention and recovery evidence documented |
 | PHASE 7 readiness record verifier | Current UTC validity, distinct normalized actors, strict JSON flags, finite coverage, per-control object references and exact record SHA-256 checked |
 | Self-hosted PHASE 7 evidence record | Signer, least-privilege audit pipeline, TLS, backup/restore and readiness checks recorded with production limitations |

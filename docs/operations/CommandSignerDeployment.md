@@ -460,6 +460,44 @@ journal rows to make the limit pass. `deliveryVerified`, `executionVerified` and
 `independentCustodyVerified` remain false. Trusted database/restore lineage,
 independent retention and WORM/SIEM delivery remain deployment controls.
 
+## Independently verify a retained signer snapshot
+
+Use PowerShell 7.2 or later on the receiving/review host:
+
+```powershell
+./eng/verify-signing-journal-snapshot.ps1 -SnapshotPath '<absolute retained JSON path>' -ExpectedSha256 '<independently approved SHA-256>'
+```
+
+Obtain the expected digest from the independently retained approval/incident
+record. The verifier reads one bounded byte buffer and checks that exact buffer's
+SHA-256 before parsing UTF-8 JSON. The retained hash includes any final LF/CRLF;
+the JSON payload remains bounded to 8 MiB plus those native newline bytes.
+No reserialization or second file read supplies the approved hash.
+
+It checks exact case-sensitive top-level and row field sets, rejects duplicate
+properties, enforces typed confirmation/non-custody flags, four arrays of at most
+5000 rows, string fields, canonical UUID/digest shapes and UTC timestamp syntax.
+Nullable target/request fields remain allowed for HTTP rejections. Unsupported
+schemas, unknown fields, UTF-16 captures, invalid UTF-8 and malformed JSON fail.
+The result reports `fleetory.signer-snapshot-verification.v1`, the actual byte
+count/SHA-256, database/operator metadata, observation time and four row counts.
+It emits no incident references or row contents and leaves the input unchanged.
+
+`approvedDigestMatched` means the supplied expected digest matched the captured
+bytes. The tool cannot authenticate the approval record, original database,
+operator identity or restore lineage, and does not validate every database
+business constraint or cross-row relationship. An old artifact with its old
+approved digest can pass; independent latest-evidence selection remains required.
+Delivery, execution and independent-custody flags remain false. File verification
+does not create external retention, an object lock or a WORM acknowledgement.
+
+The bounded reader is shared with immudb receipt tools; their PowerShell 5.1
+compatibility and existing size limit remain unchanged. The signer verifier uses
+PowerShell 7.2+ for strict JSON enumeration. Tests cover received-byte tampering,
+duplicate/coerced fields, schema/encoding/size limits, native newline boundaries
+and read-only behavior. Real psql output with legacy client encodings also passes
+through this verifier in the PostgreSQL integration tests.
+
 ## Key and service isolation
 
 1. Create a non-exportable P-256 signing key in the approved HSM or Transit

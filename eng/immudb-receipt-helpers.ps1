@@ -1,5 +1,6 @@
 ﻿# Shared helpers for immudb receipt export operations.
 
+. (Join-Path $PSScriptRoot 'evidence-file-helpers.ps1')
 $stateSource = Join-Path $PSScriptRoot 'verify-immudb-state.ps1'
 $syntaxErrors = $null
 $stateAst = [Management.Automation.Language.Parser]::ParseFile(
@@ -43,29 +44,7 @@ function Get-ReceiptExportFileSha256([byte[]] $Bytes) {
 }
 
 function Read-ReceiptExportSnapshot([string] $Path, [string] $Name) {
-    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "$Name does not exist." }
-    if ((Get-Item -LiteralPath $Path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) {
-        throw "$Name cannot be a symbolic link."
-    }
-    $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
-    $memory = [IO.MemoryStream]::new()
-    try {
-        if ($stream.Length -le 0 -or $stream.Length -gt 8MB) {
-            throw "$Name size is outside the permitted range."
-        }
-        $buffer = New-Object byte[] 4096
-        while ($true) {
-            $count = [int][Math]::Min($buffer.Length, 8MB + 1 - $memory.Length)
-            $read = $stream.Read($buffer, 0, $count)
-            if ($read -eq 0) { break }
-            if ($memory.Length + $read -gt 8MB) { throw "$Name size is outside the permitted range." }
-            $memory.Write($buffer, 0, $read)
-        }
-        if ($memory.Length -eq 0) { throw "$Name is empty." }
-        $bytes = $memory.ToArray()
-        return [pscustomobject]@{ Bytes = $bytes; Sha256 = Get-ReceiptExportFileSha256 $bytes }
-    }
-    finally { $memory.Dispose(); $stream.Dispose() }
+    return Read-BoundedEvidenceSnapshot $Path $Name
 }
 
 function Get-ReceiptExportComparableJson($Receipt) {

@@ -51,6 +51,14 @@ review evidence for the implemented behavior and is not production custody.
   or independent archive custody.
   Full local verification after the fix passed 401/401 .NET tests, strict build
   with zero warnings/errors and 93.68% production coverage.
+- Independent signer snapshot verification passed on local PowerShell 7:
+  six acceptance and 30 rejection scenarios, native newline/8 MiB boundaries,
+  duplicate/coerced fields, typed metadata and exact retained digest. Both real
+  psql Unicode cases also passed through the read-only verifier. Shared immudb
+  receipt export, independent verification and checkpoint checks passed on
+  PowerShell 7 and Windows PowerShell 5.1. Full .NET verification remained
+  401/401 with 93.68% local production coverage. External approval authenticity,
+  database freshness and WORM custody were not inferred from file verification.
 
 Production completion still requires independent CA/key custody, signer
 deployment, TLS/firewall records, WORM/SIEM object identifiers, retention/legal

@@ -26,6 +26,12 @@
     <ProjectReference Include="../../src/Fleetory.Server/Fleetory.Server.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <None Include="../../eng/verify-signing-journal-snapshot.ps1"
+          Link="verify-signing-journal-snapshot.ps1"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../eng/evidence-file-helpers.ps1"
+          Link="evidence-file-helpers.ps1"
+          CopyToOutputDirectory="PreserveNewest" />
     <None Include="../../eng/export-signing-journal.sql"
           Link="export-signing-journal.sql"
           CopyToOutputDirectory="PreserveNewest" />
