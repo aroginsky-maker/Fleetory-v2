@@ -64,6 +64,8 @@ public sealed partial class SigningHostTlsTests(PostgreSqlTestFixture fixture)
             lab.Url + "/signing/inventory-refresh", new { requestId = Guid.NewGuid(), deviceId = lab.Device.Value }));
         Assert.Equal(0, lab.TransitCalls);
         Assert.Equal(0L, await lab.CountAsync("signing_requests"));
+        var audit = await lab.TlsLogs.First.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        AssertTlsFailure(audit);
     }
 
     [Theory]
@@ -263,6 +265,7 @@ public sealed partial class SigningHostTlsTests(PostgreSqlTestFixture fixture)
         public TaskCompletionSource FourTransitCalls { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource FirstTransitCall { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public string Url => Address(_host!);
+        public TlsLogCollector TlsLogs { get; } = new();
 
         private HostLab(PostgreSqlTestFixture fixture)
         {
@@ -270,14 +273,14 @@ public sealed partial class SigningHostTlsTests(PostgreSqlTestFixture fixture)
             Pki = new TestPki(Device);
         }
 
-        public static async Task<HostLab> CreateAsync(PostgreSqlTestFixture fixture, int rate = 30, bool replacement = false)
+        public static async Task<HostLab> CreateAsync(PostgreSqlTestFixture fixture, int rate = 30, bool replacement = false, bool quiet = false)
         {
             var lab = new HostLab(fixture);
-            try { await lab.StartAsync(rate, replacement); return lab; }
+            try { await lab.StartAsync(rate, replacement, quiet); return lab; }
             catch { await lab.DisposeAsync(); throw; }
         }
 
-        private async Task StartAsync(int rate, bool replacement)
+        private async Task StartAsync(int rate, bool replacement, bool quiet)
         {
             await ExecuteOwnerAsync(await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "provision-signing-journal.sql")));
             await ExecuteOwnerAsync($"""
@@ -326,13 +329,17 @@ public sealed partial class SigningHostTlsTests(PostgreSqlTestFixture fixture)
             });
             await _transit.StartAsync();
             _transitUrl = Address(_transit);
-            _host = SigningHostApplication.Build([.. Arguments(), $"--Signer:RequestsPerMinute={rate}"]);
+            _host = SigningHostApplication.Build([.. Arguments(), $"--Signer:RequestsPerMinute={rate}",
+                $"--Logging:LogLevel:Default={(quiet ? "None" : "Information")}"]);
+            _host.Services.GetRequiredService<ILoggerFactory>().AddProvider(TlsLogs);
             await _host.StartAsync();
         }
 
         public string[] Arguments() => ["--environment=Development", $"--Signer:SecretsDirectory={Secrets.Path}",
             "--Signer:Port=0", "--Signer:AllowLoopbackHttpTransit=true", $"--Signer:TransitAddress={_transitUrl}/",
             "--Signer:TransitKey=test-key", "--Signer:TransitKeyVersion=2"];
+
+        public Task StopHostAsync() => _host!.StopAsync();
 
         public async Task ExecuteOwnerAsync(string sql)
         {

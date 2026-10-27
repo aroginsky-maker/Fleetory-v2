@@ -85,6 +85,46 @@ certificate revocations take effect through the database without restart, as bel
 Atomic policy reload, production custody, TLS-handshake audit retention, delivery
 reconciliation and WORM/SIEM export remain deployment/integration controls.
 
+## TLS failures before HTTP
+
+The signer listener now emits a structured warning when a connection leaves TLS
+admission without reaching the accepted HTTPS stage. This covers missing,
+unregistered or foreign client certificates, malformed/plaintext traffic,
+disconnects and the existing five-second handshake deadline. HTTP requests over
+successfully established TLS continue to use the PostgreSQL rejection journal;
+an HTTP 400/403 is not reclassified as a TLS failure.
+
+Collect JSON console events with category
+`Fleetory.CommandSigner.Host.SigningTlsHandshakeAudit` and EventId `701`
+(`SignerTlsHandshakeNotEstablished`). Their `State` contains:
+
+| Field | Meaning |
+| --- | --- |
+| `Schema` | `fleetory.signer-tls-failure.v1` |
+| `AuditEventId` | New UUID for this connection observation |
+| `ObservedAt` | Server UTC timestamp when the failed admission returns |
+| `ConnectionId` | Bounded, sanitized server transport correlation ID |
+| `RemoteAddress`, `RemotePort` | Actual IP socket peer, or `unknown`/0 for a non-IP transport |
+| `ElapsedMilliseconds` | Monotonic elapsed time of the rejected admission |
+| `Reason` | Fixed `TlsNotEstablished` classification |
+
+This classification does not assert an authenticated caller or distinguish a
+bad certificate from a timeout. A client retry may create multiple distinct
+connection observations. The event contains no exception text, certificate
+subject/PEM, raw handshake bytes, attempted HTTP headers, tokens or private keys.
+Forwarded headers cannot supply its peer address or connection identity.
+The audit category retains warning-level output even when generic console
+logging is disabled. Byte-level Kestrel connection logging is not enabled.
+
+Capture stdout under the dedicated service identity into the approved protected
+collector, configure retention/rotation and capacity, monitor collector health,
+and retain the required incident records outside the signer host. The events are
+operational logs, not rows in the authenticated signing journal, and console
+emission alone does not establish durable storage, WORM custody or delivery.
+Connections rejected before entering the endpoint middleware still require
+transport/Kestrel resource-limit monitoring. Production collector provisioning,
+retention and independent custody remain open deployment controls.
+
 ## Implemented Transit client contract
 
 `Fleetory.CommandSigning` currently signs only an argument-free, one-minute

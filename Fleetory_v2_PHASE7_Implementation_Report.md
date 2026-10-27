@@ -84,6 +84,13 @@
 
 ## Verification snapshot
 
+The signer now emits sanitized structured diagnostics for TLS admission that
+fails before HTTP. Missing/unregistered/foreign client keys, plaintext attempts
+and handshake stalls are covered without storing unauthenticated input or doing
+pre-authentication database work. Ordinary HTTP denials remain in PostgreSQL.
+Application emission is implemented; production log retention and custody remain
+open.
+
 Read-only signer request reconciliation now distinguishes `NotFound`, `Pending`
 and `SigningRecorded` under an independent SELECT-only login, with bounded
 database reads, actual operator/database identity and exact request/result
@@ -104,8 +111,8 @@ Policy additions/CA reload and production approval/custody remain open.
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local full tests after read-only signer reconciliation | 371/371 passed |
-| Local production coverage after read-only signer reconciliation | 93.62% |
+| Local full tests after signer TLS diagnostics | 380/380 passed |
+| Local production coverage after signer TLS diagnostics | 93.68% |
 | Local scope reparenting mutation and preflight tests | 2/2 passed |
 | Local SonarQube Community Build at `ad4271b` | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0% |
 | Local SonarQube Community Build after Windows Agent ACL hardening | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0%; 0 bugs, vulnerabilities, code smells and hotspots |
@@ -135,6 +142,7 @@ Policy additions/CA reload and production approval/custody remain open.
 | Signer-client emergency revocation | 26 real PostgreSQL/mTLS cases and 8 orchestration cases passed: retained connections, revocation/read failure during signing, distinct replacement leaf, operator evidence, narrow permissions and no envelope release |
 | Standalone signer mTLS host | 29 real HTTPS/PostgreSQL cases passed: key possession, scoped signing, strict JSON, duplicate/rate/concurrency denial, dotted-route audit, journal safety and rejection of elevated database roles |
 | Read-only signer reconciliation | 20 real PostgreSQL cases passed: all three states, canonical digest/identity binding, fresh completion visibility, SELECT-only login, malformed input, role switching, prior-write rollback, missing rights and bounded lock waits |
+| Signer TLS diagnostics | 7 real socket/mTLS scenarios (3 strengthened existing cases) and 5 metadata-sanitization cases passed: failed keys, stalled/plaintext traffic, successful-TLS HTTP denial separation, disabled generic logging and no exception/credential output |
 | Privileged change evidence runbook | Approval identities, impact hashes, audit/WORM links, retention and recovery evidence documented |
 | PHASE 7 readiness record verifier | Current UTC validity, distinct normalized actors, strict JSON flags, finite coverage, per-control object references and exact record SHA-256 checked |
 | Self-hosted PHASE 7 evidence record | Signer, least-privilege audit pipeline, TLS, backup/restore and readiness checks recorded with production limitations |

@@ -8,6 +8,7 @@ using Fleetory.ModuleAbstractions;
 using Fleetory.Security.Infrastructure;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.AspNetCore.Server.Kestrel.Https;
+using Microsoft.Extensions.Logging.Console;
 using Npgsql;
 
 namespace Fleetory.CommandSigner.Host;
@@ -26,6 +27,8 @@ public static class SigningHostApplication
         builder.Logging.ClearProviders();
         builder.Logging.AddJsonConsole();
         builder.Logging.AddFilter("Microsoft.AspNetCore", LogLevel.Warning);
+        builder.Logging.AddFilter(typeof(SigningTlsHandshakeAudit).FullName, LogLevel.Warning);
+        builder.Logging.AddFilter<ConsoleLoggerProvider>(typeof(SigningTlsHandshakeAudit).FullName, LogLevel.Warning);
         var configuration = SigningHostConfiguration.Read(builder);
         var secrets = new FileSecretProvider(builder.Configuration["Signer:SecretsDirectory"] ?? "");
         SigningClientAuthorizationPolicy? policy = null;
@@ -53,6 +56,7 @@ public static class SigningHostApplication
             builder.Services.AddSingleton<ISigningClientRevocations, PostgreSqlSigningClientRevocations>();
             builder.Services.AddSingleton<AuthorizedCommandSigner>();
             builder.Services.AddSingleton<SigningJournalReadiness>();
+            builder.Services.AddSingleton<SigningTlsHandshakeAudit>();
             builder.Services.AddHostedService(services => services.GetRequiredService<SigningJournalReadiness>());
             builder.WebHost.ConfigureKestrel(options =>
             {
@@ -61,7 +65,8 @@ public static class SigningHostApplication
                 options.Limits.MaxRequestHeadersTotalSize = 16 * 1024;
                 options.Limits.MaxConcurrentConnections = 64;
                 options.Limits.RequestHeadersTimeout = TimeSpan.FromSeconds(5);
-                options.Listen(configuration.Address, configuration.Port, listen => listen.UseHttps(https =>
+                options.Listen(configuration.Address, configuration.Port, listen =>
+                    options.ApplicationServices.GetRequiredService<SigningTlsHandshakeAudit>().Configure(listen, https =>
                 {
                     https.ServerCertificate = tls.ServerCertificate;
                     https.ServerCertificateChain = tls.ServerCertificateChain;

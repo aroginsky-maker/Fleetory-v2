@@ -45,6 +45,16 @@ implementations, and remain covered by existing Server tests. Production
 isolation/custody, handshake-log retention, policy reload and external approvals
 are still separate controls; see [the signer runbook](../operations/CommandSignerDeployment.md).
 
+The signer endpoint now observes connections around its HTTPS middleware and
+emits a fixed structured warning if TLS admission never reaches the accepted
+stage. The record contains a server-generated event UUID, UTC time, sanitized
+transport connection ID, actual IP peer and monotonic elapsed time. It logs no
+exception text, certificate data, raw bytes or attempted credentials and performs
+no database/network audit call before authentication. Established TLS followed
+by an HTTP denial remains a PostgreSQL audit event. Warning output survives a
+generic logging disable; protected collection, retention and WORM custody remain
+deployment responsibilities.
+
 Signer-client emergency revocation is now an independently written, append-only
 PostgreSQL denylist keyed by the exact client leaf SHA-256. The runtime has only
 SELECT on that table; startup rejects missing reads or write privileges. Every
