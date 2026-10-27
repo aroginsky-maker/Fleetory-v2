@@ -45,6 +45,15 @@ implementations, and remain covered by existing Server tests. Production
 isolation/custody, handshake-log retention, policy reload and external approvals
 are still separate controls; see [the signer runbook](../operations/CommandSignerDeployment.md).
 
+The restricted Linux image packages only the signer runtime and pins the .NET
+base image by digest. A real Docker process test verifies non-root execution,
+read-only root/secret mounts, no effective capabilities or Docker socket, and
+separation from an unrelated process/database principal. Actual mTLS signing
+uses verified PostgreSQL TLS and an external test HTTPS Transit endpoint; a host
+restart preserves duplicate-request denial without a second signature. These
+checks establish the tested process boundary, while production key/volume custody,
+network policy, retained diagnostics and approvals still require deployment evidence.
+
 The signer endpoint now observes connections around its HTTPS middleware and
 emits a fixed structured warning if TLS admission never reaches the accepted
 stage. The record contains a server-generated event UUID, UTC time, sanitized

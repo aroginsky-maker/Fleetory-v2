@@ -1836,6 +1836,10 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
         public X509Certificate2 MalformedIdentityClient { get; }
         public ECDsa ServerKey { get; }
 
+        public X509Certificate2 IssueServerCertificate(ECDsa key, params string[] dnsNames) =>
+            Issue("CN=Fleetory isolated service", key, "1.3.6.1.5.5.7.3.1", DateTimeOffset.UtcNow,
+                san => { foreach (var name in dnsNames) { san.AddDnsName(name); } });
+
         public HttpClient CreateClient(X509Certificate2? certificate = null)
         {
             if (Intermediate is not null && certificate is not null)

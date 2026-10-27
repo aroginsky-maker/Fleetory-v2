@@ -85,6 +85,11 @@ $env:FLEETORY_TEST_CONNECTION_STRING = '<explicit test connection string>'
 
 The database name must contain `test`. There is never a fallback to production `ConnectionStrings:Fleetory`. An external override does not by itself satisfy final PHASE 6 closure; at least one successful default disposable Testcontainers run is required.
 
+The full PHASE 7 suite additionally builds and runs the restricted signer image
+in Docker, including when this PostgreSQL override is set. See the
+[signer container profile](docs/operations/CommandSignerDeployment.md#restricted-linux-container-profile)
+for packaging, runtime limits and the exact process-isolation checks.
+
 ## Verification
 
 Windows:

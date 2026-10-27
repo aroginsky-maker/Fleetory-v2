@@ -81,23 +81,22 @@ if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
 if (Test-Path -LiteralPath $Phase6PersistenceTestProject -PathType Leaf) {
     $phase6ConnectionString = [Environment]::GetEnvironmentVariable('FLEETORY_TEST_CONNECTION_STRING')
 
-    if ([string]::IsNullOrWhiteSpace($phase6ConnectionString)) {
-        if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-            $TestsStatus = 'FAIL (Docker unavailable for PHASE 6 PostgreSQL tests)'
-            Write-Warning 'PHASE 6 PostgreSQL tests require Docker or an explicit FLEETORY_TEST_CONNECTION_STRING.'
-            Write-Summary
-            exit 1
-        }
-
-        & docker info --format '{{.ServerVersion}}' *> $null
-        if ($LASTEXITCODE -ne 0) {
-            $TestsStatus = 'FAIL (Docker unavailable for PHASE 6 PostgreSQL tests)'
-            Write-Warning 'PHASE 6 PostgreSQL tests require Docker or an explicit FLEETORY_TEST_CONNECTION_STRING.'
-            Write-Summary
-            exit 1
-        }
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        $TestsStatus = 'FAIL (Docker unavailable for signer process isolation)'
+        Write-Warning 'The full suite requires Docker for signer process isolation, including with an external PostgreSQL test database.'
+        Write-Summary
+        exit 1
     }
-    else {
+
+    & docker info --format '{{.ServerVersion}}' *> $null
+    if ($LASTEXITCODE -ne 0) {
+        $TestsStatus = 'FAIL (Docker unavailable for signer process isolation)'
+        Write-Warning 'The full suite requires a running Docker engine for signer process isolation.'
+        Write-Summary
+        exit 1
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($phase6ConnectionString)) {
         $builder = [System.Data.Common.DbConnectionStringBuilder]::new()
         try {
             $builder.ConnectionString = $phase6ConnectionString

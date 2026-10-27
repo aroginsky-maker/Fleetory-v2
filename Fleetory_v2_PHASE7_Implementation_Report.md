@@ -84,6 +84,14 @@
 
 ## Verification snapshot
 
+The signer now has a narrowly packaged Linux image and a repeatable actual-process
+isolation check. The test verifies UID 1654, read-only root and secret mounts,
+capability removal, no-new-privileges, no Docker socket, unrelated process/database
+denial, real mTLS signing with verified PostgreSQL TLS and durable RequestId denial
+after restart. The runbook provides the required runtime flags and secret-volume
+layout. The test HTTPS Transit backend holds its key outside the container;
+production key custody, network policy, protected logs and approvals remain open.
+
 The signer now emits sanitized structured diagnostics for TLS admission that
 fails before HTTP. Missing/unregistered/foreign client keys, plaintext attempts
 and handshake stalls are covered without storing unauthenticated input or doing
@@ -111,8 +119,8 @@ Policy additions/CA reload and production approval/custody remain open.
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local full tests after signer TLS diagnostics | 380/380 passed |
-| Local production coverage after signer TLS diagnostics | 93.68% |
+| Local full tests after signer container isolation | 381/381 passed |
+| Local production coverage after signer container isolation | 93.68% |
 | Local scope reparenting mutation and preflight tests | 2/2 passed |
 | Local SonarQube Community Build at `ad4271b` | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0% |
 | Local SonarQube Community Build after Windows Agent ACL hardening | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0%; 0 bugs, vulnerabilities, code smells and hotspots |
@@ -143,6 +151,8 @@ Policy additions/CA reload and production approval/custody remain open.
 | Standalone signer mTLS host | 29 real HTTPS/PostgreSQL cases passed: key possession, scoped signing, strict JSON, duplicate/rate/concurrency denial, dotted-route audit, journal safety and rejection of elevated database roles |
 | Read-only signer reconciliation | 20 real PostgreSQL cases passed: all three states, canonical digest/identity binding, fresh completion visibility, SELECT-only login, malformed input, role switching, prior-write rollback, missing rights and bounded lock waits |
 | Signer TLS diagnostics | 7 real socket/mTLS scenarios (3 strengthened existing cases) and 5 metadata-sanitization cases passed: failed keys, stalled/plaintext traffic, successful-TLS HTTP denial separation, disabled generic logging and no exception/credential output |
+| Signer container isolation | Actual restricted Linux process, read-only secret volume, unrelated process/database denial, verified PostgreSQL TLS, mTLS signature and restart/replay denial passed |
+| Signer package compatibility | PowerShell 7 and Windows PowerShell 5.1 produced the restricted runtime context; Server, application settings and debug symbols excluded |
 | Privileged change evidence runbook | Approval identities, impact hashes, audit/WORM links, retention and recovery evidence documented |
 | PHASE 7 readiness record verifier | Current UTC validity, distinct normalized actors, strict JSON flags, finite coverage, per-control object references and exact record SHA-256 checked |
 | Self-hosted PHASE 7 evidence record | Signer, least-privilege audit pipeline, TLS, backup/restore and readiness checks recorded with production limitations |

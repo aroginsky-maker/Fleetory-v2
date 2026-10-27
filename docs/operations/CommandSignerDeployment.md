@@ -85,6 +85,73 @@ certificate revocations take effect through the database without restart, as bel
 Atomic policy reload, production custody, TLS-handshake audit retention, delivery
 reconciliation and WORM/SIEM export remain deployment/integration controls.
 
+## Restricted Linux container profile
+
+Build the Release solution first, then create a fresh, narrowly scoped build
+context. Run these commands from the repository root with PowerShell:
+
+```powershell
+dotnet build Fleetory.sln -c Release
+./eng/package-command-signer.ps1 -Name approved-release
+docker build --tag fleetory-command-signer:approved-release ./artifacts/command-signer-container/approved-release
+```
+
+The packager refuses existing output paths and unexpected Fleetory assemblies.
+Only runtime DLLs and the host's two runtime manifests enter the image context;
+Server/Agent implementations, application settings, development secrets and the
+raw publish directory are excluded. The Dockerfile pins the official .NET 10
+runtime manifest by digest and uses its `app` user (UID 1654). Rebuild under a new
+release name when updating the application or approved runtime digest.
+
+Provision a separate protected volume named `fleetory-signer-secrets` through
+the deployment secret manager, outside this build context. Its files must be
+owned by UID 1654, mode 0400, with a non-writable directory. Include the seven
+required files above and an approved public PEM bundle `infrastructure-ca`.
+For remote PostgreSQL, the connection string in `signer-postgresql` must use
+`SSL Mode=VerifyFull;Root Certificate=/run/fleetory-signer/infrastructure-ca`
+with the actual approved database hostname. Its runtime login retains only the
+documented signer journal privileges. The Transit origin must use HTTPS and a
+certificate valid for its hostname under the approved trust configuration.
+
+After provisioning the dedicated `signer-management` network and credentials,
+the following profile starts the service with a local management port. Substitute
+the approved Transit origin and key version; do not put credentials in arguments:
+
+```powershell
+docker run --detach --name fleetory-command-signer `
+  --network signer-management --publish 127.0.0.1:9443:9443 `
+  --read-only --cap-drop ALL --security-opt no-new-privileges:true `
+  --pids-limit 64 --memory 256m `
+  --mount type=volume,source=fleetory-signer-secrets,target=/run/fleetory-signer,readonly `
+  --env SSL_CERT_FILE=/run/fleetory-signer/infrastructure-ca `
+  fleetory-command-signer:approved-release `
+  --Signer:SecretsDirectory=/run/fleetory-signer --Signer:Port=9443 `
+  --Signer:TransitAddress=https://transit.example --Signer:TransitKey=agent-command --Signer:TransitKeyVersion=2
+```
+
+These runtime flags are required; the Dockerfile alone does not enforce them.
+Do not mount the Docker socket, Server directories, signing private keys or
+unrelated host paths. Attach one network with one container IP: the entrypoint
+resolves that concrete IP and refuses an empty or multiple-address result,
+preserving the host's wildcard-listener prohibition. The listener certificate
+must match the hostname used by the approval client. The localhost port is a
+starting management profile; production routing/firewall rules, capacity limits,
+protected log collection and secret-volume custody need their own deployment
+evidence. A Docker administrator controls containers and volumes and remains
+outside this process-isolation boundary.
+
+`SignerProcessIsolationTests` builds this image and executes the actual host in
+a separate restricted Linux process. It checks UID, effective capabilities,
+no-new-privileges, read-only root and secret mount, absence of the Docker socket,
+Server binary and secrets in an unrelated process, and denial of journal reads
+to an unrelated database login. It signs over real mTLS with verified PostgreSQL
+TLS, verifies the returned signature, restarts the host, rejects the same RequestId
+without a second signing call and checks sanitized TLS-failure logging. Its HTTPS
+Transit endpoint is a disposable test implementation with a real P-256 key held
+outside the signer container; it does not establish production OpenBao/HSM custody.
+The earlier real OpenBao lab check remains separate evidence. Full tests now
+require Docker even when an external PostgreSQL test database is configured.
+
 ## TLS failures before HTTP
 
 The signer listener now emits a structured warning when a connection leaves TLS
