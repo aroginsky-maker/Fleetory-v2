@@ -61,8 +61,44 @@ public sealed class CredentialedHttpRedirectTests
             await redirectedRequest);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OpenBao_secret_deadline_includes_headers_and_response_body(bool sendHeaders)
+    {
+        using var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        using var lifetime = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var responseSent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        const string partialSecret = "incomplete-secret-never-returned";
+        var response = sendHeaders
+            ? "HTTP/1.1 200 OK\r\nContent-Length: 1024\r\nConnection: close\r\n\r\n" +
+              "{\"data\":{\"data\":{\"value\":\"" + partialSecret
+            : string.Empty;
+        var peer = ReplyOnceAsync(listener, response, lifetime.Token, responseSent);
+        var address = new Uri($"http://127.0.0.1:{((IPEndPoint)listener.LocalEndpoint).Port}/");
+        using var provider = new OpenBaoSecretProvider(address, "deadline-test-token",
+            allowInsecureLoopback: true);
+        var read = Task.Run(() => Record.Exception(() => provider.GetRequiredSecret("fleetory-postgresql")));
+        try
+        {
+            await responseSent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            var exception = Assert.IsType<InvalidOperationException>(
+                await read.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.DoesNotContain(partialSecret, exception.ToString(), StringComparison.Ordinal);
+            Assert.DoesNotContain("deadline-test-token", exception.ToString(), StringComparison.Ordinal);
+            Assert.Null(exception.InnerException);
+        }
+        finally
+        {
+            await lifetime.CancelAsync();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await peer);
+            await read.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
     private static async Task<string> ReplyOnceAsync(TcpListener listener,
-        string response, CancellationToken cancellationToken)
+        string response, CancellationToken cancellationToken, TaskCompletionSource? holdOpen = null)
     {
         using var client = await listener.AcceptTcpClientAsync(cancellationToken);
         var stream = client.GetStream();
@@ -70,6 +106,11 @@ public sealed class CredentialedHttpRedirectTests
         var count = await stream.ReadAsync(buffer, cancellationToken);
         var request = Encoding.ASCII.GetString(buffer, 0, count);
         await stream.WriteAsync(Encoding.ASCII.GetBytes(response), cancellationToken);
+        if (holdOpen is not null)
+        {
+            holdOpen.SetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        }
         return request;
     }
 }

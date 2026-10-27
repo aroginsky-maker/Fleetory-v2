@@ -31,44 +31,36 @@ public sealed class OpenBaoSecretProvider : ISecretProvider, IDisposable
         _baseAddress = address;
         _token = token;
         _client = HttpOriginPolicy.CreateNonRedirectingClient(handler);
-        _client.Timeout = TimeSpan.FromSeconds(5);
+        _client.Timeout = Timeout.InfiniteTimeSpan;
     }
 
     public string GetRequiredSecret(string name)
     {
         SecretName.Validate(name);
         return _cache.GetOrAdd(name, key => new Lazy<string>(
-            () => ReadSecret(key), LazyThreadSafetyMode.ExecutionAndPublication)).Value;
+            () => ReadSecretAsync(key).GetAwaiter().GetResult(),
+            LazyThreadSafetyMode.ExecutionAndPublication)).Value;
     }
 
-    private string ReadSecret(string name)
+    private async Task<string> ReadSecretAsync(string name)
     {
         try
         {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            var cancellationToken = deadline.Token;
             using var request = new HttpRequestMessage(HttpMethod.Get,
                 new Uri(_baseAddress, "v1/secret/data/fleetory/" + name));
             request.Headers.Add("X-Vault-Token", _token);
-            using var response = _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead)
-                .GetAwaiter().GetResult();
+            using var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken).ConfigureAwait(false);
             if (!response.IsSuccessStatusCode)
             {
                 throw new InvalidOperationException("Required OpenBao secret could not be read.");
             }
 
-            using var stream = response.Content.ReadAsStream();
-            using var buffer = new MemoryStream();
-            var chunk = new byte[4096];
-            int count;
-            while ((count = stream.Read(chunk, 0, chunk.Length)) != 0)
-            {
-                buffer.Write(chunk, 0, count);
-                if (buffer.Length > MaximumResponseBytes)
-                {
-                    throw new InvalidOperationException("OpenBao response is too large.");
-                }
-            }
-
-            using var json = JsonDocument.Parse(StrictUtf8.GetString(buffer.ToArray()));
+            var bytes = await BoundedHttpContentReader.ReadAsync(response.Content,
+                MaximumResponseBytes, cancellationToken).ConfigureAwait(false);
+            using var json = JsonDocument.Parse(StrictUtf8.GetString(bytes));
             var value = json.RootElement.GetProperty("data").GetProperty("data")
                 .GetProperty("value").GetString();
             if (string.IsNullOrWhiteSpace(value) || value.Length > 16 * 1024)
@@ -79,7 +71,7 @@ public sealed class OpenBaoSecretProvider : ISecretProvider, IDisposable
             return value;
         }
         catch (Exception exception) when (exception is HttpRequestException or IOException or
-            JsonException or DecoderFallbackException or KeyNotFoundException or TaskCanceledException)
+            JsonException or DecoderFallbackException or KeyNotFoundException or OperationCanceledException)
         {
             throw new InvalidOperationException("Required OpenBao secret could not be read.");
         }

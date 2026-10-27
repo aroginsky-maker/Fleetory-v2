@@ -4,6 +4,8 @@
 
 ## Implemented
 
+- OpenBao KV secret reads now have a single five-second request-and-body deadline. A real HTTP regression reproduced an incomplete-body startup hang after timely headers; both header and body stalls now fail without returning partial secrets or exposing the credential. OpenBao and immudb share one bounded response reader, retaining their distinct byte caps and the successful process-lifetime cache. This closes the demonstrated unbounded external-secret read under Baseline section 12; deployment/custody requirements remain open.
+
 - Separate Agent and Admin mTLS gateways, pinned CA roots, intermediate chains, device/person SAN validation, certificate binding, one-time Agent enrollment grants, rotation overlap and revocation.
 - Both gateways now accept an explicitly bounded two-root CA rollover window. Duplicate or third roots and any Agent/Admin root overlap fail startup. A real Agent mTLS/PostgreSQL test checks both roots during migration and denies the retired CA after the server switches to its replacement.
 - Local PostgreSQL RBAC with exact permissions and scoped grants; Admin OIDC gate validates signed tokens, WebAuthn AMR, client ID and certificate subject matching. Keycloak lab realm enforces WebAuthn and S256 PKCE.

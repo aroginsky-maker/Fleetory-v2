@@ -166,6 +166,23 @@ The recovery script requires an existing global manager assignment but refuses a
 
 The secret manager or OS mount is responsible for provisioning, access control and rotation. Fleetory also has an OpenBao KV v2 adapter selected with `Fleetory:Secrets:Provider=OpenBao`. It reads the same named secrets through an authenticated API, requires HTTPS outside Development, and accepts plain HTTP only on loopback in Development. Its HTTP client refuses redirects so the `X-Vault-Token` header cannot follow a server-supplied `Location`. A real loopback HTTP test checks the default handler for both OpenBao and immudb. Both adapters cache secrets for the process lifetime, so rotation requires a restart. Production delivery of external audit-sink credentials is still open. No secret contents are emitted in provider error messages.
 
+OpenBao KV reads now enforce one five-second deadline across request headers and
+the complete response stream. Previously `ResponseHeadersRead` ended
+`HttpClient.Timeout` coverage at the headers, so a peer could indefinitely stall
+startup while sending an incomplete secret body. The same cancellation token now
+covers the request, stream acquisition and every body read; expiration returns a
+sanitized failure without a partial value or inner transport exception. Successful
+values retain the process-lifetime, single-fetch cache. The synchronous provider
+contract remains a startup/configuration boundary, outside request hot paths.
+
+OpenBao and immudb reuse one bounded response reader, retaining their respective
+20-KiB and 16-KiB byte limits without trusting Content-Length. Real loopback HTTP
+regressions hold either headers or the secret body open; the body case reproduced
+the original indefinite wait before the fix and both now fail within the deadline.
+Existing immudb malformed/oversized response and credential isolation tests pass.
+Microsoft documents the separate body-timeout requirement for
+[ResponseHeadersRead](https://learn.microsoft.com/en-us/dotnet/api/system.net.http.httpcompletionoption?view=net-10.0).
+
 ## Implemented Agent certificate binding foundation
 
 `Fleetory.Core.Contracts` owns the certificate-binding lookup and verifier contracts. Core migration `20261016212919_AddAgentCertificateBindings` adds `core.agent_certificates`. A unique SHA-256 digest of the certificate DER binds one certificate to one `DeviceId`; multiple certificates may be valid for the same device during rotation. The row stores validity bounds and an optional revocation timestamp. It references only Core-owned `devices`. Core registers a PostgreSQL lookup and verifier; storage failure propagates, so identity cannot silently become accepted.

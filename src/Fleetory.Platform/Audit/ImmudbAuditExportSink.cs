@@ -177,22 +177,12 @@ public sealed class ImmudbAuditExportSink : IAuditExportSink, IDisposable
     private static async Task<JsonDocument> ReadJsonAsync(HttpResponseMessage response,
         CancellationToken cancellationToken)
     {
-        await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken);
-        using var buffer = new MemoryStream();
-        var chunk = new byte[4096];
-        int count;
-        while ((count = await stream.ReadAsync(chunk, cancellationToken)) != 0)
-        {
-            await buffer.WriteAsync(chunk.AsMemory(0, count), cancellationToken);
-            if (buffer.Length > MaximumResponseBytes)
-            {
-                throw new InvalidOperationException("Immudb audit response is too large.");
-            }
-        }
+        var bytes = await BoundedHttpContentReader.ReadAsync(response.Content,
+            MaximumResponseBytes, cancellationToken);
 
         try
         {
-            return JsonDocument.Parse(buffer.ToArray());
+            return JsonDocument.Parse(bytes);
         }
         catch (JsonException)
         {
