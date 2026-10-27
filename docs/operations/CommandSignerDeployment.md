@@ -161,7 +161,8 @@ in `signer.client_certificate_revocations` only. Do not grant table-wide INSERT:
 the operator must not supply database-generated event ID, session identity or time.
 It needs no ownership, memberships, UPDATE, DELETE, TRUNCATE or signing-journal
 write privileges. The signer runtime must have SELECT only on this table;
-startup rejects both table and individual-column write grants.
+startup rejects both table and individual-column write grants. The three signing
+journal tables also reject individual-column UPDATE/REFERENCES and table TRIGGER rights.
 Upgrade existing deployments with the idempotent schema v3 provisioning script
 and explicit SELECT grant before replacing the host binary; an old schema or
 missing/excessive denylist permissions fail startup.

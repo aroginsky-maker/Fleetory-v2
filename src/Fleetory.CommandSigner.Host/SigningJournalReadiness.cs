@@ -22,7 +22,8 @@ internal sealed class SigningJournalReadiness(NpgsqlDataSource source) : IHosted
                         AND has_table_privilege(current_user, relation, 'INSERT')
                         AND NOT has_table_privilege(current_user, relation, 'UPDATE')
                         AND NOT has_table_privilege(current_user, relation, 'DELETE')
-                        AND NOT has_table_privilege(current_user, relation, 'TRUNCATE'))
+                        AND NOT has_table_privilege(current_user, relation, 'TRUNCATE,REFERENCES,TRIGGER')
+                        AND NOT has_any_column_privilege(current_user, relation, 'UPDATE,REFERENCES'))
                 FROM unnest(ARRAY['signer.signing_requests', 'signer.signing_results',
                                  'signer.signing_rejections']) AS relation;
                 """);

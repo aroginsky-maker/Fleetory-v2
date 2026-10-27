@@ -93,13 +93,15 @@ public sealed partial class SigningHostTlsTests
     [InlineData("missing-read")]
     [InlineData("runtime-write")]
     [InlineData("column-write")]
-    public async Task Startup_rejects_missing_or_excessive_revocation_permissions(string kind)
+    [InlineData("journal-column-update")]
+    public async Task Startup_rejects_missing_or_excessive_runtime_permissions(string kind)
     {
         await using var lab = await HostLab.CreateAsync(fixture);
         await lab.ExecuteOwnerAsync(kind switch
         {
             "missing-read" => $"REVOKE SELECT ON signer.client_certificate_revocations FROM {lab.Role}",
             "column-write" => $"GRANT INSERT (certificate_sha256) ON signer.client_certificate_revocations TO {lab.Role}",
+            "journal-column-update" => $"GRANT UPDATE (caller_id) ON signer.signing_requests TO {lab.Role}",
             _ => $"GRANT INSERT ON signer.client_certificate_revocations TO {lab.Role}"
         });
         await using var app = SigningHostApplication.Build(lab.Arguments());

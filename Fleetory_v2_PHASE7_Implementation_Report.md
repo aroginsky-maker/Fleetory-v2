@@ -97,8 +97,8 @@ Policy additions/CA reload and production approval/custody remain open.
 | Check | Latest verified result |
 | --- | ---: |
 | Local strict Release build | 0 warnings, 0 errors |
-| Local full tests at `35ef44f` | 345/345 passed |
-| Local production coverage at `35ef44f` | 93.62% |
+| Local full tests at `8ed4499` | 349/349 passed |
+| Local production coverage at `8ed4499` | 93.62% |
 | Local scope reparenting mutation and preflight tests | 2/2 passed |
 | Local SonarQube Community Build at `ad4271b` | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0% |
 | Local SonarQube Community Build after Windows Agent ACL hardening | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0%; 0 bugs, vulnerabilities, code smells and hotspots |
@@ -125,7 +125,7 @@ Policy additions/CA reload and production approval/custody remain open.
 | Transit signing client regression checks | 28/28 passed: bounded headers/body lifetime, caller cancellation, rejected credentials, safe errors and signature verification |
 | Signer caller authorization checks | 31/31 passed: pinned client identity, custom trust, purpose/validity, exact target, immutable inputs, same-subject CA rollover, leaf rotation and no Transit call on denial |
 | Durable signer journal checks | 20 PostgreSQL cases and 9 orchestration cases passed: persistence, concurrent reservation, immutable completion, narrow permissions, forced synchronous commit and failure/cancellation/expiry without release |
-| Signer-client emergency revocation | 25 real PostgreSQL/mTLS cases and 8 orchestration cases passed: retained connections, revocation/read failure during signing, distinct replacement leaf, operator evidence, narrow permissions and no envelope release |
+| Signer-client emergency revocation | 26 real PostgreSQL/mTLS cases and 8 orchestration cases passed: retained connections, revocation/read failure during signing, distinct replacement leaf, operator evidence, narrow permissions and no envelope release |
 | Standalone signer mTLS host | 28 real HTTPS/PostgreSQL cases passed: key possession, scoped signing, strict JSON, duplicate/rate/concurrency denial, dotted-route audit, journal safety and rejection of elevated database roles |
 | Privileged change evidence runbook | Approval identities, impact hashes, audit/WORM links, retention and recovery evidence documented |
 | PHASE 7 readiness record verifier | Current UTC validity, distinct normalized actors, strict JSON flags, finite coverage, per-control object references and exact record SHA-256 checked |
