@@ -44,6 +44,13 @@ review evidence for the implemented behavior and is not production custody.
   prior-write rollback, role switching and lock deadline. Full local verification
   passed 399/399 .NET tests with 93.68% production coverage. This extracts metadata
   for reviewed archival; no external WORM/SIEM delivery or custody was claimed.
+- Native psql checks reproduced multilingual journal export failures with
+  inherited LATIN1 and WIN1251 client encodings. Explicit transaction-local UTF-8
+  output fixed both cases; all 20 signer export tests passed. This exercises the
+  real PostgreSQL Linux client and does not establish production authentication
+  or independent archive custody.
+  Full local verification after the fix passed 401/401 .NET tests, strict build
+  with zero warnings/errors and 93.68% production coverage.
 
 Production completion still requires independent CA/key custody, signer
 deployment, TLS/firewall records, WORM/SIEM object identifiers, retention/legal

@@ -6,6 +6,7 @@ SET LOCAL statement_timeout = '5s';
 SET LOCAL lock_timeout = '2s';
 SET LOCAL idle_in_transaction_session_timeout = '5s';
 SET LOCAL TIME ZONE 'UTC';
+SET LOCAL client_encoding = 'UTF8';
 SET LOCAL search_path = pg_catalog;
 DO $fleetory_signer_export$
 DECLARE

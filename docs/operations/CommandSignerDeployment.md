@@ -415,6 +415,13 @@ deployment. Run the script in a fresh session with stop-on-error enabled; for
 psql use the approved service profile with `-X -q -A -t -v ON_ERROR_STOP=1`
 and load the script with `--file` or `\i`. Credentials must not appear in arguments.
 
+The script explicitly selects UTF-8 client output for its transaction. Native
+psql tests reproduce failures with inherited `LATIN1` and `WIN1251` when incident
+references contain Cyrillic, accented Latin or CJK characters; the export now
+preserves those references and emits exactly one parseable JSON observation.
+These tests use the real psql client in disposable PostgreSQL Linux containers;
+their local socket trust is not a production authentication profile.
+
 Capture the single JSON result through the operator's approved mechanism into
 a new private incident artifact. Refuse an existing output path: psql's `--output`
 alone can overwrite a file and is not a no-overwrite capture mechanism. On any
@@ -423,6 +430,9 @@ Hash the exact retained UTF-8 bytes, including any final newline, and retain tha
 digest and the actual object/version identifier in the independent incident
 record. Verify the received bytes and approved retention/object-lock controls
 at the external destination; the SQL script does not contact that destination.
+Do not use Windows PowerShell 5.1's `>` redirection for this capture: it can
+transcode native output to UTF-16. Use a reviewed capture that retains UTF-8 bytes
+and enforces a new private destination before computing the retained hash.
 
 The `fleetory.signer-journal-snapshot.v1` observation includes database/operator
 identity, UTC observation time, `readOnly`, `snapshotComplete` and the four arrays

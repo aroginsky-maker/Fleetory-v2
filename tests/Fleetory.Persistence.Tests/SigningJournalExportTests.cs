@@ -1,6 +1,8 @@
 using System.Diagnostics;
 using System.Text.Json;
+using DotNet.Testcontainers.Configurations;
 using Npgsql;
+using Testcontainers.PostgreSql;
 
 namespace Fleetory.Persistence.Tests;
 
@@ -186,6 +188,53 @@ public sealed class SigningJournalExportTests(PostgreSqlTestFixture fixture) : I
         var error = await Assert.ThrowsAsync<PostgresException>(() => ExportAsync());
         Assert.Equal(PostgresErrorCodes.LockNotAvailable, error.SqlState);
         Assert.True(elapsed.Elapsed < TimeSpan.FromSeconds(10));
+    }
+
+    [Theory]
+    [InlineData("LATIN1")]
+    [InlineData("WIN1251")]
+    public async Task Native_psql_emits_one_utf8_json_observation_despite_a_legacy_client_encoding(string initialEncoding)
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromMinutes(1));
+        await using var database = new PostgreSqlBuilder(PostgreSqlTestFixture.PostgreSqlImage)
+            .WithDatabase("signer_encoding_test").WithUsername("encoding_owner").WithPassword(Guid.NewGuid().ToString("N"))
+            .WithEnvironment("PGCLIENTENCODING", initialEncoding)
+            .WithResourceMapping(await File.ReadAllBytesAsync(Path.Combine(AppContext.BaseDirectory, "export-signing-journal.sql"), deadline.Token),
+                "/proof/export-signing-journal.sql", 999, 999, UnixFileModes.UserRead)
+            .Build();
+        await database.StartAsync(deadline.Token);
+        await using var owner = NpgsqlDataSource.Create(database.GetConnectionString());
+        await using (var schema = owner.CreateCommand(await File.ReadAllTextAsync(Path.Combine(AppContext.BaseDirectory, "provision-signing-journal.sql"))))
+        {
+            await schema.ExecuteNonQueryAsync(deadline.Token);
+        }
+        await using (var provision = owner.CreateCommand("""
+            CREATE ROLE evidence_reader LOGIN;
+            GRANT CONNECT ON DATABASE signer_encoding_test TO evidence_reader;
+            GRANT USAGE ON SCHEMA signer TO evidence_reader;
+            GRANT SELECT ON ALL TABLES IN SCHEMA signer TO evidence_reader;
+            """))
+        {
+            await provision.ExecuteNonQueryAsync(deadline.Token);
+        }
+        await using (var incident = owner.CreateCommand("""
+            INSERT INTO signer.client_certificate_revocations
+                (certificate_sha256, incident_reference, operator_reference, approver_reference, evidence_sha256)
+            VALUES (repeat('A', 64), $1, 'operator', 'approver', repeat('B', 64));
+            """))
+        {
+            incident.Parameters.AddWithValue("ИНЦИДЕНТ-漢字-é");
+            await incident.ExecuteNonQueryAsync(deadline.Token);
+        }
+        // Local socket trust belongs only to this disposable test container, not to the production service profile.
+        var export = await database.ExecAsync(["psql", "-X", "-q", "-A", "-t", "-v", "ON_ERROR_STOP=1",
+            "--no-password", "--username=evidence_reader", "--dbname=signer_encoding_test", "--file=/proof/export-signing-journal.sql"], deadline.Token);
+        Assert.True(export.ExitCode == 0, export.Stderr);
+        using var snapshot = JsonDocument.Parse(export.Stdout);
+        Assert.Equal("fleetory.signer-journal-snapshot.v1", snapshot.RootElement.GetProperty("schema").GetString());
+        Assert.Equal("evidence_reader", snapshot.RootElement.GetProperty("databaseOperator").GetString());
+        Assert.Equal("ИНЦИДЕНТ-漢字-é", snapshot.RootElement.GetProperty("revocations")[0].GetProperty("incident_reference").GetString());
+        Assert.False(snapshot.RootElement.GetProperty("independentCustodyVerified").GetBoolean());
     }
 
     private async Task<string> ExportAsync(bool switchedRole = false, bool joinWriteTransaction = false)
