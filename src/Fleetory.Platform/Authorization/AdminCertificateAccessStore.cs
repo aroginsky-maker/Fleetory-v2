@@ -6,10 +6,19 @@ namespace Fleetory.Platform.Authorization;
 
 public enum AdminCertificateAccess { Accepted, Revoked, Unregistered }
 
+/// <summary>Retains the registration deadline so later admission work cannot extend a rotation overlap.</summary>
+public sealed record AdminCertificateAccessResult(
+    AdminCertificateAccess Status, DateTimeOffset? RegistrationExpiresAt = null)
+{
+    public AdminCertificateAccess GetStatusAt(DateTimeOffset now) =>
+        Status == AdminCertificateAccess.Accepted && RegistrationExpiresAt is { } expiry && now >= expiry
+            ? AdminCertificateAccess.Unregistered : Status;
+}
+
 /// <summary>Checks the durable Admin credential registry on every request.</summary>
 public interface IAdminCertificateAccessStore
 {
-    ValueTask<AdminCertificateAccess> CheckAsync(string certificateSha256,
+    ValueTask<AdminCertificateAccessResult> CheckAsync(string certificateSha256,
         string actorSubjectId, bool requireRegistration,
         CancellationToken cancellationToken = default);
 }
@@ -17,7 +26,7 @@ public interface IAdminCertificateAccessStore
 internal sealed class AdminCertificateAccessStore(PostgreSqlConnectionSettings settings)
     : IAdminCertificateAccessStore
 {
-    public async ValueTask<AdminCertificateAccess> CheckAsync(
+    public async ValueTask<AdminCertificateAccessResult> CheckAsync(
         string certificateSha256,
         string actorSubjectId,
         bool requireRegistration,
@@ -38,11 +47,12 @@ internal sealed class AdminCertificateAccessStore(PostgreSqlConnectionSettings s
             SELECT EXISTS (
                 SELECT 1 FROM platform.admin_certificate_revocations
                 WHERE certificate_sha256 = @certificate_sha256),
-                EXISTS (
-                    SELECT 1 FROM platform.admin_certificate_registrations
-                    WHERE certificate_sha256 = @certificate_sha256
-                      AND actor_subject_id = @actor_subject_id
-                      AND (overlap_ends_at IS NULL OR overlap_ends_at > now()))
+                registration.certificate_sha256, registration.overlap_ends_at
+            FROM (SELECT 1) AS request
+            LEFT JOIN platform.admin_certificate_registrations AS registration
+              ON registration.certificate_sha256 = @certificate_sha256
+             AND registration.actor_subject_id = @actor_subject_id
+             AND (registration.overlap_ends_at IS NULL OR registration.overlap_ends_at > clock_timestamp())
             """, connection);
         command.Parameters.AddWithValue("certificate_sha256", NpgsqlDbType.Varchar,
             certificateSha256);
@@ -54,8 +64,11 @@ internal sealed class AdminCertificateAccessStore(PostgreSqlConnectionSettings s
             throw new InvalidOperationException("Admin certificate registry returned no result.");
         }
 
-        return reader.GetBoolean(0) ? AdminCertificateAccess.Revoked :
-            requireRegistration && !reader.GetBoolean(1)
+        var status = reader.GetBoolean(0) ? AdminCertificateAccess.Revoked :
+            requireRegistration && reader.IsDBNull(1)
                 ? AdminCertificateAccess.Unregistered : AdminCertificateAccess.Accepted;
+        var expiry = requireRegistration && status == AdminCertificateAccess.Accepted && !reader.IsDBNull(2)
+            ? reader.GetFieldValue<DateTimeOffset>(2) : (DateTimeOffset?)null;
+        return new AdminCertificateAccessResult(status, expiry);
     }
 }

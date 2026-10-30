@@ -100,15 +100,8 @@ public sealed class AdminConnectionLifetimeTests(PostgreSqlTestFixture fixture)
         var pending = client.GetAsync(uri, cancellationToken);
         try
         {
-            await using var probe = new NpgsqlCommand("""
-                SELECT EXISTS (SELECT 1 FROM pg_locks
-                               WHERE relation = 'platform.admin_certificate_registrations'::regclass
-                                 AND NOT granted AND pid <> pg_backend_pid())
-                """, blocker, transaction);
-            while (await probe.ExecuteScalarAsync(cancellationToken) is not true)
-            {
-                await Task.Delay(20, cancellationToken);
-            }
+            await PostgreSqlLockWait.ForReaderAsync(blocker, transaction,
+                "platform.admin_certificate_registrations", cancellationToken);
             await WaitForExpiryAsync(certificate, cancellationToken);
         }
         finally

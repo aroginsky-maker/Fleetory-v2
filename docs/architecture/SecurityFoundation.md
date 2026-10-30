@@ -281,6 +281,16 @@ actual database lock, with exactly one persisted denial/export entry. These
 admission checks do not cancel an operation already dispatched before expiry;
 production clock trust, CA lifecycle and key custody remain deployment controls.
 
+Admin registration overlap expiry is evaluated against actual database time after
+SQL lock waits. The lookup also retains the exact accepted overlap deadline;
+the shared admission guard rechecks it with current Server UTC after the lookup
+and after OIDC work. Expiry fails with the existing audited registration denial,
+without repeating the database lookup. Two real PostgreSQL lock-wait cases and
+eight guard cases cover expired/still-valid overlap, exact boundaries, captured
+results, permanent registrations and revoked/unregistered/unknown denials. The
+[registration runbook](AdminCertificateRegistration.md) records the clock and
+dispatch limits.
+
 Core owns `POST /admin/devices/{deviceId}/certificates/{fingerprint}/revoke`. It is reachable only on the Admin mTLS port; web and Agent ports return 404. A successful call returns 204 after the authorized request, Core update and completion audit event have been persisted. The update and completion event share one transaction. Denied authorization returns 403 and is audited. Invalid identity or a missing/foreign client certificate is refused. The Admin listener does not expose health or module routes. The end-to-end test covers the three-port boundary, separate CAs, denied grants and identities, audit completion and Agent rejection after revocation.
 
 The Admin listener can additionally require an OIDC access token via `Fleetory:AdminGateway:Oidc:Enabled=true`. The JWT bearer handler validates issuer, audience, signature and lifetime against the configured authority. Fleetory then requires `azp` to equal the configured client ID, `amr` to contain `webauthn`, and the token `sub` UUID to equal the UUID in the client certificate's Admin SAN. A certificate without a token receives 401 before RBAC or Core work; the denial is persisted through `IAuditWriter` with the certificate actor and correlation ID, without storing token contents. When the Admin listener is enabled outside Development, OIDC is mandatory at startup. Development may still run certificate-only tests. The provider's authentication flow must ensure the `amr` claim reflects a completed WebAuthn execution; the local Keycloak provisioner configures that reference. This establishes a dual proof for the existing administrative routes, not a general login UI or a role-management surface. Deployment must restrict access to the Admin port to a management network and provision Admin certificates and grants under a separate approval process. Admin certificate lifecycle and issuance, distributed rate limits and recovery of commit-acknowledgement ambiguity remain open.

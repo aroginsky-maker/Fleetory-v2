@@ -149,20 +149,11 @@ public static class FleetoryApplication
                     var certificateAccess = await context.RequestServices
                         .GetRequiredService<IAdminCertificateAccessStore>()
                         .CheckAsync(fingerprint, actor.SubjectId,
-                            requireAdminCertificateRegistration, context.RequestAborted);
-                    if (certificateAccess != AdminCertificateAccess.Accepted)
+                            requireAdminCertificateRegistration, context.RequestAborted)
+                        ?? throw new InvalidOperationException("Admin certificate registry returned no result.");
+                    if (!await AdminCertificateRequestGuard.CheckAsync(
+                            context, adminCertificate, actor, fingerprint, certificateAccess))
                     {
-                        var action = certificateAccess == AdminCertificateAccess.Revoked
-                            ? "admin.certificate.revoked_denied"
-                            : "admin.certificate.unregistered_denied";
-                        await context.RequestServices.GetRequiredService<IAuditWriter>()
-                            .WriteAsync(new AuditRecord(actor, action,
-                                new AuditTarget("admin_certificate", fingerprint),
-                                new CorrelationId(context.TraceIdentifier),
-                                context.RequestServices.GetRequiredService<IClock>().UtcNow),
-                                context.RequestAborted);
-
-                        context.Response.StatusCode = StatusCodes.Status403Forbidden;
                         return;
                     }
 
@@ -187,7 +178,7 @@ public static class FleetoryApplication
                     }
 
                     if (!await AdminCertificateRequestGuard.CheckAsync(
-                            context, adminCertificate, actor, fingerprint))
+                            context, adminCertificate, actor, fingerprint, certificateAccess))
                     {
                         return;
                     }

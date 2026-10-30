@@ -8,6 +8,18 @@ TLS connection. A missing, mismatched, revoked or expired registration returns 4
 and is audited. A database failure closes access. OIDC/WebAuthn and RBAC remain
 separate required gates.
 
+The registry query evaluates overlap expiry with PostgreSQL `clock_timestamp()`.
+Unlike transaction-start `now()`, this observes current database time after a
+lock wait; see [PostgreSQL current-time semantics](https://www.postgresql.org/docs/18/functions-datetime.html#FUNCTIONS-DATETIME-CURRENT).
+The same read returns the accepted registration's exact overlap deadline.
+Admission checks that deadline again with current Server UTC after the read and
+after OIDC authentication, immediately before dispatch. A captured registration
+cannot extend its overlap while authentication is pending; expiry produces the
+existing audited `admin.certificate.unregistered_denied` response. No extra
+registry query or external authentication request is added. Database/Server clock
+trust remains an operating requirement; already dispatched operations are not
+cancelled by these admission checks.
+
 Apply Platform migrations before starting a Server version with this gate. **On an
 existing production deployment, pre-register every active Admin certificate before
 upgrading the Server.** Otherwise all existing Admin credentials lose access until

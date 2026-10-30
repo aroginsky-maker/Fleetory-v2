@@ -1,8 +1,10 @@
 # Fleetory v2 — PHASE 7 Security Foundation progress report
 
-**Status:** IN PROGRESS, 30 October 2026. PHASE 6 is complete; PHASE 8 has not started. Draft [PR #2](https://github.com/aroginsky-maker/Fleetory-v2/pull/2) contains the current implementation. The detailed controls and limits are maintained in [SecurityFoundation](docs/architecture/SecurityFoundation.md) and the [local lab guide](docs/architecture/SecurityLab.md).
+**Status:** IN PROGRESS, 31 October 2026. PHASE 6 is complete; PHASE 8 has not started. Draft [PR #2](https://github.com/aroginsky-maker/Fleetory-v2/pull/2) contains the current implementation. The detailed controls and limits are maintained in [SecurityFoundation](docs/architecture/SecurityFoundation.md) and the [local lab guide](docs/architecture/SecurityLab.md).
 
 ## Implemented
+
+- Admin registration overlap now uses actual database time after SQL lock waits and carries the exact accepted deadline through subsequent authentication. Current Server UTC is checked after lookup and after OIDC work, so a captured registration cannot outlive the rotation overlap. A real PostgreSQL regression first reproduced acceptance after expiry; two lock-wait cases and eight admission cases cover expiry, valid completion, permanent registrations and revoked/unregistered/unknown denials. Shared lock observation and denial auditing avoid duplicate implementations. This closes the demonstrated credential-retirement admission gap under Baseline section 12; production clock trust, CA custody and approvals remain open.
 
 - Admin request admission now rechecks leaf validity on every request and after asynchronous registry/OIDC work, preventing an expired certificate from using an established TLS connection. A real mTLS regression first reproduced the unauthorized 204 response; the corrected path returns 403 without endpoint dispatch and commits a denial plus audit export entry. Seven focused tests cover exact time boundaries, cancellation and audit failure; two real mTLS/PostgreSQL cases cover connection reuse and expiry during a database-lock wait. Agent enrollment and binding verification reuse the same validity predicate. This closes the demonstrated Admin admission gap under Baseline section 12; production clock trust, CA custody and independent approvals remain open.
 

@@ -1,6 +1,7 @@
 using System.Data.Common;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
+using Fleetory.Platform.Authorization;
 using Fleetory.Platform.Contracts;
 using Fleetory.Server.Infrastructure;
 using Fleetory.SharedKernel;
@@ -43,6 +44,44 @@ public sealed class AdminCertificateRequestGuardTests
         Assert.True(await test.CheckAsync());
         test.Clock.UtcNow = Now.AddMinutes(1);
         Assert.False(await test.CheckAsync());
+        Assert.Single(test.Audit.Records);
+    }
+
+    [Theory]
+    [InlineData(AdminCertificateAccess.Accepted, null, 0, true)]
+    [InlineData(AdminCertificateAccess.Accepted, 30, 29, true)]
+    [InlineData(AdminCertificateAccess.Accepted, 30, 30, false)]
+    [InlineData(AdminCertificateAccess.Accepted, 30, 31, false)]
+    [InlineData(AdminCertificateAccess.Revoked, null, 0, false)]
+    [InlineData(AdminCertificateAccess.Unregistered, null, 0, false)]
+    [InlineData((AdminCertificateAccess)999, null, 0, false)]
+    public async Task Registry_result_is_rechecked_at_the_admission_boundary(
+        AdminCertificateAccess status, int? expiresIn, int elapsed, bool expected)
+    {
+        using var test = new RequestFixture();
+        test.Clock.UtcNow = Now.AddSeconds(elapsed);
+        var result = new AdminCertificateAccessResult(status,
+            expiresIn is { } seconds ? Now.AddSeconds(seconds) : null);
+        Assert.Equal(expected, await test.CheckAsync(result));
+        if (expected) { Assert.Empty(test.Audit.Records); }
+        else
+        {
+            Assert.Equal(StatusCodes.Status403Forbidden, test.Context.Response.StatusCode);
+            var denied = Assert.Single(test.Audit.Records);
+            Assert.Equal(status == AdminCertificateAccess.Revoked
+                ? "admin.certificate.revoked_denied" : "admin.certificate.unregistered_denied", denied.Action);
+            Assert.Equal(test.Fingerprint, denied.Target?.Id);
+        }
+    }
+
+    [Fact]
+    public async Task Captured_registration_cannot_outlive_its_overlap_during_later_authentication()
+    {
+        using var test = new RequestFixture();
+        var result = new AdminCertificateAccessResult(AdminCertificateAccess.Accepted, Now.AddSeconds(30));
+        Assert.True(await test.CheckAsync(result));
+        test.Clock.UtcNow = Now.AddSeconds(30);
+        Assert.False(await test.CheckAsync(result));
         Assert.Single(test.Audit.Records);
     }
 
@@ -108,7 +147,9 @@ public sealed class AdminCertificateRequestGuardTests
         public MemoryAudit Audit { get; } = new();
         public DefaultHttpContext Context { get; } = new();
         public string Fingerprint { get; }
-        public Task<bool> CheckAsync() => AdminCertificateRequestGuard.CheckAsync(Context, _certificate, Actor, Fingerprint);
+        public Task<bool> CheckAsync() => CheckAsync(null);
+        public Task<bool> CheckAsync(AdminCertificateAccessResult? result) =>
+            AdminCertificateRequestGuard.CheckAsync(Context, _certificate, Actor, Fingerprint, result);
 
         public void Dispose()
         {
