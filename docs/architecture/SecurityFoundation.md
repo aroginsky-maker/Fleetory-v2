@@ -284,6 +284,31 @@ A different Admin identity needs global `core.agent_certificate.recover.approve`
 
 Both Admin endpoints use the Admin mTLS listener and the mandatory OIDC/WebAuthn gate outside Development. The test suite checks separate actors and permissions, evidence mismatch, expiry and replay, audit rollback, old-certificate revocation and the full mTLS route. If the approval response is lost, inspect the completion audit and database state by correlation ID; an approved token cannot be recovered. Wait for the five-minute grant to expire, then start a new two-person request. The local flow provides an enforceable two-person gate and an audit link to the incident evidence; production physical-device verification, evidence retention, CA issuance and secure token delivery still require a deployment procedure.
 
+### Certificate deadlines after database contention
+
+Enrollment, rotation-intent creation/claim and recovery request/approval sample
+current UTC inside the protected device transaction after acquiring the device-row
+lock. Time captured before that wait is retained only where it describes the
+earlier request; it cannot authorize an expired grant, intent or recovery request.
+Freshly issued grants/intents and recovery requests receive their full five- and
+15-minute lifetimes from the protected decision time, respectively.
+
+Enrollment repeats local certificate/binding verification under the lock and
+checks the leaf validity again before its conditional grant consumption. A leaf
+that expired while waiting cannot gain a binding. Grant consumption and recovery
+approval also apply their expiry predicates to a freshly sampled time. If recovery
+expires after revocation/deletion work has started, the failed conditional approval
+rolls back that transaction, restoring old bindings, intents and existing grants.
+
+Eleven PostgreSQL integration cases cover exact-expiry rejection, valid late
+operations with fresh timestamps/lifetimes, new/old leaf expiry and late recovery
+rollback. The contention cases hold a row lock on a second connection and observe
+`pg_blocking_pids` before advancing an injected clock. Another case advances the
+clock after a real revocation SQL command to verify complete rollback. Authority
+is stubbed only in this focused time-control fixture; existing real authorization,
+mTLS, concurrent redemption and audit-failure tests run alongside it. These tests
+do not establish production CA custody, physical-device approval or clock trust.
+
 ## Signed artifact verification
 
 The standalone signed-artifact verifier checks the exact manifest bytes, P-256 IEEE P1363 signature, artifact SHA-256 and protected anti-rollback anchor before installation. Repeated acceptance is idempotent; lower versions, same-version conflicts, changed artifacts and invalid signatures fail closed. The verifier is outside the normal request path; release key custody, approval and installer integration remain deployment controls.

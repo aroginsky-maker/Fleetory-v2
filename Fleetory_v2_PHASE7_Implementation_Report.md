@@ -4,6 +4,8 @@
 
 ## Implemented
 
+- Enrollment/rotation/recovery deadlines now use current UTC after device-row lock acquisition, and conditional grant consumption/recovery approval refresh it again. Enrollment revalidates the certificate under the lock, so an expired leaf cannot acquire a binding. Late recovery expiry rolls back certificate revocation, intent deletion and prior-grant deletion. Eleven PostgreSQL cases exercise actual lock waits, fresh lifetimes and complete rollback; six existing lifecycle/mTLS/authorization regressions also pass locally. Production clock trust, CA custody and independent approvals remain open.
+
 - Signed-command validity is now rechecked after asynchronous key, policy and replay operations and immediately before handler dispatch. Delayed or clock-shifted commands fail closed; a nonce already committed to replay storage remains consumed. Twelve deterministic cases cover expiry/skew rejection, valid boundary acceptance and retry behavior. This closes the demonstrated stale-command acceptance gap under Baseline section 12 without enabling additional commands or Agent transport.
 
 - OpenBao KV secret reads now have a single five-second request-and-body deadline. A real HTTP regression reproduced an incomplete-body startup hang after timely headers; both header and body stalls now fail without returning partial secrets or exposing the credential. OpenBao and immudb share one bounded response reader, retaining their distinct byte caps and the successful process-lifetime cache. This closes the demonstrated unbounded external-secret read under Baseline section 12; deployment/custody requirements remain open.

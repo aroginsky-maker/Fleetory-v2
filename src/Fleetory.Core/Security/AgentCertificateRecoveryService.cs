@@ -42,8 +42,12 @@ public sealed class AgentCertificateRecoveryService(
         try
         {
             await using var transaction = await database.Database.BeginTransactionAsync(cancellationToken);
-            if (!await CoreDeviceRowLock.TryLockAsync(database, deviceId, cancellationToken) ||
-                !await BindingExistsAsync(deviceId, expectedCertificateSha256, cancellationToken) ||
+            if (!await CoreDeviceRowLock.TryLockAsync(database, deviceId, cancellationToken))
+            {
+                throw new AgentRecoveryConflictException();
+            }
+            now = clock.UtcNow.ToUniversalTime();
+            if (!await BindingExistsAsync(deviceId, expectedCertificateSha256, cancellationToken) ||
                 await database.AgentCertificates.AsNoTracking().AnyAsync(
                     row => row.CertificateSha256 == replacementCertificateSha256,
                     cancellationToken) ||
@@ -110,6 +114,7 @@ public sealed class AgentCertificateRecoveryService(
                 throw new AgentRecoveryConflictException();
             }
 
+            now = clock.UtcNow.ToUniversalTime();
             var request = await database.AgentCertificateRecoveries.AsNoTracking()
                 .SingleOrDefaultAsync(row => row.RecoveryId == recoveryId &&
                     row.DeviceId == deviceId && row.ApprovedAt == null &&
@@ -149,8 +154,10 @@ public sealed class AgentCertificateRecoveryService(
                 .Where(row => row.DeviceId == deviceId && row.ConsumedAt == null)
                 .ExecuteDeleteAsync(cancellationToken);
 
+            now = clock.UtcNow.ToUniversalTime();
             var approved = await database.AgentCertificateRecoveries
-                .Where(row => row.RecoveryId == recoveryId && row.ApprovedAt == null)
+                .Where(row => row.RecoveryId == recoveryId && row.ApprovedAt == null &&
+                    row.ExpiresAt > now)
                 .ExecuteUpdateAsync(setters => setters
                     .SetProperty(row => row.ApprovedAt, now)
                     .SetProperty(row => row.ApproverSubjectId, actor.SubjectId),

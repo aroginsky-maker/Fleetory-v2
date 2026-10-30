@@ -54,6 +54,7 @@ public sealed class AgentEnrollmentService(
         await using (var transaction = await database.Database.BeginTransactionAsync(cancellationToken))
         {
             await LockDeviceAsync(deviceId, cancellationToken);
+            now = clock.UtcNow.ToUniversalTime();
             if (!await ActiveBindingExistsAsync(deviceId, currentFingerprint, now, cancellationToken))
             {
                 await WriteAuditInTransactionAsync(actor,
@@ -143,6 +144,7 @@ public sealed class AgentEnrollmentService(
                         "Agent certificate rotation is not authorized.");
                 }
 
+                now = clock.UtcNow.ToUniversalTime();
                 var replacementCertificateSha256 = initialCertificateSha256;
                 if (expectedCertificateSha256 is not null)
                 {
@@ -241,6 +243,12 @@ public sealed class AgentEnrollmentService(
         await using (var transaction = await database.Database.BeginTransactionAsync(cancellationToken))
         {
             await LockDeviceAsync(deviceId, cancellationToken);
+            status = await verifier.VerifyAsync(deviceId, certificate, cancellationToken);
+            now = clock.UtcNow.ToUniversalTime();
+            if (status is not (AgentCertificateStatus.UnknownCertificate or AgentCertificateStatus.Accepted))
+            {
+                throw new UnauthorizedAccessException("Agent enrollment is denied.");
+            }
             var grant = await database.AgentEnrollmentGrants.AsNoTracking().SingleOrDefaultAsync(
                 row => row.TokenSha256 == tokenHash && row.DeviceId == deviceId &&
                     row.ConsumedAt == null && row.ExpiresAt > now, cancellationToken);
@@ -271,6 +279,11 @@ public sealed class AgentEnrollmentService(
                 throw new UnauthorizedAccessException("Agent enrollment is denied.");
             }
 
+            now = clock.UtcNow.ToUniversalTime();
+            if (now < certificate.NotBefore.ToUniversalTime() || now >= certificate.NotAfter.ToUniversalTime())
+            {
+                throw new UnauthorizedAccessException("Agent enrollment is denied.");
+            }
             var consumed = await database.AgentEnrollmentGrants
                 .Where(row => row.TokenSha256 == tokenHash && row.DeviceId == deviceId &&
                     row.ConsumedAt == null && row.ExpiresAt > now)
