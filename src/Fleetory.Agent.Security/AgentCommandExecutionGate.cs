@@ -8,15 +8,18 @@ public sealed class AgentCommandExecutionGate
 {
     private readonly DeviceId _localDeviceId;
     private readonly SignedCommandVerifier _verifier;
+    private readonly IClock _clock;
     private readonly IAgentInventoryRefreshHandler _inventoryRefresh;
 
     private AgentCommandExecutionGate(
         DeviceId localDeviceId,
         SignedCommandVerifier verifier,
+        IClock clock,
         IAgentInventoryRefreshHandler inventoryRefresh)
     {
         _localDeviceId = localDeviceId;
         _verifier = verifier;
+        _clock = clock;
         _inventoryRefresh = inventoryRefresh;
     }
 
@@ -38,7 +41,7 @@ public sealed class AgentCommandExecutionGate
             new DirectoryCommandVerificationKeys(localDeviceId, trustDirectory),
             new SqliteCommandReplayStore(replayDatabasePath),
             new AgentCommandExecutionPolicy(localDeviceId), clock);
-        return new AgentCommandExecutionGate(localDeviceId, verifier, inventoryRefresh);
+        return new AgentCommandExecutionGate(localDeviceId, verifier, clock, inventoryRefresh);
     }
 
     public async ValueTask<CommandVerificationStatus> ExecuteAsync(
@@ -58,6 +61,11 @@ public sealed class AgentCommandExecutionGate
             !command.Payload.IsEmpty)
         {
             return CommandVerificationStatus.DeniedByPolicy;
+        }
+
+        if (!SignedCommandVerifier.IsWithinValidityWindow(envelope, _clock.UtcNow))
+        {
+            return CommandVerificationStatus.OutsideValidityWindow;
         }
 
         await _inventoryRefresh.RefreshAsync(command.CommandId, cancellationToken);

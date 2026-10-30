@@ -85,6 +85,30 @@ invalid UUIDs, prior transaction writes, lost read privileges and blocked reads
 fail closed. The JSON observation still needs independent custody and delivery
 correlation; signing recorded in the journal is not Agent delivery or execution.
 
+### Command validity across asynchronous checks
+
+Baseline section 12 requires expiry and replay protection before Agent execution.
+The verifier rechecks the signed validity window after asynchronous key lookup,
+after the policy decision and after durable replay consumption. It also checks
+the window at entry; the execution gate performs the same check immediately
+before invoking the inventory handler. These checks use the same local clock,
+five-minute maximum lifetime and 30-second future-issue tolerance. They add no
+external authorization or time-service call.
+
+An envelope that reaches its expiry or falls outside the issue-time tolerance
+while waiting returns `OutsideValidityWindow` without verified command content.
+Before replay consumption, that rejection leaves the nonce unused. After a
+successful replay commit, rejection preserves the consumed nonce/command ID;
+clock recovery cannot authorize the same envelope again. Operators must not
+treat this outcome as evidence that a handler ran or automatically issue a retry.
+
+Deterministic tests pause each key/policy/replay dependency at a real asynchronous
+boundary and advance or roll back an injected clock. Six rejection cases reproduced
+acceptance of stale commands before the fix. Six acceptance cases retain the
+valid expiry/skew boundaries, and retries verify replay-state preservation.
+The production clock, trust distribution and future Agent host remain deployment
+and integration responsibilities.
+
 ## Implemented local audit persistence
 
 Platform now registers `IAuditWriter` backed by PostgreSQL. A write inserts an append-only `platform.audit_events` row and a matching `platform.audit_export_queue` row in the same transaction. The method returns only after commit. A database or transaction failure propagates to the caller; critical call sites must not swallow it. Both tables and their indexes are created by Platform migration `202610160001_AddPlatformAuditOutbox`. No foreign key crosses a module schema.

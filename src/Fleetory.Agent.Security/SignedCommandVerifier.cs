@@ -54,11 +54,7 @@ public sealed class SignedCommandVerifier(
             return new(CommandVerificationStatus.WrongTarget);
         }
 
-        var now = clock.UtcNow;
-        if (envelope.ExpiresAt <= now ||
-            envelope.IssuedAt > now.Add(MaximumClockSkew) ||
-            envelope.ExpiresAt <= envelope.IssuedAt ||
-            envelope.ExpiresAt - envelope.IssuedAt > MaximumLifetime)
+        if (!IsWithinValidityWindow(envelope, clock.UtcNow))
         {
             return new(CommandVerificationStatus.OutsideValidityWindow);
         }
@@ -68,6 +64,11 @@ public sealed class SignedCommandVerifier(
         if (publicKey is null || publicKey.Value.Length is 0 or > 1024)
         {
             return new(CommandVerificationStatus.UnknownKey);
+        }
+
+        if (!IsWithinValidityWindow(envelope, clock.UtcNow))
+        {
+            return new(CommandVerificationStatus.OutsideValidityWindow);
         }
 
         var payload = envelope.Payload.ToArray();
@@ -97,6 +98,11 @@ public sealed class SignedCommandVerifier(
             return new(CommandVerificationStatus.DeniedByPolicy);
         }
 
+        if (!IsWithinValidityWindow(envelope, clock.UtcNow))
+        {
+            return new(CommandVerificationStatus.OutsideValidityWindow);
+        }
+
         if (!await replayStore.TryConsumeAsync(
                 localDeviceId, envelope.CommandId, envelope.Nonce,
                 envelope.ExpiresAt, cancellationToken))
@@ -104,9 +110,21 @@ public sealed class SignedCommandVerifier(
             return new(CommandVerificationStatus.Replay);
         }
 
+        // A successful durable consume stays consumed if the command expired while committing.
+        if (!IsWithinValidityWindow(envelope, clock.UtcNow))
+        {
+            return new(CommandVerificationStatus.OutsideValidityWindow);
+        }
+
         return new(CommandVerificationStatus.Accepted,
             new VerifiedCommand(localDeviceId, envelope.CommandId, envelope.CommandType, payload));
     }
+
+    internal static bool IsWithinValidityWindow(SignedCommandEnvelope envelope, DateTimeOffset now) =>
+        envelope.ExpiresAt > now &&
+        envelope.IssuedAt - now <= MaximumClockSkew &&
+        envelope.ExpiresAt > envelope.IssuedAt &&
+        envelope.ExpiresAt - envelope.IssuedAt <= MaximumLifetime;
 
     private static bool IsWellFormed(SignedCommandEnvelope envelope) =>
         envelope.FormatVersion == 1 &&

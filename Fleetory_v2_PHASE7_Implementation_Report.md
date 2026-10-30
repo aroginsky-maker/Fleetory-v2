@@ -1,8 +1,10 @@
 # Fleetory v2 — PHASE 7 Security Foundation progress report
 
-**Status:** IN PROGRESS, 27 October 2026. PHASE 6 is complete; PHASE 8 has not started. Draft [PR #2](https://github.com/aroginsky-maker/Fleetory-v2/pull/2) contains the current implementation. The detailed controls and limits are maintained in [SecurityFoundation](docs/architecture/SecurityFoundation.md) and the [local lab guide](docs/architecture/SecurityLab.md).
+**Status:** IN PROGRESS, 30 October 2026. PHASE 6 is complete; PHASE 8 has not started. Draft [PR #2](https://github.com/aroginsky-maker/Fleetory-v2/pull/2) contains the current implementation. The detailed controls and limits are maintained in [SecurityFoundation](docs/architecture/SecurityFoundation.md) and the [local lab guide](docs/architecture/SecurityLab.md).
 
 ## Implemented
+
+- Signed-command validity is now rechecked after asynchronous key, policy and replay operations and immediately before handler dispatch. Delayed or clock-shifted commands fail closed; a nonce already committed to replay storage remains consumed. Twelve deterministic cases cover expiry/skew rejection, valid boundary acceptance and retry behavior. This closes the demonstrated stale-command acceptance gap under Baseline section 12 without enabling additional commands or Agent transport.
 
 - OpenBao KV secret reads now have a single five-second request-and-body deadline. A real HTTP regression reproduced an incomplete-body startup hang after timely headers; both header and body stalls now fail without returning partial secrets or exposing the credential. OpenBao and immudb share one bounded response reader, retaining their distinct byte caps and the successful process-lifetime cache. This closes the demonstrated unbounded external-secret read under Baseline section 12; deployment/custody requirements remain open.
 
