@@ -71,6 +71,22 @@ immediately; its denylist overrides the overlap. Confirm the
 rotation waits for expiry or revocation of the prior certificate so that the
 script never creates more than two live certificates for one identity.
 
+Eligibility is evaluated after the shared registration advisory lock and row
+locks for that identity's existing registrations have been acquired. A prior
+registration that expires while either lock is pending cannot authorize rotation.
+Recovery re-evaluates the same state after waiting. The operation then takes one
+fresh database timestamp for registration, the one-hour overlap and audit/outbox
+metadata. Six real PostgreSQL cases cover expiry, valid completion, recovery and
+matching timestamps after advisory/row lock waits; rejected attempts leave no new
+credential or completion audit/export entry.
+
+The approved operator needs `SELECT`, `INSERT` and row-locking `UPDATE` rights on
+the registry, plus the existing audit/outbox write rights. Row locks also apply
+to bootstrap/recovery; bootstrap locks all existing registrations before checking
+that none is active. Complete independent approval before opening the transaction
+and commit or roll it back promptly. Locks remain held until that transaction
+ends, as described in [PostgreSQL locking](https://www.postgresql.org/docs/18/explicit-locking.html).
+
 ## Recovery of a different identity
 
 Use the [emergency recovery procedure](SecurityFoundation.md) to grant a

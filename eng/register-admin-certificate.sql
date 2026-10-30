@@ -17,7 +17,7 @@ DECLARE
     actor_id text;
     active_count integer;
     event_id uuid := gen_random_uuid();
-    now_utc timestamptz := clock_timestamp();
+    now_utc timestamptz;
 BEGIN
     IF registration_mode NOT IN ('bootstrap', 'rotate', 'recovery') OR
        registration_mode IS NULL THEN
@@ -46,10 +46,18 @@ BEGIN
 
     -- Serialize registrations across all actors, including first bootstrap.
     PERFORM pg_advisory_xact_lock(2067, 3);
+    -- Existing credentials can also be locked by another database operation.
+    -- Acquire those row locks before evaluating expiry or choosing audit time.
+    PERFORM 1 FROM platform.admin_certificate_registrations AS registration
+    WHERE registration_mode = 'bootstrap' OR registration.actor_subject_id = actor_id
+    ORDER BY registration.certificate_sha256
+    FOR UPDATE;
     IF EXISTS (SELECT 1 FROM platform.admin_certificate_revocations
                WHERE certificate_sha256 = fingerprint) THEN
         RAISE EXCEPTION 'A revoked Admin certificate cannot be registered.';
     END IF;
+
+    now_utc := clock_timestamp();
 
     SELECT count(*) INTO active_count
     FROM platform.admin_certificate_registrations AS registration
