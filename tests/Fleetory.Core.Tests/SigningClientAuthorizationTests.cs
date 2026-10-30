@@ -381,18 +381,78 @@ public sealed class SigningClientAuthorizationTests
         Assert.Equal(check == 4 ? 1 : 0, scenario.Journal.Results.Count);
     }
 
+    [Theory]
+    [InlineData(1, 300, 0, 0, 0)]
+    [InlineData(2, 300, 0, 1, 0)]
+    [InlineData(3, 300, 1, 1, 0)]
+    [InlineData(4, 300, 1, 1, 1)]
+    [InlineData(1, 299, 1, 1, 1)]
+    [InlineData(2, 299, 1, 1, 1)]
+    [InlineData(3, 299, 1, 1, 1)]
+    [InlineData(4, 299, 1, 1, 1)]
+    public async Task Caller_grant_is_rechecked_after_a_delayed_revocation_read(
+        int check, int elapsedSeconds, int transitCalls, int requests, int results)
+    {
+        using var scenario = new JournalScenario();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        scenario.Revocations.OnReadingAsync = async (number, cancellationToken) =>
+        {
+            if (number != check) { return; }
+            entered.TrySetResult();
+            await release.Task.WaitAsync(cancellationToken);
+        };
+        var requestId = Guid.NewGuid();
+        var pending = scenario.Service.SignInventoryRefreshAsync(requestId, scenario.Client, Device);
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            scenario.Clock.UtcNow = Now.AddSeconds(elapsedSeconds);
+            release.TrySetResult();
+            if (elapsedSeconds == 300)
+            {
+                await Assert.ThrowsAsync<UnauthorizedAccessException>(async () =>
+                    await pending.WaitAsync(TimeSpan.FromSeconds(5)));
+            }
+            else
+            {
+                Assert.Equal("approval-service",
+                    (await pending.WaitAsync(TimeSpan.FromSeconds(5))).CallerId);
+            }
+            Assert.Equal(transitCalls, scenario.Transit.CallCount);
+            Assert.Equal(requests, scenario.Journal.Requests.Count);
+            Assert.Equal(results, scenario.Journal.Results.Count);
+
+            // A rejected request with a reservation must never sign again after clock recovery.
+            scenario.Clock.UtcNow = Now;
+            if (requests != 0)
+            {
+                await Assert.ThrowsAsync<SigningRequestConflictException>(() =>
+                    scenario.Service.SignInventoryRefreshAsync(requestId, scenario.Client, Device));
+                Assert.Equal(transitCalls, scenario.Transit.CallCount);
+            }
+            else
+            {
+                await scenario.Service.SignInventoryRefreshAsync(requestId, scenario.Client, Device);
+                Assert.Equal(1, scenario.Transit.CallCount);
+            }
+        }
+        finally { release.TrySetResult(); }
+    }
+
     private sealed class MemorySigningRevocations : ISigningClientRevocations
     {
         private int _checks;
         public bool IsRevoked { get; set; }
         public int FailOnCheck { get; set; }
+        public Func<int, CancellationToken, Task>? OnReadingAsync { get; set; }
 
-        public Task EnsureNotRevokedAsync(string certificateSha256, CancellationToken cancellationToken = default)
+        public async Task EnsureNotRevokedAsync(string certificateSha256, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (++_checks == FailOnCheck) { throw new IOException("Revocation store unavailable."); }
+            if (OnReadingAsync is { } reading) { await reading(_checks, cancellationToken); }
             if (IsRevoked) { throw new UnauthorizedAccessException("Client revoked."); }
-            return Task.CompletedTask;
         }
     }
 

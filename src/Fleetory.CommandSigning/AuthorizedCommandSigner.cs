@@ -28,7 +28,7 @@ public sealed class AuthorizedCommandSigner(
             ?? throw new UnauthorizedAccessException("Signing caller or target is not authorized.");
         var request = new SigningRequest(requestId, caller,
             authenticatedClientCertificate!.GetCertHashString(HashAlgorithmName.SHA256), targetDeviceId);
-        await revocations.EnsureNotRevokedAsync(request.ClientCertificateSha256, cancellationToken);
+        await EnsureAuthorizedAsync(authenticatedClientCertificate, request, cancellationToken);
         if (!await journal.TryBeginAsync(request, cancellationToken))
         {
             throw new SigningRequestConflictException();
@@ -46,10 +46,11 @@ public sealed class AuthorizedCommandSigner(
     private async Task EnsureAuthorizedAsync(X509Certificate2? certificate, SigningRequest request,
         CancellationToken cancellationToken)
     {
+        await revocations.EnsureNotRevokedAsync(request.ClientCertificateSha256, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         if (authorization.GetAuthorizedInventoryRefreshCaller(certificate, request.TargetDeviceId) != request.CallerId)
         {
             throw new UnauthorizedAccessException("Signing authorization expired before envelope release.");
         }
-        await revocations.EnsureNotRevokedAsync(request.ClientCertificateSha256, cancellationToken);
     }
 }

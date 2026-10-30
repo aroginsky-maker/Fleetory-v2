@@ -109,6 +109,24 @@ valid expiry/skew boundaries, and retries verify replay-state preservation.
 The production clock, trust distribution and future Agent host remain deployment
 and integration responsibilities.
 
+### Signer caller validity after revocation reads
+
+The isolated signer's caller policy now runs after each asynchronous revocation
+read: before RequestId reservation, before Transit, before result completion and
+before envelope release. It samples current grant/certificate validity after the
+read rather than trusting the time before that wait. The initial synchronous
+caller/target check still rejects untrusted input before any database lookup.
+No additional revocation read or signing capability is introduced.
+
+Eight deterministic cases pause a revocation read at each boundary. Four
+exact-expiry cases reproduced either later unauthorized work or actual envelope
+release before the fix; four still-valid cases continue to sign once. A denial
+before reservation leaves no RequestId to reconcile. A later denial preserves its
+pending/recorded journal state and cannot sign again when the clock recovers;
+a recorded result does not establish signature delivery. Caller cancellation and
+revocation-store failures continue to withhold the envelope. Production time
+trust, approvals and key custody remain external controls.
+
 ## Implemented local audit persistence
 
 Platform now registers `IAuditWriter` backed by PostgreSQL. A write inserts an append-only `platform.audit_events` row and a matching `platform.audit_export_queue` row in the same transaction. The method returns only after commit. A database or transaction failure propagates to the caller; critical call sites must not swallow it. Both tables and their indexes are created by Platform migration `202610160001_AddPlatformAuditOutbox`. No foreign key crosses a module schema.
