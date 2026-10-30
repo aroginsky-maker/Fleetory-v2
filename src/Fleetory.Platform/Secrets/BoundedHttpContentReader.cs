@@ -16,7 +16,7 @@ internal static class BoundedHttpContentReader
             {
                 throw new InvalidOperationException("External service response is too large.");
             }
-            buffer.Write(chunk, 0, count);
+            await buffer.WriteAsync(chunk.AsMemory(0, count), cancellationToken).ConfigureAwait(false);
         }
         cancellationToken.ThrowIfCancellationRequested();
         return buffer.ToArray();
