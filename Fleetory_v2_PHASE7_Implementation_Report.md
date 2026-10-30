@@ -4,6 +4,8 @@
 
 ## Implemented
 
+- Agent certificate/binding verification now rechecks current UTC after the asynchronous identity-store read, including before returning `UnknownCertificate`. Leaf and binding windows cannot be accepted using a pre-lookup timestamp; cancellation is enforced before and after lookup. Fourteen cases cover separate leaf/binding lifetimes, known/unknown identities, exact boundaries and cancellation, with no additional lookup or external time request. Local Core tests pass 154/154 and architecture tests 29/29.
+
 - The isolated signer now checks caller grant/certificate validity after each asynchronous revocation read, including the final read before releasing a signature. Expiry during a read cannot advance to the next signing/journal boundary. Before-reservation rejection leaves no request; later rejection preserves pending/recorded state and replay denial. Eight cases cover exact expiry and valid completion across four boundaries; the current local Core suite passes 140/140 and architecture tests 29/29. No additional revocation read, command type or Agent transport is enabled.
 
 - Enrollment/rotation/recovery deadlines now use current UTC after device-row lock acquisition, and conditional grant consumption/recovery approval refresh it again. Enrollment revalidates the certificate under the lock, so an expired leaf cannot acquire a binding. Late recovery expiry rolls back certificate revocation, intent deletion and prior-grant deletion. Eleven PostgreSQL cases exercise actual lock waits, fresh lifetimes and complete rollback; six existing lifecycle/mTLS/authorization regressions also pass locally. Production clock trust, CA custody and independent approvals remain open.

@@ -233,6 +233,22 @@ The verifier checks the certificate validity interval, end-entity Basic Constrai
 
 The verifier is a binding check; the gateway supplies the certificate from Kestrel's client-certificate TLS handshake. Supplying a copied public certificate object to the verifier alone proves no possession of its private key.
 
+Certificate/binding verification now samples current UTC again after its
+asynchronous binding lookup. It checks the leaf window before returning even an
+`UnknownCertificate` result, then evaluates the binding's own window using that
+same fresh instant. A slow identity-store read cannot turn an expired or not-yet-
+valid leaf/binding into an accepted identity. Already invalid inputs still fail
+before database access; no extra lookup or external time-service call is added.
+Cancellation is checked at entry and after the lookup, including when a store
+finishes despite a cancelled caller.
+
+Fourteen controlled cases cover known/unknown leaves with independently wider
+binding windows, shorter binding windows, inclusive NotBefore/exclusive NotAfter
+boundaries, clock movement during a real asynchronous pause and cancellation.
+Eight rejection cases failed against the previous implementation; six valid
+boundary cases retain their accepted/unknown outcomes. Production clock trust
+and authorization of future long-lived Agent streams remain separate controls.
+
 ## Implemented initial Agent mTLS listener
 
 The opt-in `Fleetory:AgentGateway:Enabled=true` setting requires a mounted secret directory and two different explicit ports: `Fleetory:Web:Port` for the existing HTTP web/health surface and `Fleetory:AgentGateway:Port` for HTTPS with a mandatory client certificate. Kestrel builds a chain directly to the configured Fleetory root CA, checks Client Authentication purpose, and refuses certificates outside that trust root. The server certificate must chain directly to the same root and have Server Authentication purpose. Invalid or missing TLS material fails startup. The gateway reads `agent-gateway-root-ca` (PEM certificate), `agent-gateway-server-cert` (PEM certificate) and `agent-gateway-server-key` (matching PEM private key) through `ISecretProvider`. The root CA private key must stay outside Fleetory Server. TLS termination or a reverse proxy in front of this port must preserve the authenticated client-certificate boundary; the current implementation expects the handshake at Kestrel.

@@ -18,6 +18,7 @@ public sealed class AgentCertificateBindingVerifier(
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(certificate);
+        cancellationToken.ThrowIfCancellationRequested();
 
         if (deviceId.Value == Guid.Empty || !HasClientAuthenticationPurpose(certificate))
         {
@@ -25,14 +26,19 @@ public sealed class AgentCertificateBindingVerifier(
         }
 
         var instant = clock.UtcNow.ToUniversalTime();
-        if (instant < certificate.NotBefore.ToUniversalTime() ||
-            instant >= certificate.NotAfter.ToUniversalTime())
+        if (!IsWithinValidityWindow(certificate, instant))
         {
             return AgentCertificateStatus.Expired;
         }
 
         var fingerprint = Convert.ToHexString(SHA256.HashData(certificate.RawData));
         var binding = await bindings.FindBySha256Async(fingerprint, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        instant = clock.UtcNow.ToUniversalTime();
+        if (!IsWithinValidityWindow(certificate, instant))
+        {
+            return AgentCertificateStatus.Expired;
+        }
         if (binding is null)
         {
             return AgentCertificateStatus.UnknownCertificate;
@@ -60,6 +66,10 @@ public sealed class AgentCertificateBindingVerifier(
 
         return AgentCertificateStatus.Accepted;
     }
+
+    private static bool IsWithinValidityWindow(X509Certificate2 certificate, DateTimeOffset instant) =>
+        instant >= certificate.NotBefore.ToUniversalTime() &&
+        instant < certificate.NotAfter.ToUniversalTime();
 
     private static bool HasClientAuthenticationPurpose(X509Certificate2 certificate)
     {
