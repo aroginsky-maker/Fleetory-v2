@@ -111,7 +111,11 @@ public sealed class AdminConnectionLifetimeTests(PostgreSqlTestFixture fixture)
             }
             await WaitForExpiryAsync(certificate, cancellationToken);
         }
-        finally { await transaction.RollbackAsync(); }
+        finally
+        {
+            // Release the test lock even when the request deadline has elapsed.
+            await transaction.RollbackAsync(CancellationToken.None);
+        }
         return await pending;
     }
 
