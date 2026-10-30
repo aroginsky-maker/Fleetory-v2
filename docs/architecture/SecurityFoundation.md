@@ -267,6 +267,20 @@ The service writes a second audit event with the `revoked` or `unchanged` outcom
 
 `Fleetory:AdminGateway:Enabled=true` activates a third, separate Kestrel listener with mandatory client-certificate TLS. It binds to loopback by default; `Fleetory:AdminGateway:BindAddress` must explicitly name a management-network IP for remote access. Wildcard addresses (`0.0.0.0`, `::` and IPv4-mapped equivalents) are rejected at startup. It uses `Fleetory:AdminGateway:Port` and `admin-gateway-root-ca`, `admin-gateway-server-cert`, `admin-gateway-server-key` in the secret mount. The Admin and Agent roots must be different when both listeners are enabled. The Admin certificate must chain to the configured Admin root, be an end-entity signing certificate and contain exactly one `urn:fleetory:admin:<guid>` SAN URI; the GUID becomes the `person:<guid>` actor subject for Platform RBAC. Issuance of an Admin certificate is a privileged external CA procedure; the Admin CA private key does not belong on Fleetory Server. Removing the actor's RBAC grant denies the next request, including over an existing TLS connection.
 
+The Admin middleware also checks the leaf's current UTC validity window on every
+request, before the certificate registry read and again after registry/OIDC work,
+immediately before dispatch. TLS handshake validation alone cannot expire an
+already established connection. A leaf outside `[NotBefore, NotAfter)` receives
+403 with `admin.certificate.validity_denied`, the certificate SHA-256, actor and
+correlation ID in durable audit/outbox; audit failure prevents dispatch. The shared
+time-window predicate is also used by Agent binding verification and enrollment.
+Seven controlled-clock/cancellation/audit tests cover exact boundaries. Two real
+mTLS/PostgreSQL cases prove a single TCP connection cannot authorize another
+request after expiry or when expiry occurs while its registry read waits on an
+actual database lock, with exactly one persisted denial/export entry. These
+admission checks do not cancel an operation already dispatched before expiry;
+production clock trust, CA lifecycle and key custody remain deployment controls.
+
 Core owns `POST /admin/devices/{deviceId}/certificates/{fingerprint}/revoke`. It is reachable only on the Admin mTLS port; web and Agent ports return 404. A successful call returns 204 after the authorized request, Core update and completion audit event have been persisted. The update and completion event share one transaction. Denied authorization returns 403 and is audited. Invalid identity or a missing/foreign client certificate is refused. The Admin listener does not expose health or module routes. The end-to-end test covers the three-port boundary, separate CAs, denied grants and identities, audit completion and Agent rejection after revocation.
 
 The Admin listener can additionally require an OIDC access token via `Fleetory:AdminGateway:Oidc:Enabled=true`. The JWT bearer handler validates issuer, audience, signature and lifetime against the configured authority. Fleetory then requires `azp` to equal the configured client ID, `amr` to contain `webauthn`, and the token `sub` UUID to equal the UUID in the client certificate's Admin SAN. A certificate without a token receives 401 before RBAC or Core work; the denial is persisted through `IAuditWriter` with the certificate actor and correlation ID, without storing token contents. When the Admin listener is enabled outside Development, OIDC is mandatory at startup. Development may still run certificate-only tests. The provider's authentication flow must ensure the `amr` claim reflects a completed WebAuthn execution; the local Keycloak provisioner configures that reference. This establishes a dual proof for the existing administrative routes, not a general login UI or a role-management surface. Deployment must restrict access to the Admin port to a management network and provision Admin certificates and grants under a separate approval process. Admin certificate lifecycle and issuance, distributed rate limits and recovery of commit-acknowledgement ambiguity remain open.

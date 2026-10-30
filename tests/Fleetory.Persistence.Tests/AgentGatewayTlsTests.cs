@@ -1657,7 +1657,7 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
     private static string CertificateSha256(X509Certificate2 certificate) =>
         Convert.ToHexString(SHA256.HashData(certificate.RawData));
 
-    private static int GetFreePort()
+    internal static int GetFreePort()
     {
         var listener = new TcpListener(IPAddress.Loopback, 0);
         listener.Start();
@@ -1868,7 +1868,7 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             return new HttpClient(handler);
         }
 
-        private bool ValidateServer(X509Certificate2? server, X509Chain? peerChain,
+        internal bool ValidateServer(X509Certificate2? server, X509Chain? peerChain,
             SslPolicyErrors errors)
         {
             if (server is null || (errors & SslPolicyErrors.RemoteCertificateNameMismatch) != 0)
@@ -1932,8 +1932,14 @@ public sealed class AgentGatewayTlsTests(PostgreSqlTestFixture fixture)
             using var publicCertificate = request.Create(
                 Intermediate ?? Root, now.AddHours(-1), now.AddDays(1), Guid.NewGuid().ToByteArray());
             using var withPrivateKey = publicCertificate.CopyWithPrivateKey(key);
-            var bundle = new X509Certificate2Collection { withPrivateKey };
-            if (Intermediate is not null) { bundle.Add(Intermediate); }
+            return LoadTlsCertificate(withPrivateKey, Intermediate);
+        }
+
+        internal static X509Certificate2 LoadTlsCertificate(X509Certificate2 certificate,
+            X509Certificate2? intermediate = null)
+        {
+            var bundle = new X509Certificate2Collection { certificate };
+            if (intermediate is not null) { bundle.Add(intermediate); }
             var pkcs12 = bundle.Export(X509ContentType.Pkcs12)!;
             try
             {

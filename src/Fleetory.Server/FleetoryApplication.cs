@@ -141,6 +141,11 @@ public static class FleetoryApplication
                     }
 
                     var fingerprint = Convert.ToHexString(SHA256.HashData(adminCertificate.RawData));
+                    if (!await AdminCertificateRequestGuard.CheckAsync(
+                            context, adminCertificate, actor, fingerprint))
+                    {
+                        return;
+                    }
                     var certificateAccess = await context.RequestServices
                         .GetRequiredService<IAdminCertificateAccessStore>()
                         .CheckAsync(fingerprint, actor.SubjectId,
@@ -179,6 +184,12 @@ public static class FleetoryApplication
                             context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                             return;
                         }
+                    }
+
+                    if (!await AdminCertificateRequestGuard.CheckAsync(
+                            context, adminCertificate, actor, fingerprint))
+                    {
+                        return;
                     }
                 }
                 else if (context.Request.Path.StartsWithSegments("/agent") ||

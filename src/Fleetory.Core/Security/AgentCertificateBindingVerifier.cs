@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using Fleetory.Core.Contracts;
+using Fleetory.Platform.Contracts;
 using Fleetory.SharedKernel;
 
 namespace Fleetory.Core.Security;
@@ -26,7 +27,7 @@ public sealed class AgentCertificateBindingVerifier(
         }
 
         var instant = clock.UtcNow.ToUniversalTime();
-        if (!IsWithinValidityWindow(certificate, instant))
+        if (!CertificateValidity.IsCurrent(certificate, instant))
         {
             return AgentCertificateStatus.Expired;
         }
@@ -35,7 +36,7 @@ public sealed class AgentCertificateBindingVerifier(
         var binding = await bindings.FindBySha256Async(fingerprint, cancellationToken);
         cancellationToken.ThrowIfCancellationRequested();
         instant = clock.UtcNow.ToUniversalTime();
-        if (!IsWithinValidityWindow(certificate, instant))
+        if (!CertificateValidity.IsCurrent(certificate, instant))
         {
             return AgentCertificateStatus.Expired;
         }
@@ -66,10 +67,6 @@ public sealed class AgentCertificateBindingVerifier(
 
         return AgentCertificateStatus.Accepted;
     }
-
-    private static bool IsWithinValidityWindow(X509Certificate2 certificate, DateTimeOffset instant) =>
-        instant >= certificate.NotBefore.ToUniversalTime() &&
-        instant < certificate.NotAfter.ToUniversalTime();
 
     private static bool HasClientAuthenticationPurpose(X509Certificate2 certificate)
     {

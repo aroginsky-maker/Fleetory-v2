@@ -280,7 +280,7 @@ public sealed class AgentEnrollmentService(
             }
 
             now = clock.UtcNow.ToUniversalTime();
-            if (now < certificate.NotBefore.ToUniversalTime() || now >= certificate.NotAfter.ToUniversalTime())
+            if (!CertificateValidity.IsCurrent(certificate, now))
             {
                 throw new UnauthorizedAccessException("Agent enrollment is denied.");
             }
