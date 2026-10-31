@@ -19,6 +19,11 @@ public sealed class FileSecretProvider : ISecretProvider
         }
 
         this.directory = Path.GetFullPath(directory);
+        ValidateDirectory();
+    }
+
+    private void ValidateDirectory()
+    {
         if (!Directory.Exists(this.directory) ||
             (File.GetAttributes(this.directory) & FileAttributes.ReparsePoint) != 0)
         {
@@ -48,6 +53,7 @@ public sealed class FileSecretProvider : ISecretProvider
         var path = Path.Combine(directory, name);
         try
         {
+            ValidateDirectory();
             if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
             {
                 throw new InvalidOperationException("Secret file must not be a symbolic link.");

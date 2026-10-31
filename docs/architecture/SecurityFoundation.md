@@ -455,6 +455,25 @@ accepted oversized input before the fix. These are byte-budget guarantees at the
 reader boundary; upstream hosting limits and request-timeout policies remain
 separate controls.
 
+## Secret-root validation on uncached reads
+
+The file secret provider now repeats its root-directory validation before each
+uncached file read. A directory replaced by a symbolic link or Windows junction
+after provider creation is refused; Unix group/other write permissions are
+rechecked at the same boundary. Constructor and read paths share one validator.
+Already cached secrets retain their validated process-lifetime snapshot, while a
+later uncached name cannot load replacement material through the changed root.
+
+Windows junction tests reproduce cold/warm-provider replacement, and Linux
+tests cover symbolic replacement and changed group/other write permissions.
+A valid-root control retains later secret reads. The Windows CI job now runs
+the complete Server test project as well as Core, so the junction and existing
+JSON/OIDC/secret-reader checks remain exercised on both server platforms.
+These are pre-open filesystem observations, not an atomic protection against a
+privileged concurrent path replacement. Protected root/parent ownership,
+Windows mount ACL provisioning, credential custody and rotation remain
+deployment controls.
+
 ## Remaining PHASE 7 work
 
 - External Agent CA issuance and grant delivery, CA lifecycle, full rotation administration with physical device verification, Admin certificate lifecycle, and revocation propagation to future long-lived Agent streams. The [production certificate lifecycle runbook](../operations/CertificateLifecycle.md) defines the required issuance, custody, rotation, recovery and rollback evidence.

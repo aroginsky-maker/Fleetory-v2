@@ -46,6 +46,10 @@ jobs:
         shell: pwsh
         run: dotnet test tests/Fleetory.Core.Tests/Fleetory.Core.Tests.csproj -c Release --nologo --warnaserror
 
+      - name: Verify Server security on Windows
+        shell: pwsh
+        run: dotnet test tests/Fleetory.Server.Tests/Fleetory.Server.Tests.csproj -c Release --nologo --warnaserror
+
       - name: Verify signer evidence snapshot on Windows
         shell: pwsh
         run: |
