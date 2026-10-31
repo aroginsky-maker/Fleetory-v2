@@ -50,6 +50,10 @@ jobs:
         shell: pwsh
         run: dotnet test tests/Fleetory.Server.Tests/Fleetory.Server.Tests.csproj -c Release --nologo --warnaserror
 
+      - name: Verify signed artifact anti-rollback on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/SignedArtifactVerification.Tests.ps1
+
       - name: Verify signer evidence snapshot on Windows
         shell: pwsh
         run: |

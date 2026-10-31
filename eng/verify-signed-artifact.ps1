@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Verifies a signed Fleetory artifact and advances an anti-rollback anchor.
 #>
@@ -14,6 +14,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'evidence-file-helpers.ps1')
 if ($PSVersionTable.PSVersion.Major -lt 7) {
     throw 'Signed artifact verification requires PowerShell 7 or later.'
 }
@@ -54,7 +55,7 @@ function Assert-ArtifactManifest($Manifest, [string] $ExpectedArtifactId) {
         }
     }
     $artifactId = [string]$Manifest.artifactId
-    if ($artifactId -notmatch '^[a-z0-9][a-z0-9._-]{0,127}$') {
+    if ($artifactId -notmatch '\A[a-z0-9][a-z0-9._-]{0,127}\z') {
         throw 'The artifact identifier is invalid.'
     }
     if (-not [string]::IsNullOrWhiteSpace($ExpectedArtifactId) -and $artifactId -ne $ExpectedArtifactId) {
@@ -65,10 +66,10 @@ function Assert-ArtifactManifest($Manifest, [string] $ExpectedArtifactId) {
             [Globalization.CultureInfo]::InvariantCulture, [ref]$version) -or $version -lt 1) {
         throw 'The artifact version is invalid.'
     }
-    if ([string]$Manifest.sha256 -notmatch '^[0-9A-Fa-f]{64}$') {
+    if ([string]$Manifest.sha256 -notmatch '\A[0-9A-Fa-f]{64}\z') {
         throw 'The artifact SHA-256 is invalid.'
     }
-    if ([string]$Manifest.signingKeyId -notmatch '^[a-z0-9][a-z0-9._-]{0,127}$') {
+    if ([string]$Manifest.signingKeyId -notmatch '\A[a-z0-9][a-z0-9._-]{0,127}\z') {
         throw 'The artifact signing key identifier is invalid.'
     }
 }
@@ -101,8 +102,44 @@ function Assert-ArtifactSignature([byte[]] $ManifestBytes, [string] $SignaturePa
 function Read-ArtifactAnchor([string] $Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
     Assert-ArtifactPathIsSafe $Path 'The artifact anchor'
-    try { return ConvertFrom-Json -InputObject ([IO.File]::ReadAllText($Path)) -Depth 5 }
+    $snapshot = Read-BoundedEvidenceSnapshot $Path 'The artifact anchor' 4KB
+    $document = $null
+    try {
+        $text = [Text.UTF8Encoding]::new($false, $true).GetString($snapshot.Bytes).TrimStart([char]0xFEFF)
+        $options = [Text.Json.JsonDocumentOptions]::new()
+        $options.MaxDepth = 2
+        $document = [Text.Json.JsonDocument]::Parse($text, $options)
+        $root = $document.RootElement
+        if ($root.ValueKind -ne [Text.Json.JsonValueKind]::Object) { throw 'Expected an anchor object.' }
+        $fields = @('artifactId', 'version', 'sha256', 'signingKeyId', 'acceptedAt')
+        $members = @($root.EnumerateObject())
+        if ($members.Count -ne $fields.Count) { throw 'Anchor fields are missing or unsupported.' }
+        foreach ($field in $fields) {
+            if (@($members | Where-Object { $_.Name -ceq $field }).Count -ne 1) {
+                throw 'Anchor fields must be unique and supported.'
+            }
+        }
+        $version = 0L
+        if (-not $root.GetProperty('version').TryGetInt64([ref]$version) -or $version -lt 1) {
+            throw 'Expected a positive integer anchor version.'
+        }
+        $anchor = [pscustomobject]@{
+            artifactId = $root.GetProperty('artifactId').GetString()
+            version = $version
+            sha256 = $root.GetProperty('sha256').GetString()
+            signingKeyId = $root.GetProperty('signingKeyId').GetString()
+            acceptedAt = $root.GetProperty('acceptedAt').GetString()
+        }
+        Assert-ArtifactManifest $anchor ''
+        $accepted = [DateTimeOffset]::MinValue
+        if ($anchor.acceptedAt -cnotmatch '\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?(?:Z|\+00:00)\z' -or
+            -not [DateTimeOffset]::TryParse($anchor.acceptedAt,
+                [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None,
+                [ref]$accepted)) { throw 'Expected an anchor UTC timestamp.' }
+        return $anchor
+    }
     catch { throw 'The artifact anti-rollback anchor is invalid.' }
+    finally { if ($null -ne $document) { $document.Dispose() } }
 }
 
 function Write-ArtifactAnchor([string] $Path, $Manifest) {
