@@ -235,6 +235,37 @@ public sealed class AgentCommandSecurityTests
         }
     }
 
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(1024, true)]
+    [InlineData(1025, false)]
+    [InlineData(16384, false)]
+    public async Task Trust_directory_enforces_actual_content_length(int length, bool accepted)
+    {
+        var directory = CreateTemporaryDirectory();
+        try
+        {
+            var bytes = Enumerable.Repeat((byte)0x5A, length).ToArray();
+            var path = Path.Combine(directory, $"{Device.Value:N}-key-1.spki");
+            await File.WriteAllBytesAsync(path, bytes);
+            var trust = new DirectoryCommandVerificationKeys(Device, directory);
+
+            if (accepted)
+            {
+                Assert.Equal(bytes, (await trust.FindPublicKeyAsync(Device, "key-1"))?.ToArray());
+            }
+            else
+            {
+                await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+                    await trust.FindPublicKeyAsync(Device, "key-1"));
+            }
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
     private static string CreateTemporaryDirectory()
     {
         var directory = Path.Combine(Path.GetTempPath(), "fleetory-agent-replay-" + Guid.NewGuid().ToString("N"));

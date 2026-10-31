@@ -5,6 +5,7 @@ namespace Fleetory.Agent.Security;
 /// <summary>Reads target-bound public keys from an Agent-local, externally provisioned trust directory.</summary>
 public sealed class DirectoryCommandVerificationKeys : ICommandVerificationKeys
 {
+    private const int MaximumPublicKeyBytes = 1024;
     private readonly DeviceId _localDeviceId;
     private readonly string _directory;
 
@@ -63,7 +64,7 @@ public sealed class DirectoryCommandVerificationKeys : ICommandVerificationKeys
                 return null;
             }
 
-            if ((file.Attributes & FileAttributes.ReparsePoint) != 0 || file.Length is < 1 or > 1024)
+            if ((file.Attributes & FileAttributes.ReparsePoint) != 0)
             {
                 throw new InvalidOperationException("Command trust file is invalid.");
             }
@@ -81,18 +82,30 @@ public sealed class DirectoryCommandVerificationKeys : ICommandVerificationKeys
                 }
             }
 
-            var bytes = await File.ReadAllBytesAsync(path, cancellationToken);
-            if (bytes.Length is < 1 or > 1024)
-            {
-                throw new InvalidOperationException("Command trust file is invalid.");
-            }
-
-            return bytes;
+            await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
+                bufferSize: MaximumPublicKeyBytes, options: FileOptions.Asynchronous | FileOptions.SequentialScan);
+            return await ReadPublicKeyBytesAsync(stream, cancellationToken).ConfigureAwait(false);
         }
         catch (FileNotFoundException)
         {
             return null;
         }
+    }
+
+    internal static async ValueTask<byte[]> ReadPublicKeyBytesAsync(
+        Stream stream, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var bytes = new byte[MaximumPublicKeyBytes + 1];
+        var length = await stream.ReadAtLeastAsync(bytes, bytes.Length,
+            throwOnEndOfStream: false, cancellationToken).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (length is < 1 or > MaximumPublicKeyBytes)
+        {
+            throw new InvalidOperationException("Command trust file is invalid.");
+        }
+
+        return bytes[..length];
     }
 
     private static bool IsValidKeyId(string? keyId) =>
