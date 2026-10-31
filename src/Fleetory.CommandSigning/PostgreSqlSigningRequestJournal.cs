@@ -32,7 +32,7 @@ public sealed partial class PostgreSqlSigningRequestJournal(NpgsqlDataSource dat
         ArgumentNullException.ThrowIfNull(envelope);
         if (envelope.TargetDeviceId != request.TargetDeviceId || envelope.CommandId == Guid.Empty ||
             envelope.FormatVersion != 1 || envelope.CommandType != AgentCommandTypes.InventoryRefresh ||
-            !envelope.Payload.IsEmpty || envelope.Signature.Length != 64 ||
+            envelope.PayloadLength != 0 || envelope.SignatureLength != 64 ||
             envelope.SigningKeyId is not { Length: >= 1 and <= 128 } ||
             !envelope.SigningKeyId.All(character => char.IsAsciiLetterOrDigit(character) || character == '-'))
         {

@@ -20,6 +20,21 @@ The Fleetory Development Baseline places Agent identity, mTLS, certificate lifec
 
 The signature input is a deterministic binary sequence: each variable field has a 32-bit big-endian byte length; numeric fields use big-endian integers. The field order is domain separator `Fleetory.Command.v1`, format version, target `DeviceId` as 32 lowercase hexadecimal UTF-8 characters, command ID in the same form, command type UTF-8, SHA-256 of exact payload bytes, issue and expiry UTC ticks, nonce UTF-8 and signing-key ID UTF-8. ECDSA signatures use the 64-byte IEEE P1363 `r || s` form. A signing key ID is included in the signed material to prevent key substitution. The incoming payload and signature are copied before storage. The verifier returns a separate payload copy for execution.
 
+The envelope exposes scalar `PayloadLength` and `SignatureLength` metadata from
+its owned buffers. Agent format checks use these values before calling the
+accessors that return copies: payload remains capped at 64 KiB and a P-256
+signature must contain exactly 64 bytes. Signer-journal completion uses the same
+metadata to require an empty payload and a 64-byte signature before database I/O.
+
+Four regressions reproduced an extra allocation of approximately 8 MiB merely
+to reject an oversized payload or signature in those two consumers. Tests now
+require less than 512 KiB of managed allocation on the measured thread for each
+rejection, with envelope construction and warm-up outside the measurement.
+Boundary and mutation tests retain the 64-KiB payload limit, 63/65-byte signature
+rejection, constructor/accessor isolation and unchanged signing material.
+These guards bound validation overhead after construction; transport readers
+still need their own input limits before building an envelope.
+
 This is a security contract, **not** the PHASE 8 Agent wire protocol. Private signing keys and command signing are not implemented in Fleetory Server. `DirectoryCommandVerificationKeys` reads device-bound public SPKI files from an Agent-local trust directory on every lookup; removing a file revokes that key for the next command. External provisioning must protect the trust directory from unauthorized writes. On Unix the directory and key files cannot be symbolic links or writable by other users. On Windows the trust and replay directories must have protected ACLs, and the directory, trust files, replay database and its WAL/SHM files may grant access only to the Agent process identity, LocalSystem or Administrators; their owner must also be one of those identities. Directory permissions are rechecked for each operation, and trust-file and existing replay-file permissions are checked before use. A changed or broad ACL fails closed. The local lab provisions a process-private replay directory; production must provision the service identity and protected paths before Agent startup. `SqliteCommandReplayStore` uses a private Agent-local SQLite database with WAL and full synchronous commits. Unique constraints atomically reject reuse of either command ID or nonce per device, including after a restart or concurrent attempt. Entries are retained indefinitely to remain safe across wall-clock rollback; deployment must monitor disk use. Storage errors propagate and prevent command acceptance. `AgentCommandExecutionPolicy` currently accepts only an argument-free `Inventory.Refresh` for the local device; all other commands, including high-risk and bulk operations, are denied. `AgentCommandExecutionGate.Create` binds the real trust directory, SQLite replay store and local policy before it can invoke an inventory handler. Tests prove invalid, tampered, untrusted and replayed commands never reach that handler, including after gate recreation. Replay is committed before handler invocation; if a handler fails, the failure propagates and the same envelope cannot be retried. The actual Agent host and command transport are not yet wired.
 
 Agent trust-key reads enforce the 1-KiB limit on the bytes obtained from one

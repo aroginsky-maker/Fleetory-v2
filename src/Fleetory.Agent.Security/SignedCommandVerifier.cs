@@ -140,8 +140,8 @@ public sealed class SignedCommandVerifier(
         IsIdentifier(envelope.SigningKeyId, 128) &&
         IsIdentifier(envelope.Nonce, 128) &&
         envelope.Nonce.Length >= 16 &&
-        envelope.Payload.Length <= 64 * 1024 &&
-        envelope.Signature.Length == 64;
+        envelope.PayloadLength <= 64 * 1024 &&
+        envelope.SignatureLength == 64;
 
     private static bool IsIdentifier(string? value, int maximumLength) =>
         !string.IsNullOrEmpty(value) &&

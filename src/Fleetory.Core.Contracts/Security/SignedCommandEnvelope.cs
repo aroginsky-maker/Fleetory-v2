@@ -40,11 +40,13 @@ public sealed class SignedCommandEnvelope
     public DeviceId TargetDeviceId { get; }
     public Guid CommandId { get; }
     public string CommandType { get; }
+    public int PayloadLength => _payload.Length;
     public ReadOnlyMemory<byte> Payload => _payload.ToArray();
     public DateTimeOffset IssuedAt { get; }
     public DateTimeOffset ExpiresAt { get; }
     public string Nonce { get; }
     public string SigningKeyId { get; }
+    public int SignatureLength => _signature.Length;
     public ReadOnlyMemory<byte> Signature => _signature.ToArray();
     public int FormatVersion { get; }
 

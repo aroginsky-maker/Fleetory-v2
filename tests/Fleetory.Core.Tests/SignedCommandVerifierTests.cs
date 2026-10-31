@@ -195,6 +195,36 @@ public sealed class SignedCommandVerifierTests
         Assert.Equal(Payload, result.Command?.Payload.ToArray());
     }
 
+    [Fact]
+    public async Task Exact_payload_limit_reaches_signature_and_policy_checks()
+    {
+        using var signer = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var fixture = CreateFixture(signer);
+        var envelope = CreateSigned(signer, payload: new byte[64 * 1024]);
+
+        var result = await fixture.Verifier.VerifyAsync(envelope, Device);
+
+        Assert.Equal(CommandVerificationStatus.DeniedByPolicy, result.Status);
+        Assert.Equal(1, fixture.Keys.LookupCount);
+        Assert.Equal(0, fixture.ReplayStore.ConsumedCount);
+    }
+
+    [Theory]
+    [InlineData(63)]
+    [InlineData(65)]
+    public async Task A_signature_either_side_of_its_exact_size_is_rejected_without_lookup(int length)
+    {
+        using var signer = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var fixture = CreateFixture(signer);
+        var envelope = Copy(CreateSigned(signer), signature: new byte[length]);
+
+        var result = await fixture.Verifier.VerifyAsync(envelope, Device);
+
+        Assert.Equal(CommandVerificationStatus.InvalidEnvelope, result.Status);
+        Assert.Equal(0, fixture.Keys.LookupCount);
+        Assert.Equal(0, fixture.ReplayStore.ConsumedCount);
+    }
+
     private static TestFixture CreateFixture(ECDsa signer)
     {
         var keys = new TestKeys(signer.ExportSubjectPublicKeyInfo());
