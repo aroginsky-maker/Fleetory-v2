@@ -72,11 +72,10 @@ public sealed class AgentCommandExecutionGateTests
         var gate = fixture.CreateGate(clock);
         var envelope = fixture.Sign();
 
-        var error = await Record.ExceptionAsync(async () =>
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
             await gate.ExecuteAsync(envelope, cancellation.Token));
 
         Assert.Empty(fixture.Handler.CommandIds);
-        Assert.IsAssignableFrom<OperationCanceledException>(error);
         Assert.True(cancellation.IsCancellationRequested);
         Assert.Equal(CommandVerificationStatus.Replay,
             await fixture.CreateGate().ExecuteAsync(envelope));
