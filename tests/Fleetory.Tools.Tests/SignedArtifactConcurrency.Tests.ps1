@@ -27,7 +27,7 @@ function New-ReleaseFixture([int] $Version) {
 }
 
 function Start-TestProcess([string[]] $Arguments) {
-    $start = [Diagnostics.ProcessStartInfo]::new((Get-Command pwsh -CommandType Application).Source)
+    $start = [Diagnostics.ProcessStartInfo]::new([Environment]::ProcessPath)
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
     $start.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
