@@ -68,12 +68,16 @@ public sealed class SqliteCommandReplayStore : ICommandReplayStore
         ConfigureDurability(connection);
 
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        // Keep schema checks and insertion under the same non-deferred writer transaction.
+        await EnsureReplayTableHasNoTriggersAsync(connection, (SqliteTransaction)transaction, cancellationToken);
         await using var command = connection.CreateCommand();
         command.Transaction = (SqliteTransaction)transaction;
         command.CommandText = """
-            INSERT OR IGNORE INTO consumed_commands
+            INSERT OR ABORT INTO main.consumed_commands
                 (device_id, command_id, nonce, expires_at_utc_ticks)
-            VALUES ($deviceId, $commandId, $nonce, $expiresAt);
+            VALUES ($deviceId, $commandId, $nonce, $expiresAt)
+            ON CONFLICT(device_id, command_id) DO NOTHING
+            ON CONFLICT(device_id, nonce) DO NOTHING;
             """;
         command.Parameters.AddWithValue("$deviceId", targetDeviceId.Value.ToString("N"));
         command.Parameters.AddWithValue("$commandId", commandId.ToString("N"));
@@ -82,6 +86,23 @@ public sealed class SqliteCommandReplayStore : ICommandReplayStore
         var inserted = await command.ExecuteNonQueryAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return inserted == 1;
+    }
+
+    private static async Task EnsureReplayTableHasNoTriggersAsync(
+        SqliteConnection connection, SqliteTransaction transaction, CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = """
+            SELECT EXISTS (
+                SELECT 1 FROM main.sqlite_schema
+                WHERE type = 'trigger' AND tbl_name = 'consumed_commands' COLLATE NOCASE
+            );
+            """;
+        if (await command.ExecuteScalarAsync(cancellationToken) is not 0L)
+        {
+            throw new InvalidOperationException("Replay storage does not support triggers on consumed_commands.");
+        }
     }
 
     private void ValidateDirectory()

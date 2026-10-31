@@ -266,19 +266,5 @@ public sealed class AgentCommandSecurityTests
         }
     }
 
-    private static string CreateTemporaryDirectory()
-    {
-        var directory = Path.Combine(Path.GetTempPath(), "fleetory-agent-replay-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(directory);
-        if (OperatingSystem.IsWindows())
-        {
-            WindowsAgentAclTestHelper.ProtectDirectory(directory);
-        }
-        else
-        {
-            File.SetUnixFileMode(directory,
-                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
-        }
-        return directory;
-    }
+    private static string CreateTemporaryDirectory() => AgentStorageTestDirectory.Create();
 }
