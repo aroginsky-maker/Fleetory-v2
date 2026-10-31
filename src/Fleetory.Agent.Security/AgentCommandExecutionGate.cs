@@ -49,6 +49,7 @@ public sealed class AgentCommandExecutionGate
         CancellationToken cancellationToken = default)
     {
         var result = await _verifier.VerifyAsync(envelope, _localDeviceId, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         if (result.Status != CommandVerificationStatus.Accepted)
         {
             return result.Status;
@@ -68,6 +69,7 @@ public sealed class AgentCommandExecutionGate
             return CommandVerificationStatus.OutsideValidityWindow;
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         await _inventoryRefresh.RefreshAsync(command.CommandId, cancellationToken);
         return CommandVerificationStatus.Accepted;
     }

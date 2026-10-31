@@ -76,6 +76,45 @@ public sealed class SignedCommandDeadlineTests
         finally { fixture.Release.TrySetResult(); }
     }
 
+    [Theory]
+    [InlineData("key", true)]
+    [InlineData("key", false)]
+    [InlineData("policy", true)]
+    [InlineData("policy", false)]
+    [InlineData("replay", true)]
+    [InlineData("replay", false)]
+    public async Task Cancellation_after_a_dependency_returns_cannot_release_a_result_or_start_more_work(
+        string boundary, bool succeeded)
+    {
+        using var signer = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var cancellation = new CancellationTokenSource();
+        var fixture = new DelayedSecurityBoundary(signer, boundary,
+            ignoreCancellation: true, succeeded: succeeded);
+        var command = Sign(signer);
+        var verification = fixture.Verifier.VerifyAsync(command, Device, cancellation.Token).AsTask();
+        try
+        {
+            await fixture.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            cancellation.Cancel();
+            fixture.Release.TrySetResult();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+                await verification.WaitAsync(TimeSpan.FromSeconds(5)));
+
+            Assert.Equal(boundary == "key" ? 0 : 1, fixture.PolicyCalls);
+            Assert.Equal(boundary == "replay" ? 1 : 0, fixture.ReplayCalls);
+            Assert.Equal(boundary == "replay" && succeeded ? 1 : 0, fixture.ConsumedCount);
+
+            if (succeeded)
+            {
+                var retry = await fixture.Verifier.VerifyAsync(command, Device);
+                Assert.Equal(boundary == "replay" ? CommandVerificationStatus.Replay :
+                    CommandVerificationStatus.Accepted, retry.Status);
+                Assert.Equal(1, fixture.ConsumedCount);
+            }
+        }
+        finally { fixture.Release.TrySetResult(); }
+    }
+
     private static SignedCommandEnvelope Sign(ECDsa signer)
     {
         var unsigned = new SignedCommandEnvelope(Device, Guid.NewGuid(),
@@ -96,12 +135,16 @@ public sealed class SignedCommandDeadlineTests
         ICommandExecutionPolicy, ICommandReplayStore
     {
         private readonly string _boundary;
+        private readonly bool _ignoreCancellation;
+        private readonly bool _succeeded;
         private readonly byte[] _publicKey;
         private readonly HashSet<Guid> _consumed = [];
 
-        public DelayedSecurityBoundary(ECDsa signer, string boundary)
+        public DelayedSecurityBoundary(ECDsa signer, string boundary, bool ignoreCancellation = false, bool succeeded = true)
         {
             _boundary = boundary;
+            _ignoreCancellation = ignoreCancellation;
+            _succeeded = succeeded;
             _publicKey = signer.ExportSubjectPublicKeyInfo();
             Verifier = new SignedCommandVerifier(this, this, this, Clock);
         }
@@ -112,12 +155,13 @@ public sealed class SignedCommandDeadlineTests
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public int ConsumedCount => _consumed.Count;
         public int PolicyCalls { get; private set; }
+        public int ReplayCalls { get; private set; }
 
         public async ValueTask<ReadOnlyMemory<byte>?> FindPublicKeyAsync(
             DeviceId targetDeviceId, string keyId, CancellationToken cancellationToken = default)
         {
             await PauseAsync("key", cancellationToken);
-            return _publicKey;
+            return Succeeded("key") ? _publicKey : null;
         }
 
         public async ValueTask<bool> IsAllowedAsync(DeviceId targetDeviceId,
@@ -125,23 +169,27 @@ public sealed class SignedCommandDeadlineTests
         {
             PolicyCalls++;
             await PauseAsync("policy", cancellationToken);
-            return true;
+            return Succeeded("policy");
         }
 
         public async ValueTask<bool> TryConsumeAsync(DeviceId targetDeviceId,
             Guid commandId, string nonce, DateTimeOffset expiresAt,
             CancellationToken cancellationToken = default)
         {
-            if (!_consumed.Add(commandId)) { return false; }
+            ReplayCalls++;
+            var consumed = Succeeded("replay") && _consumed.Add(commandId);
             await PauseAsync("replay", cancellationToken);
-            return true;
+            return consumed;
         }
+
+        private bool Succeeded(string boundary) => _boundary != boundary || _succeeded;
 
         private async Task PauseAsync(string boundary, CancellationToken cancellationToken)
         {
             if (_boundary != boundary) { return; }
             Entered.TrySetResult();
-            await Release.Task.WaitAsync(cancellationToken);
+            if (_ignoreCancellation) { await Release.Task; }
+            else { await Release.Task.WaitAsync(cancellationToken); }
         }
     }
 }

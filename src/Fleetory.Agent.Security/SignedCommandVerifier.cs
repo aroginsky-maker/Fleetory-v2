@@ -61,6 +61,7 @@ public sealed class SignedCommandVerifier(
 
         var publicKey = await keys.FindPublicKeyAsync(
             localDeviceId, envelope.SigningKeyId, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
         if (publicKey is null || publicKey.Value.Length is 0 or > 1024)
         {
             return new(CommandVerificationStatus.UnknownKey);
@@ -92,8 +93,10 @@ public sealed class SignedCommandVerifier(
             return new(CommandVerificationStatus.InvalidSignature);
         }
 
-        if (!await policy.IsAllowedAsync(
-                localDeviceId, envelope.CommandType, payload.ToArray(), cancellationToken))
+        var allowed = await policy.IsAllowedAsync(
+            localDeviceId, envelope.CommandType, payload.ToArray(), cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!allowed)
         {
             return new(CommandVerificationStatus.DeniedByPolicy);
         }
@@ -103,19 +106,22 @@ public sealed class SignedCommandVerifier(
             return new(CommandVerificationStatus.OutsideValidityWindow);
         }
 
-        if (!await replayStore.TryConsumeAsync(
-                localDeviceId, envelope.CommandId, envelope.Nonce,
-                envelope.ExpiresAt, cancellationToken))
+        var consumed = await replayStore.TryConsumeAsync(
+            localDeviceId, envelope.CommandId, envelope.Nonce,
+            envelope.ExpiresAt, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!consumed)
         {
             return new(CommandVerificationStatus.Replay);
         }
 
-        // A successful durable consume stays consumed if the command expired while committing.
+        // A successful durable consume stays consumed if cancellation or expiry withholds acceptance.
         if (!IsWithinValidityWindow(envelope, clock.UtcNow))
         {
             return new(CommandVerificationStatus.OutsideValidityWindow);
         }
 
+        cancellationToken.ThrowIfCancellationRequested();
         return new(CommandVerificationStatus.Accepted,
             new VerifiedCommand(localDeviceId, envelope.CommandId, envelope.CommandType, payload));
     }

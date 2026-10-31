@@ -60,6 +60,42 @@ public sealed class AgentCommandExecutionGateTests
         Assert.Equal([envelope.CommandId], fixture.Handler.CommandIds);
     }
 
+    [Theory]
+    [InlineData(4)]
+    [InlineData(5)]
+    public async Task Cancellation_before_result_release_or_dispatch_cannot_invoke_an_ignoring_handler(int readToCancel)
+    {
+        using var fixture = new GateFixture();
+        using var cancellation = new CancellationTokenSource();
+        fixture.Handler.IgnoreCancellation = true;
+        var clock = new DispatchCancellationClock(cancellation, readToCancel);
+        var gate = fixture.CreateGate(clock);
+        var envelope = fixture.Sign();
+
+        var error = await Record.ExceptionAsync(async () =>
+            await gate.ExecuteAsync(envelope, cancellation.Token));
+
+        Assert.Empty(fixture.Handler.CommandIds);
+        Assert.IsAssignableFrom<OperationCanceledException>(error);
+        Assert.True(cancellation.IsCancellationRequested);
+        Assert.Equal(CommandVerificationStatus.Replay,
+            await fixture.CreateGate().ExecuteAsync(envelope));
+        Assert.Empty(fixture.Handler.CommandIds);
+    }
+
+    private sealed class DispatchCancellationClock(CancellationTokenSource cancellation, int readToCancel) : IClock
+    {
+        private int _reads;
+        public DateTimeOffset UtcNow
+        {
+            get
+            {
+                if (++_reads == readToCancel) { cancellation.Cancel(); }
+                return DateTimeOffset.UtcNow;
+            }
+        }
+    }
+
     private sealed class GateFixture : IDisposable
     {
         private readonly ECDsa _signer = ECDsa.Create(ECCurve.NamedCurves.nistP256);
@@ -104,8 +140,8 @@ public sealed class AgentCommandExecutionGateTests
         public TestHandler Handler { get; }
         public AgentCommandExecutionGate Gate { get; }
 
-        public AgentCommandExecutionGate CreateGate() => AgentCommandExecutionGate.Create(
-            Device, _trustDirectory, _replayPath, new SystemClock(), Handler);
+        public AgentCommandExecutionGate CreateGate(IClock? clock = null) => AgentCommandExecutionGate.Create(
+            Device, _trustDirectory, _replayPath, clock ?? new SystemClock(), Handler);
 
         public SignedCommandEnvelope Sign(
             DeviceId? target = null,
@@ -146,10 +182,11 @@ public sealed class AgentCommandExecutionGateTests
     {
         public List<Guid> CommandIds { get; } = [];
         public bool Fail { get; set; }
+        public bool IgnoreCancellation { get; set; }
 
         public ValueTask RefreshAsync(Guid commandId, CancellationToken cancellationToken = default)
         {
-            cancellationToken.ThrowIfCancellationRequested();
+            if (!IgnoreCancellation) { cancellationToken.ThrowIfCancellationRequested(); }
             CommandIds.Add(commandId);
             if (Fail) { throw new IOException("Inventory handler failed."); }
             return ValueTask.CompletedTask;

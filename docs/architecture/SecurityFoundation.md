@@ -115,6 +115,22 @@ Deterministic tests pause each key/policy/replay dependency at a real asynchrono
 boundary and advance or roll back an injected clock. Six rejection cases reproduced
 acceptance of stale commands before the fix. Six acceptance cases retain the
 valid expiry/skew boundaries, and retries verify replay-state preservation.
+Caller cancellation is rechecked after each key lookup, policy decision and
+replay-store await, before verified content is returned, and in the execution
+gate before handler dispatch. This includes dependencies that ignore their
+token or return a denial after cancellation. Observed cancellation throws
+`OperationCanceledException`; no verified command or further stage is released.
+Cancellation observed before replay consumption leaves it unused, while an
+already committed nonce/command ID stays consumed. A later uncancelled retry
+therefore remains a replay after commit. Cancellation is not a rollback of a
+handler that has already been dispatched.
+
+Six deterministic dependency cases and two gate cases reproduced the previous
+gap, including actual invocation of a handler which ignored its token. The gate
+tests use P-256 trust files and SQLite and prove that withheld dispatch remains
+unexecuted after gate recreation. Existing expiry/skew tests share their
+controlled dependency fixture with the new cancellation checks.
+
 The production clock, trust distribution and future Agent host remain deployment
 and integration responsibilities.
 
