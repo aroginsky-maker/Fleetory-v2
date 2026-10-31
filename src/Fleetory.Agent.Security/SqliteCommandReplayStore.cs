@@ -162,6 +162,11 @@ public sealed class SqliteCommandReplayStore : ICommandReplayStore
             {
                 WindowsAgentStorageAcl.ValidateFile(path, "Replay storage file");
             }
+            else if ((File.GetUnixFileMode(path) &
+                      (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0)
+            {
+                throw new InvalidOperationException("Replay storage file permissions are too broad.");
+            }
         }
     }
 
