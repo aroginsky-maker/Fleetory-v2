@@ -56,14 +56,14 @@ function Get-FleetorySonarCheck {
         $Response.total_count -ne $Response.check_runs.Count) {
         throw 'GitHub check response is incomplete.'
     }
-    $matches = @($Response.check_runs | Where-Object {
+    $officialChecks = @($Response.check_runs | Where-Object {
         $_.name -ceq 'SonarCloud Code Analysis' -and $_.head_sha -ceq $Revision -and
         $_.app.id -eq 12526 -and $_.app.slug -ceq 'sonarqubecloud'
     })
-    if ($matches.Count -gt 1) { throw 'Sonar check identity is ambiguous.' }
-    if ($matches.Count -eq 0 -or $matches[0].status -ne 'completed') { return $null }
-    if ((Get-FleetorySonarCompletionTime $matches[0]).ToUnixTimeSeconds() -lt $NotBefore.ToUnixTimeSeconds()) { return $null }
-    return $matches[0]
+    if ($officialChecks.Count -gt 1) { throw 'Sonar check identity is ambiguous.' }
+    if ($officialChecks.Count -eq 0 -or $officialChecks[0].status -ne 'completed') { return $null }
+    if ((Get-FleetorySonarCompletionTime $officialChecks[0]).ToUnixTimeSeconds() -lt $NotBefore.ToUnixTimeSeconds()) { return $null }
+    return $officialChecks[0]
 }
 
 function Assert-FleetorySonarCheckClean {
@@ -77,12 +77,12 @@ function Assert-FleetorySonarCheckClean {
     Assert-FleetorySonarScope $Check.details_url '/dashboard' $ProjectKey $PullRequest $Branch
     foreach ($category in @('New', 'Accepted')) {
         $pattern = '\[(?<count>0|[1-9][0-9]*) ' + $category + ' issues?\]\((?<url>[^)\r\n]+)\)'
-        $matches = [regex]::Matches([string] $Check.output.summary, $pattern,
+        $issueLinks = [regex]::Matches([string] $Check.output.summary, $pattern,
             [Text.RegularExpressions.RegexOptions]::CultureInvariant)
-        if ($matches.Count -ne 1) { throw 'Sonar issue count is absent, malformed or ambiguous.' }
-        Assert-FleetorySonarScope $matches[0].Groups['url'].Value '/project/issues' $ProjectKey $PullRequest $Branch
+        if ($issueLinks.Count -ne 1) { throw 'Sonar issue count is absent, malformed or ambiguous.' }
+        Assert-FleetorySonarScope $issueLinks[0].Groups['url'].Value '/project/issues' $ProjectKey $PullRequest $Branch
         $count = 0
-        if (-not [int]::TryParse($matches[0].Groups['count'].Value, [ref] $count) -or $count -ne 0) {
+        if (-not [int]::TryParse($issueLinks[0].Groups['count'].Value, [ref] $count) -or $count -ne 0) {
             throw "Fleetory requires zero $category Sonar issues."
         }
     }

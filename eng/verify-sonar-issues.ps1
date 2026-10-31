@@ -20,9 +20,9 @@ if ($eventName -eq 'pull_request') {
         (Get-Item -LiteralPath $eventPath).Length -gt 1048576) {
         throw 'GitHub PR event is unavailable.'
     }
-    $event = Get-Content -LiteralPath $eventPath -Raw | ConvertFrom-Json
-    $revision = [string] $event.pull_request.head.sha
-    $pullRequest = [string] $event.number
+    $pullRequestEvent = Get-Content -LiteralPath $eventPath -Raw | ConvertFrom-Json
+    $revision = [string] $pullRequestEvent.pull_request.head.sha
+    $pullRequest = [string] $pullRequestEvent.number
     if ($pullRequest -cnotmatch '^[1-9][0-9]*$') { throw 'GitHub PR identity is invalid.' }
 }
 elseif ($eventName -notin @('push', 'workflow_dispatch')) {

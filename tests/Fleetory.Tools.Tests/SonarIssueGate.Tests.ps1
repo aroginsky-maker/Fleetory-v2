@@ -153,9 +153,9 @@ function Start-Sleep {
         if ($case -eq 'incomplete') { $reply.total_count = 2 }
         [IO.File]::WriteAllText((Join-Path $work 'response.json'),
             ($reply | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
-        $event = '{"number":2,"pull_request":{"head":{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}'
-        if ($case -eq 'invalid-event') { $event = '{"number":2}' }
-        [IO.File]::WriteAllText((Join-Path $work 'event.json'), $event, [Text.UTF8Encoding]::new($false))
+        $pullRequestEvent = '{"number":2,"pull_request":{"head":{"sha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}}'
+        if ($case -eq 'invalid-event') { $pullRequestEvent = '{"number":2}' }
+        [IO.File]::WriteAllText((Join-Path $work 'event.json'), $pullRequestEvent, [Text.UTF8Encoding]::new($false))
         $taskPath = Join-Path $reportDirectory 'report-task.txt'
         $task = @('projectKey=fleetory-test', 'ceTaskId=test-task')
         if ($case -eq 'wrong-task-project') { $task[0] = 'projectKey=foreign' }
