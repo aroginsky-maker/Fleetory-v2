@@ -1,0 +1,497 @@
+# Fleetory PHASE 7 Security Foundation
+
+**Status:** IN PROGRESS — Command Plane verification, local audit persistence/export transport, RBAC evaluation, Agent mTLS enrollment and Admin OIDC gate, 18 October 2026.
+
+The local self-hosted integration stack and its current limits are documented in [SecurityLab.md](SecurityLab.md). Fleetory can now read its PostgreSQL connection through an OpenBao KV v2 provider. The Agent and Admin gateway loaders accept one pinned root or two during rollover, with a bounded intermediate chain. A Windows CI probe verifies that the actual Admin listener sends leaf plus intermediate and passes root-only OpenSSL validation after the root and intermediate have been provisioned in the Windows host certificate stores. Windows deployments must provision those stores as part of host PKI setup; supplying the PEM bundle alone was insufficient in the original local probe. Tests also cover OpenBao failure modes and real Windows mTLS requests.
+
+Fleetory applies the same end-entity signing-key checks in the Core certificate verifier and Kestrel gateway. RFC 5280 allows Basic Constraints to be absent from a leaf; an actual step-ca leaf exposed the previous overly strict check. The shared policy rejects any certificate marked as a CA or granted certificate-signing key usage, even when Basic Constraints are absent. A lab run started both gateways with separate step-ca roots and OpenBao TLS material.
+
+The Fleetory Development Baseline places Agent identity, mTLS, certificate lifecycle, RBAC enforcement, durable audit, secret abstraction, signed commands and replay protection in PHASE 7, before Agent Protocol v2 and the first Agent deployment. A compromised application server must not automatically gain authority to command the whole fleet.
+
+## Implemented first slice
+
+`Fleetory.Core.Contracts` owns `SignedCommandEnvelope` and the public verification-key, replay-store and local execution-policy interfaces. The separate `Fleetory.Agent.Security` project provides `SignedCommandVerifier` and Agent-local implementations; it has no Server or EF dependency. The verifier accepts a command only after checking:
+
+1. format, bounded identifiers, payload and signature size;
+2. exact target device, issue/expiry times and a maximum five-minute lifetime;
+3. a trusted target-specific P-256 public key and ECDSA/SHA-256 signature;
+4. local command policy;
+5. atomic consumption of both command ID and nonce by a durable replay store.
+
+The signature input is a deterministic binary sequence: each variable field has a 32-bit big-endian byte length; numeric fields use big-endian integers. The field order is domain separator `Fleetory.Command.v1`, format version, target `DeviceId` as 32 lowercase hexadecimal UTF-8 characters, command ID in the same form, command type UTF-8, SHA-256 of exact payload bytes, issue and expiry UTC ticks, nonce UTF-8 and signing-key ID UTF-8. ECDSA signatures use the 64-byte IEEE P1363 `r || s` form. A signing key ID is included in the signed material to prevent key substitution. The incoming payload and signature are copied before storage. The verifier returns a separate payload copy for execution.
+
+This is a security contract, **not** the PHASE 8 Agent wire protocol. Private signing keys and command signing are not implemented in Fleetory Server. `DirectoryCommandVerificationKeys` reads device-bound public SPKI files from an Agent-local trust directory on every lookup; removing a file revokes that key for the next command. External provisioning must protect the trust directory from unauthorized writes. On Unix the directory and key files cannot be symbolic links or writable by other users. On Windows the trust and replay directories must have protected ACLs, and the directory, trust files, replay database and its WAL/SHM files may grant access only to the Agent process identity, LocalSystem or Administrators; their owner must also be one of those identities. Directory permissions are rechecked for each operation, and trust-file and existing replay-file permissions are checked before use. A changed or broad ACL fails closed. The local lab provisions a process-private replay directory; production must provision the service identity and protected paths before Agent startup. `SqliteCommandReplayStore` uses a private Agent-local SQLite database with WAL and full synchronous commits. Unique constraints atomically reject reuse of either command ID or nonce per device, including after a restart or concurrent attempt. Entries are retained indefinitely to remain safe across wall-clock rollback; deployment must monitor disk use. Storage errors propagate and prevent command acceptance. `AgentCommandExecutionPolicy` currently accepts only an argument-free `Inventory.Refresh` for the local device; all other commands, including high-risk and bulk operations, are denied. `AgentCommandExecutionGate.Create` binds the real trust directory, SQLite replay store and local policy before it can invoke an inventory handler. Tests prove invalid, tampered, untrusted and replayed commands never reach that handler, including after gate recreation. Replay is committed before handler invocation; if a handler fails, the failure propagates and the same envelope cannot be retried. The actual Agent host and command transport are not yet wired.
+
+Agent trust-key reads enforce the 1-KiB limit on the bytes obtained from one
+open file handle. A fixed 1025-byte buffer includes one overflow byte, so growth
+after metadata inspection cannot cause an unbounded whole-file allocation.
+Empty content and overflow fail closed, and cancellation is checked before I/O
+and again before returning any key bytes. The reader handles short reads and
+does not rely on a declared stream length. File handles are disposed on success,
+failure and cancellation; the existing ACL/link checks and per-device lookup
+remain in force.
+
+The command security tests cover valid signatures, target mismatch, expiry/future/overlong windows, payload and nonce tampering, unknown and malformed keys, policy denial, repeated commands and nonce reuse, oversized/malformed envelopes, input-copy isolation, replay-store failure, durable restart and concurrent consumption, and trust-file removal. Architecture tests keep the contracts in Core ownership.
+
+The local lab now provisions a non-exportable OpenBao Transit P-256 signing key, a separate one-hour sign-only token and the matching Agent trust file. `Fleetory.CommandSigning` is a separate project outside the Server dependency graph; its current API can sign only an empty, one-minute `Inventory.Refresh` for an explicit DeviceId. It pins the Transit key version and public P-256 key, rejects redirects and unexpected signature versions, and verifies each returned signature locally before releasing the envelope. The repeatable lab check obtains a live Transit signature, confirms that Agent accepts it once and rejects replay, and confirms that the Server's KV read token receives 403 from Transit sign. `eng/verify-security-lab-command-key-rotation.ps1` rotates the lab Transit key, provisions the new DeviceId-bound trust file, checks both versions during overlap, archives the old trust file, and confirms that a newly signed old-version command is rejected as `UnknownKey` while the new version still works. This intentionally changes the disposable lab key on every run. OpenBao can continue signing with an older version after rotation; Agent trust removal is the revocation boundary. Provisioning now compares all DeviceId-bound trust versions with OpenBao's current key ring; a restarted ephemeral ring cannot silently leave an older version trusted. A lab-only reset explicitly archives every stale target key. The lab's single desktop user and OpenBao development mode do not establish production signer process isolation, request authentication, authorization, approval or recovery. No command dispatch or Agent execution handler is wired yet.
+
+The Transit client now bounds the complete request and response lifetime to ten seconds, including body reads, and honors caller cancellation before releasing an envelope. It caps response buffering at 4 KiB, validates the sign-only token before HTTP header construction, disables inherited proxies and cookies, and returns fixed status/JSON/encoding errors without the remote reason phrase or body. Real loopback tests cover stalled headers, stalled bodies and cancellation during body reads. Production signer isolation, deployment custody and human approval integration remain open.
+
+`SigningClientAuthorizationPolicy` now binds a protected caller identity and exact certificate SHA-256 to explicit DeviceIds and a UTC validity window. It requires digital-signature/client-authentication usage and a valid chain under bounded custom CA trust without certificate downloads. `AuthorizedCommandSigner` checks the policy before Transit access and again before envelope release. Policy inputs are copied; unregistered, out-of-scope and expired callers fail closed. This library layer must receive the actual connection certificate after mTLS proof of possession. The standalone host supplies mTLS proof and durable request/HTTP-denial audit. Controlled policy reload, production custody and external approval integration remain open; an uploaded certificate is not authentication.
+
+Authorized signing now requires a durable RequestId reservation and result journal before returning any envelope. The signer-owned PostgreSQL adapter commits append-only request/result rows with `synchronous_commit=on`, blocks duplicate RequestIds across concurrent connections and binds completion to caller, certificate and DeviceId. It stores CommandId/key ID and a canonical-envelope/signature hash rather than credentials or raw signature material. Failures remain pending for reconciliation; even a committed signing result does not prove delivery. The data source belongs to the independent signer deployment, outside the Server dependency graph. TLS-handshake audit retention, delivery reconciliation and independent WORM/SIEM export remain open.
+
+`Fleetory.CommandSigner.Host` is now a separate executable with no Server/Agent
+implementation references. Its single HTTPS listener requires the registered
+client key through mTLS and rechecks grant/DeviceId scope before signing. The
+strict, bounded endpoint exposes only empty `Inventory.Refresh`; global rate,
+concurrency and request deadlines apply. A narrow PostgreSQL login is required
+before startup; runtime loss of rights degrades journal readiness. HTTP denials
+are stored with the actual peer fingerprint and a returned audit ID; backend
+failures never release an unaudited envelope. Shared TLS/file-secret adapters
+now live in `Fleetory.Security.Infrastructure`, outside bounded-context
+implementations, and remain covered by existing Server tests. Production
+isolation/custody, handshake-log retention, policy reload and external approvals
+are still separate controls; see [the signer runbook](../operations/CommandSignerDeployment.md).
+
+The restricted Linux image packages only the signer runtime and pins the .NET
+base image by digest. A real Docker process test verifies non-root execution,
+read-only root/secret mounts, no effective capabilities or Docker socket, and
+separation from an unrelated process/database principal. Actual mTLS signing
+uses verified PostgreSQL TLS and an external test HTTPS Transit endpoint; a host
+restart preserves duplicate-request denial without a second signature. These
+checks establish the tested process boundary, while production key/volume custody,
+network policy, retained diagnostics and approvals still require deployment evidence.
+
+The signer endpoint now observes connections around its HTTPS middleware and
+emits a fixed structured warning if TLS admission never reaches the accepted
+stage. The record contains a server-generated event UUID, UTC time, sanitized
+transport connection ID, actual IP peer and monotonic elapsed time. It logs no
+exception text, certificate data, raw bytes or attempted credentials and performs
+no database/network audit call before authentication. Established TLS followed
+by an HTTP denial remains a PostgreSQL audit event. Warning output survives a
+generic logging disable; protected collection, retention and WORM custody remain
+deployment responsibilities.
+
+Signer-client emergency revocation is now an independently written, append-only
+PostgreSQL denylist keyed by the exact client leaf SHA-256. The runtime has only
+SELECT on that table; startup rejects missing reads or write privileges. Every
+HTTP request and each signing boundary performs a fresh read, including after
+Transit and after result commit. Revocation or lookup failure withholds the
+envelope even on existing TLS connections. The operator procedure records the
+incident, distinct operator/approver references, evidence digest, database identity
+and event UUID with synchronous commit. These references still require external
+approval/custody validation. CA/grant policy reload, recalling already returned
+envelopes and independent WORM export are separate controls.
+
+Lost-response incidents can now use `eng/reconcile-signing-request.sql` under
+an independent SELECT-only operator login. Its bounded read-only transaction
+returns one request/result snapshot and distinguishes missing reservation,
+pending reservation and committed signing result without returning signatures
+or authorizing a retry. It retains the exact certificate/caller/DeviceId binding
+and canonical envelope digest for external evidence comparison. Role switching,
+invalid UUIDs, prior transaction writes, lost read privileges and blocked reads
+fail closed. The JSON observation still needs independent custody and delivery
+correlation; signing recorded in the journal is not Agent delivery or execution.
+
+### Command validity across asynchronous checks
+
+Baseline section 12 requires expiry and replay protection before Agent execution.
+The verifier rechecks the signed validity window after asynchronous key lookup,
+after the policy decision and after durable replay consumption. It also checks
+the window at entry; the execution gate performs the same check immediately
+before invoking the inventory handler. These checks use the same local clock,
+five-minute maximum lifetime and 30-second future-issue tolerance. They add no
+external authorization or time-service call.
+
+An envelope that reaches its expiry or falls outside the issue-time tolerance
+while waiting returns `OutsideValidityWindow` without verified command content.
+Before replay consumption, that rejection leaves the nonce unused. After a
+successful replay commit, rejection preserves the consumed nonce/command ID;
+clock recovery cannot authorize the same envelope again. Operators must not
+treat this outcome as evidence that a handler ran or automatically issue a retry.
+
+Deterministic tests pause each key/policy/replay dependency at a real asynchronous
+boundary and advance or roll back an injected clock. Six rejection cases reproduced
+acceptance of stale commands before the fix. Six acceptance cases retain the
+valid expiry/skew boundaries, and retries verify replay-state preservation.
+The production clock, trust distribution and future Agent host remain deployment
+and integration responsibilities.
+
+### Signer caller validity after revocation reads
+
+The isolated signer's caller policy now runs after each asynchronous revocation
+read: before RequestId reservation, before Transit, before result completion and
+before envelope release. It samples current grant/certificate validity after the
+read rather than trusting the time before that wait. The initial synchronous
+caller/target check still rejects untrusted input before any database lookup.
+No additional revocation read or signing capability is introduced.
+
+Eight deterministic cases pause a revocation read at each boundary. Four
+exact-expiry cases reproduced either later unauthorized work or actual envelope
+release before the fix; four still-valid cases continue to sign once. A denial
+before reservation leaves no RequestId to reconcile. A later denial preserves its
+pending/recorded journal state and cannot sign again when the clock recovers;
+a recorded result does not establish signature delivery. Caller cancellation and
+revocation-store failures continue to withhold the envelope. Production time
+trust, approvals and key custody remain external controls.
+
+## Implemented local audit persistence
+
+Platform now registers `IAuditWriter` backed by PostgreSQL. A write inserts an append-only `platform.audit_events` row and a matching `platform.audit_export_queue` row in the same transaction. The method returns only after commit. A database or transaction failure propagates to the caller; critical call sites must not swallow it. Both tables and their indexes are created by Platform migration `202610160001_AddPlatformAuditOutbox`. No foreign key crosses a module schema.
+
+Audit input validates bounded actor, action, target and correlation identifiers. Context is limited in size and rejects sensitive key names such as passwords, tokens and credentials. Callers must still avoid putting secret values under innocuous keys. The audit tables are owned by Platform; modules use only `IAuditWriter` and do not read Platform tables directly.
+
+The outbox preserves pending export state so that an unavailable external sink does not block the local transaction. This is durable local storage, not a claim of tamper-proof audit after a full database compromise. No privileged endpoint is exposed by this slice.
+
+## Implemented audit export transport
+
+Platform migration `202610160003_AddAuditExportLease` adds attempt count, due time and a bounded lease to each pending export. `PostgreSqlAuditExportPump` claims due entries using PostgreSQL row locks with `SKIP LOCKED`; multiple Server nodes cannot claim the same live lease. It publishes outside the database transaction through `IAuditExportSink` and deletes a queue entry only after the sink reports durable acceptance. Delivery failures clear the lease and schedule exponential retry, capped at one hour. A crashed worker leaves a recoverable lease. Entries are never silently discarded because of retry count. The event ID is stable across all attempts, so a sink must deduplicate by that ID. Delivery is **at least once**; order across nodes is not guaranteed.
+
+The background worker starts with `Fleetory:AuditExport:Enabled=true`. Enabling it requires an `IAuditExportSink` registration; without one, Server startup fails instead of pretending that export works. In non-Development environments, enabling either Agent or Admin Gateway now also requires `AuditExport:Enabled=true` and the supported `Immudb` sink before the gateway starts. A public-only deployment can leave export disabled. If the configured sink becomes unavailable after startup, critical events still commit locally and the outbox retries asynchronously. The worker batches at most three entries under a two-minute lease and gives each sink call a 30-second cancellation deadline. If a sink ignores cancellation, another node may retry after lease expiry; sink idempotency remains required. Retry logs contain event IDs and attempt counts, not sink exception messages. Integration tests cover successful delivery, failed delivery and retry, expired lease recovery, concurrent claims and the enabled background worker.
+
+When export is enabled, `/health/ready` also checks the oldest pending outbox entry. It reports `Degraded` after five minutes of backlog and returns to `Healthy` after the queue drains. A degraded result does not prevent local audit writes or make the web listener unavailable; operators must monitor this status and investigate exporter logs and the destination. The check reads only PostgreSQL queue metadata and does not call immudb in the request path. It does not prove the external copy is complete or cryptographically anchored.
+
+The `Immudb` sink can be selected with `Fleetory:AuditExport:Enabled=true`, `Fleetory:AuditExport:Sink=Immudb`, `Fleetory:AuditExport:Address=<HTTPS origin>`, `Fleetory:AuditExport:Username=<writer name>` and the optional `Fleetory:AuditExport:Database=<database name>` (default `defaultdb`). The database name is validated and selected explicitly after login, so a writer can be isolated to a dedicated audit database. It loads `audit-immudb-password` through `ISecretProvider`. Plain HTTP and the default `immudb` administrator username are accepted only in Development; the default `immudb` password is also refused outside Development. OpenBao and immudb addresses both reject embedded URL credentials. Invalid production transport, credentials or database names prevent sink construction during Server startup. The HTTP client refuses redirects so an immudb response cannot redirect the login request or bearer token to another origin. It uses immudb's conditional write (`KeyMustNotExist`) with a stable EventId key, then reads back the value and requires revision 1. Matching retries are acknowledged without adding another revision; conflicting content fails and remains in the outbox. The local immudb instance and a simulated retry/conflict test verify this behavior. The separate [signed-state receipt verifier](ImmudbAuditState.md) reads `GET /api/db/state`, verifies the pinned immudb state signature, and rejects rollback or conflicting state before appending a receipt. This transport and verifier still do not establish production retention, protected backups or separation of audit administrator duties.
+
+For production provisioning, create a separate read/write user for the audit database through immudb administration, without granting Admin or SysAdmin rights. The current REST sink uses immudb's default database selection, so provision that user for `defaultdb` or isolate Fleetory audit on its own immudb instance. Configure a trusted HTTPS origin for the REST API, restrict its network path to Fleetory, and keep the administrative API off that path. Put only the writer password in the Fleetory secret provider and set the non-default username in configuration. Verify startup, an exported EventId at revision 1 and retry without an additional revision; then verify that removing write permission leaves the event pending in the PostgreSQL outbox. This is a deployment procedure to execute against the selected production topology, not evidence that a production immudb installation has passed it. The [immudb user-management guide](https://docs.immudb.io/1.5.0/management/user) describes database-scoped read/write permissions; its [backup guide](https://docs.immudb.io/master/production/backup) and [signed-state guide](https://docs.immudb.io/master/management/state) inform the separate retention, restore and off-host receipt-anchor controls still to be implemented and exercised.
+
+## Implemented local RBAC evaluation
+
+Platform migration `202610160002_AddPlatformAuthorization` owns scope hierarchy, roles, exact permissions and actor-role assignments in the `platform` schema. `IAuthorizationService` now has a PostgreSQL evaluator. A grant may be global or tied to a Platform scope; scoped grants apply to that scope and its descendants, while unrelated scopes and unknown scope IDs are denied. Requests without a scope require a global assignment. Actor kind and subject ID must match exactly, permissions are case-sensitive and never use wildcards. Anonymous actors and malformed requests are denied. Each decision reads the current local database state, so removing an assignment affects the next decision without waiting for an external identity provider or stale cache. Storage failure propagates rather than producing an allow decision.
+
+The evaluator and an initial administration surface are now available. On the Admin mTLS port, `POST /admin/authorization/roles` creates a role with 1–32 exact permissions; `POST /admin/authorization/scopes` creates a scope; `POST /admin/authorization/roles/{roleId}/assignments` assigns a role globally or within a scope; and `DELETE /admin/authorization/assignments/{assignmentId}` revokes it. `DELETE /admin/authorization/roles/{roleId}` retires a role only after all assignments are revoked; `DELETE /admin/authorization/scopes/{scopeId}` retires a scope only after its assignments and child scopes are removed. In-use objects return 409, missing objects return 404, and blocked attempts are audited. The database role foreign key also prohibits direct cascading deletion of assigned roles.
+
+`POST /admin/authorization/roles/{roleId}/replacements` takes the same name and permission body as role creation and returns a new role ID. It locks the old role, creates the replacement, moves its existing assignment IDs and scopes, deletes the old version, and appends the audit event and export entry in one serializable transaction. A failed audit rolls the rights change back. The old ID returns 404 for active role operations after replacement. Removing `platform.authorization.manage` from the last global management role returns 409 and records a blocked attempt. Operators must review the complete new permission set before calling this route because every assignment changes at once. `platform.authorization_role_versions` retains each role ID, canonical permission set, name, predecessor ID and snapshot time, including the original version after its active row is deleted. Existing roles are snapshotted by migration; legacy direct database roles are snapshotted on replacement. The audit event links the old and proposed new IDs. `GET /admin/authorization/roles/{roleId}/versions` reads the current or historical ID's lineage newest first, requires the same global management permission and writes a read/missing audit event.
+
+Scope names can be revised with `PUT /admin/authorization/scopes/{scopeId}` and a body containing `name` and `expectedRevision`. The response returns the same `ScopeId` and the next revision. A stale revision returns 409 and is audited; missing scope returns 404. The version snapshot, active name, audit event and export entry commit together. The parent, child links and scoped assignments retain their IDs, so a name change cannot silently move authorization boundaries. `GET /admin/authorization/scopes/{scopeId}/versions` returns the audited revision history. Parent changes are deliberately excluded from the HTTP API; an approved database operator can use the serializable, audited [scope reparenting procedure](ScopeReparenting.md) after reviewing its read-only impact report.
+
+Outside Development, these routes pass the Admin OIDC/WebAuthn gate. Each operation requires a global `platform.authorization.manage` grant. The authorization decision, RBAC write and audit event plus export queue entry use one serializable PostgreSQL transaction. Denied attempts are audited. Removing an assignment affects the next decision, including on an existing Admin TLS connection. Revoking the last global management assignment returns 409 and writes an audit event without removing access. The routes share the Admin rate limit and reject bodies above 4 KiB. No default administrative grant is seeded. The offline first-admin bootstrap procedure below grants that permission once; recovery after loss of certificate or OIDC access is still open. Direct database writes in tests are only bootstrap fixtures. External-group mapping, general UI session management and authorization of future privileged routes remain open. The local Admin OIDC/WebAuthn gate is verified separately below.
+
+### First Admin bootstrap
+
+Issue the first Admin client certificate through the external Admin CA and verify its single `urn:fleetory:admin:<uuid>` SAN, client-authentication purpose and private-key custody. During deployment, a database operator with write access to the Platform schema runs [bootstrap-first-admin.sql](../../eng/bootstrap-first-admin.sql) in a controlled `psql` session, using the UUID from that SAN:
+
+```text
+\set ON_ERROR_STOP on
+BEGIN;
+SET LOCAL fleetory.bootstrap.admin_person_id = '<uuid-from-admin-certificate-san>';
+\i eng/bootstrap-first-admin.sql
+SET LOCAL fleetory.admin_register.mode = 'bootstrap';
+SET LOCAL fleetory.admin_register.person_id = '<uuid-from-admin-certificate-san>';
+SET LOCAL fleetory.admin_register.certificate_sha256 = '<UPPERCASE_DER_SHA256>';
+SET LOCAL fleetory.admin_register.incident_reference = '<APPROVED_DEPLOYMENT_REFERENCE>';
+SET LOCAL fleetory.admin_register.operator_reference = '<OPERATOR_ID>';
+\i eng/register-admin-certificate.sql
+COMMIT;
+```
+
+Run this from the repository root after Platform migrations, with `ON_ERROR_STOP` enabled. Supply database credentials through the operator's normal protected `psql` mechanism; do not put a password in the command line or repository. The transaction creates one global `platform.authorization.manage` assignment and registers the exact first Admin certificate, with separate audit/export entries. The bootstrap uses a transaction-scoped advisory lock and refuses to run if any global manager already exists. The PostgreSQL integration tests verify the grants and registration. Restrict and revoke the temporary database operator's Platform write access after bootstrap. This procedure cannot recover a deployment that still has a manager assignment but has lost that person's certificate or OIDC access; use the controlled recovery procedure below.
+
+### Emergency Admin recovery
+
+If no existing global administrator can authenticate, an authorized database operator can run [recover-admin-access.sql](../../eng/recover-admin-access.sql). Before the database session, the incident owner and a separate approver must document the incident, verify that the replacement certificate has a single `urn:fleetory:admin:<uuid>` SAN with a protected private key, and verify that the replacement person can complete the OIDC/WebAuthn login. The SQL script cannot verify these external approvals or certificate custody; the operator must check them through the incident process. Use a short-lived database credential with Platform write privileges, outside the Fleetory Server identity.
+
+In a controlled `psql` session from the repository root after Platform migrations:
+
+```text
+\set ON_ERROR_STOP on
+BEGIN;
+SET LOCAL fleetory.recovery.admin_person_id = '<uuid-from-replacement-admin-certificate-san>';
+SET LOCAL fleetory.recovery.incident_id = '<approved-incident-reference>';
+\i eng/recover-admin-access.sql
+SET LOCAL fleetory.admin_register.mode = 'recovery';
+SET LOCAL fleetory.admin_register.person_id = '<uuid-from-replacement-admin-certificate-san>';
+SET LOCAL fleetory.admin_register.certificate_sha256 = '<UPPERCASE_DER_SHA256>';
+SET LOCAL fleetory.admin_register.incident_reference = '<approved-incident-reference>';
+SET LOCAL fleetory.admin_register.operator_reference = '<OPERATOR_ID>';
+\i eng/register-admin-certificate.sql
+COMMIT;
+```
+
+The recovery script requires an existing global manager assignment but refuses a duplicate grant to the replacement identity. The transaction creates a new global management role and assignment, registers the exact replacement certificate, and writes both audit/export entries atomically. The RBAC audit context includes the incident reference and PostgreSQL `session_user`; the separate certificate registration records the supplied operator reference. Previous grants remain intact so the operator can first confirm the replacement person's Admin mTLS plus OIDC access. The new administrator then revokes an inaccessible prior assignment through the audited Admin route, preserving the last-manager safeguard. Confirm audit export and revoke the temporary database credential. If no global manager assignment remains, use the separate first-admin bootstrap only under an approved restoration procedure. Tests cover recovery, audit export enqueue, duplicate denial and missing-manager denial.
+
+## Implemented Secret Provider boundary
+
+`Fleetory.Platform.Contracts` owns `ISecretProvider`; Platform implements a bounded UTF-8 file adapter for an externally provisioned secret mount. In non-development environments, Server requires an absolute `Fleetory:Secrets:Directory` and reads `fleetory-postgresql` before startup. Both Platform and Core obtain their PostgreSQL connection string from the same provider. Direct `ConnectionStrings:Fleetory` is rejected in these environments and cannot be combined with a secret directory. The provider caches values for the process lifetime, so rotation requires a restart. It rejects missing, empty, oversized, invalid UTF-8 and unsafe names. The mount directory and secret files cannot be symbolic links; on Unix the directory cannot be group/other writable and secret files cannot be group/other readable. Deployment must also protect the parent path and mount owner from substitution; Windows deployment must enforce an ACL granting only the service identity access.
+
+The secret manager or OS mount is responsible for provisioning, access control and rotation. Fleetory also has an OpenBao KV v2 adapter selected with `Fleetory:Secrets:Provider=OpenBao`. It reads the same named secrets through an authenticated API, requires HTTPS outside Development, and accepts plain HTTP only on loopback in Development. Its HTTP client refuses redirects so the `X-Vault-Token` header cannot follow a server-supplied `Location`. A real loopback HTTP test checks the default handler for both OpenBao and immudb. Both adapters cache secrets for the process lifetime, so rotation requires a restart. Production delivery of external audit-sink credentials is still open. No secret contents are emitted in provider error messages.
+
+OpenBao KV reads now enforce one five-second deadline across request headers and
+the complete response stream. Previously `ResponseHeadersRead` ended
+`HttpClient.Timeout` coverage at the headers, so a peer could indefinitely stall
+startup while sending an incomplete secret body. The same cancellation token now
+covers the request, stream acquisition and every body read; expiration returns a
+sanitized failure without a partial value or inner transport exception. Successful
+values retain the process-lifetime, single-fetch cache. The synchronous provider
+contract remains a startup/configuration boundary, outside request hot paths.
+
+OpenBao and immudb reuse one bounded response reader, retaining their respective
+20-KiB and 16-KiB byte limits without trusting Content-Length. Real loopback HTTP
+regressions hold either headers or the secret body open; the body case reproduced
+the original indefinite wait before the fix and both now fail within the deadline.
+Existing immudb malformed/oversized response and credential isolation tests pass.
+Microsoft documents the separate body-timeout requirement for
+[ResponseHeadersRead](https://learn.microsoft.com/en-us/dotnet/api/system.net.http.httpcompletionoption?view=net-10.0).
+
+## Implemented Agent certificate binding foundation
+
+`Fleetory.Core.Contracts` owns the certificate-binding lookup and verifier contracts. Core migration `20261016212919_AddAgentCertificateBindings` adds `core.agent_certificates`. A unique SHA-256 digest of the certificate DER binds one certificate to one `DeviceId`; multiple certificates may be valid for the same device during rotation. The row stores validity bounds and an optional revocation timestamp. It references only Core-owned `devices`. Core registers a PostgreSQL lookup and verifier; storage failure propagates, so identity cannot silently become accepted.
+
+The verifier checks the certificate validity interval, end-entity Basic Constraints, Digital Signature Key Usage, Client Authentication EKU, exact registered digest, target `DeviceId`, binding validity and revocation. The initial gateway calls it on **every Agent request**, including a request sent over an existing TLS connection. A revoked binding is denied on the next request. Two active bindings permit rotation overlap without changing the billable device identity. Integration tests cover overlap and revocation against real PostgreSQL; unit tests cover unknown, wrong-device, invalid-purpose and expired certificates.
+
+The verifier is a binding check; the gateway supplies the certificate from Kestrel's client-certificate TLS handshake. Supplying a copied public certificate object to the verifier alone proves no possession of its private key.
+
+Certificate/binding verification now samples current UTC again after its
+asynchronous binding lookup. It checks the leaf window before returning even an
+`UnknownCertificate` result, then evaluates the binding's own window using that
+same fresh instant. A slow identity-store read cannot turn an expired or not-yet-
+valid leaf/binding into an accepted identity. Already invalid inputs still fail
+before database access; no extra lookup or external time-service call is added.
+Cancellation is checked at entry and after the lookup, including when a store
+finishes despite a cancelled caller.
+
+Fourteen controlled cases cover known/unknown leaves with independently wider
+binding windows, shorter binding windows, inclusive NotBefore/exclusive NotAfter
+boundaries, clock movement during a real asynchronous pause and cancellation.
+Eight rejection cases failed against the previous implementation; six valid
+boundary cases retain their accepted/unknown outcomes. Production clock trust
+and authorization of future long-lived Agent streams remain separate controls.
+
+## Implemented initial Agent mTLS listener
+
+The opt-in `Fleetory:AgentGateway:Enabled=true` setting requires a mounted secret directory and two different explicit ports: `Fleetory:Web:Port` for the existing HTTP web/health surface and `Fleetory:AgentGateway:Port` for HTTPS with a mandatory client certificate. Kestrel builds a chain directly to the configured Fleetory root CA, checks Client Authentication purpose, and refuses certificates outside that trust root. The server certificate must chain directly to the same root and have Server Authentication purpose. Invalid or missing TLS material fails startup. The gateway reads `agent-gateway-root-ca` (PEM certificate), `agent-gateway-server-cert` (PEM certificate) and `agent-gateway-server-key` (matching PEM private key) through `ISecretProvider`. The root CA private key must stay outside Fleetory Server. TLS termination or a reverse proxy in front of this port must preserve the authenticated client-certificate boundary; the current implementation expects the handshake at Kestrel.
+
+The identity route `GET /agent/identity` returns `204` after successful mutual TLS and an active Core certificate binding. The Agent `DeviceId` is read from a single SAN URI `urn:fleetory:device:<guid>`; a missing, malformed or duplicate Fleetory URI is denied. The web port does not expose `/agent`, and the Agent port does not expose health or module routes. The gateway checks the binding on every identity request, so revocation blocks reuse of an established connection at the next request. The additional enrollment route is described below. An integration test exercises a real TLS handshake, port isolation, accepted, unknown and revoked bindings, and missing client certificates against disposable PostgreSQL.
+
+The identity probe is not Agent Protocol v2 or a production Agent operation. CA revocation lists and OCSP are not configured: the pinned direct CA chain is checked in TLS, while the local database binding controls individual certificate revocation per request. Each gateway accepts one or two explicitly provisioned PEM roots. Two roots provide a bounded CA rollover window; duplicate roots, a third root and any root shared by Agent and Admin gateways fail startup. During rollover, provision the new CA root alongside the old root, issue and enroll replacement client certificates through the existing rotation flow, switch the server certificate to the new CA, then remove the old root and restart. Removing the old root rejects its clients at TLS even if their Core binding has not yet been revoked, so operators must confirm migration first. Windows hosts also need the new issuer chain in their certificate stores before the server switch. A production deployment must restrict and encrypt the web listener at its ingress and protect the secret mount. External certificate issuance, controlled trust distribution and full rotation administration remain open.
+
+## Implemented internal certificate revocation boundary
+
+Core registers `AgentCertificateRevocationService` for trusted in-process callers. It requires a global `core.agent_certificate.revoke` permission through Platform RBAC, writes an audit event for denied or authorized requests through `IAuditWriter`, and only then atomically marks the matching Core certificate binding revoked. A failure to persist the authorized audit intent prevents the state change. Repeating a request cannot replace the original revocation time. The Agent gateway checks the updated binding on the next request. An integration test covers a denied actor, audit-store failure, successful revocation and retry against real PostgreSQL.
+
+The service writes a second audit event with the `revoked` or `unchanged` outcome in the same PostgreSQL transaction as the Core update. Platform owns the audit and export-queue writes through `IAuditWriter`; Core passes the active transaction without accessing Platform tables. If the update or completion audit fails, both roll back. The earlier request event remains, and a retry can perform the revocation. An integration test reproduces this failure and retry. An interruption while committing can still leave the caller unsure of the result; the operator must inspect the certificate binding and audit by correlation ID before deciding whether to retry. No grant is seeded by default.
+
+## Implemented authenticated Admin revocation entry
+
+`Fleetory:AdminGateway:Enabled=true` activates a third, separate Kestrel listener with mandatory client-certificate TLS. It binds to loopback by default; `Fleetory:AdminGateway:BindAddress` must explicitly name a management-network IP for remote access. Wildcard addresses (`0.0.0.0`, `::` and IPv4-mapped equivalents) are rejected at startup. It uses `Fleetory:AdminGateway:Port` and `admin-gateway-root-ca`, `admin-gateway-server-cert`, `admin-gateway-server-key` in the secret mount. The Admin and Agent roots must be different when both listeners are enabled. The Admin certificate must chain to the configured Admin root, be an end-entity signing certificate and contain exactly one `urn:fleetory:admin:<guid>` SAN URI; the GUID becomes the `person:<guid>` actor subject for Platform RBAC. Issuance of an Admin certificate is a privileged external CA procedure; the Admin CA private key does not belong on Fleetory Server. Removing the actor's RBAC grant denies the next request, including over an existing TLS connection.
+
+The Admin middleware also checks the leaf's current UTC validity window on every
+request, before the certificate registry read and again after registry/OIDC work,
+immediately before dispatch. TLS handshake validation alone cannot expire an
+already established connection. A leaf outside `[NotBefore, NotAfter)` receives
+403 with `admin.certificate.validity_denied`, the certificate SHA-256, actor and
+correlation ID in durable audit/outbox; audit failure prevents dispatch. The shared
+time-window predicate is also used by Agent binding verification and enrollment.
+Seven controlled-clock/cancellation/audit tests cover exact boundaries. Two real
+mTLS/PostgreSQL cases prove a single TCP connection cannot authorize another
+request after expiry or when expiry occurs while its registry read waits on an
+actual database lock, with exactly one persisted denial/export entry. These
+admission checks do not cancel an operation already dispatched before expiry;
+production clock trust, CA lifecycle and key custody remain deployment controls.
+
+Admin registration overlap expiry is evaluated against actual database time after
+SQL lock waits. The lookup also retains the exact accepted overlap deadline;
+the shared admission guard rechecks it with current Server UTC after the lookup
+and after OIDC work. Expiry fails with the existing audited registration denial,
+without repeating the database lookup. Two real PostgreSQL lock-wait cases and
+eight guard cases cover expired/still-valid overlap, exact boundaries, captured
+results, permanent registrations and revoked/unregistered/unknown denials. The
+[registration runbook](AdminCertificateRegistration.md) records the clock and
+dispatch limits.
+
+The offline Admin registration procedure now acquires the shared registration
+advisory lock and existing credential row locks before evaluating expiry. Its
+decision/registration/audit timestamp is captured after those waits. An expired
+prior registration cannot authorize rotation, recovery sees current eligibility,
+and successful rotation receives its complete one-hour overlap. Six actual
+PostgreSQL advisory/row-lock cases verify denial, valid completion, recovery,
+unchanged rejected state and consistent registration/audit/outbox timestamps.
+Operator rights and short transaction handling are documented in the registration
+runbook; external approval authenticity and CA custody remain deployment controls.
+
+Core owns `POST /admin/devices/{deviceId}/certificates/{fingerprint}/revoke`. It is reachable only on the Admin mTLS port; web and Agent ports return 404. A successful call returns 204 after the authorized request, Core update and completion audit event have been persisted. The update and completion event share one transaction. Denied authorization returns 403 and is audited. Invalid identity or a missing/foreign client certificate is refused. The Admin listener does not expose health or module routes. The end-to-end test covers the three-port boundary, separate CAs, denied grants and identities, audit completion and Agent rejection after revocation.
+
+The Admin listener can additionally require an OIDC access token via `Fleetory:AdminGateway:Oidc:Enabled=true`. The JWT bearer handler validates issuer, audience, signature and lifetime against the configured authority. Fleetory then requires `azp` to equal the configured client ID, `amr` to contain `webauthn`, and the token `sub` UUID to equal the UUID in the client certificate's Admin SAN. A certificate without a token receives 401 before RBAC or Core work; the denial is persisted through `IAuditWriter` with the certificate actor and correlation ID, without storing token contents. When the Admin listener is enabled outside Development, OIDC is mandatory at startup. Development may still run certificate-only tests. The provider's authentication flow must ensure the `amr` claim reflects a completed WebAuthn execution; the local Keycloak provisioner configures that reference. This establishes a dual proof for the existing administrative routes, not a general login UI or a role-management surface. Deployment must restrict access to the Admin port to a management network and provision Admin certificates and grants under a separate approval process. Admin certificate lifecycle and issuance, distributed rate limits and recovery of commit-acknowledgement ambiguity remain open.
+
+The Admin enrollment, recovery and revocation routes share a fixed one-minute request limit partitioned by Admin client certificate per Server instance. The default is 30 requests per minute; `Fleetory:AdminGateway:RateLimitPerMinute` accepts 1–300 for deployment sizing. Excess requests return HTTP 429 before repeating authorization and database work. The limiter is active only on the Admin listener, so Admin paths on the public web port consistently return 404 without consuming a bucket. One noisy Admin certificate cannot exhaust another certificate's bucket. This limit is per process, so an ingress must enforce a fleet-wide limit across Server replicas and certificates. A real mTLS integration test verifies these boundaries.
+
+The Agent `POST /agent/rotation-intents` route has a separate fixed one-minute limiter, partitioned by the presented client-certificate thumbprint. `Fleetory:AgentGateway:RotationIntentRateLimitPerMinute` defaults to 30 and accepts 1–300. A noisy Agent receives 429 without exhausting the Admin bucket or blocking `/agent/identity`; the real mTLS test checks both boundaries. The limiter is local to each Server replica; deployment ingress still needs an aggregate abuse limit.
+
+The unbound Agent `POST /agent/enroll` route also has its own per-certificate one-minute limit, configured by `Fleetory:AgentGateway:EnrollmentRateLimitPerMinute` (default 30, range 1–300). It bounds online grant-token attempts without blocking another certificate's enrollment, `/agent/identity` or Admin grant creation. The limit is local to each Server replica, so ingress must also constrain aggregate attempts across replicas and newly issued certificates.
+
+Both Agent limiters run only on the Agent listener. Agent paths reached through the public web port consistently return 404 and do not consume the Agent bucket; the real gateway test sends more than the configured limit through the wrong port.
+
+An [emergency Admin certificate revocation procedure](AdminCertificateRevocation.md) now stores the exact leaf DER SHA-256 in PostgreSQL with incident and operator references. The operator SQL commits the revocation and audit export entry atomically; the Admin listener checks the denylist on every request, before OIDC and RBAC, and records a denial for a revoked certificate with a valid Admin SAN. The old certificate loses access on its next request while a new certificate with the same SAN UUID can still authenticate. Production CA issuance, renewal approval, distribution, external CA revocation and recovery remain open.
+
+## Implemented one-time Agent enrollment grant
+
+An Admin certificate with the global `core.agent_certificate.enroll` permission may call `POST /admin/devices/{deviceId}/enrollment-grants` on the Admin mTLS port with a bounded display name. A first enrollment must include `initialCertificateSha256`, the SHA-256 of the exact CA-issued Agent certificate DER; omission or an invalid digest returns 400. A replacement grant instead requires the active old certificate fingerprint, a rotation intent and the separate global `core.agent_certificate.rotate` permission. Core creates the device if it is new, retaining the existing device record on reenrollment, and returns a cryptographically random 256-bit token once with `Cache-Control: no-store`. The PostgreSQL `core.agent_enrollment_grants` table stores only its SHA-256 digest, the target `DeviceId`, a five-minute expiry, consumption time, optional expected old certificate SHA-256 and the required target certificate SHA-256. Expired rows are removed when a new grant is created. The token is never written to audit records. A legacy unconsumed grant without a target fingerprint is rejected during redemption without consuming it; operators must issue a new bound grant. Possession of the token alone cannot enroll a different CA-issued certificate with the same DeviceId.
+
+For a device with any existing certificate binding, the Admin request must include `expectedCertificateSha256` matching one of that device's active bound certificates. This makes rotation explicit; an omitted, foreign or revoked fingerprint returns 409, with the collision decision audited. A matching fingerprint without `core.agent_certificate.rotate` returns 403 and an audited `grant_rotation_denied` event. A device without a binding requires the fingerprint field to be absent and only the enrollment permission. Core locks the device row while issuing or redeeming a grant and rechecks the stored expectation before binding a certificate. Revocation takes the same row lock, so it cannot race past the active-binding check. Thus two initial grants issued before the first enrollment cannot both bind different certificates. Rejected redemption returns 403 and an audited `denied_collision` event without consuming the grant. A certificate previously bound to a different `DeviceId` is rejected by its globally unique digest. The same `DeviceId` continues to represent one managed device during certificate overlap.
+
+Before an Admin can request a replacement grant, the Agent presents its **currently bound and active** certificate to `POST /agent/rotation-intents` over the Agent mTLS port with `replacementCertificateSha256` set to the SHA-256 of the already issued replacement certificate DER. The server returns a random `intentId` with `Cache-Control: no-store`. The intent lasts five minutes, records both certificate fingerprints, and is invalidated when another intent is created for that device. The Admin supplies both `expectedCertificateSha256` and `rotationIntentId` when requesting a replacement grant. Core checks the active old binding, consumes the intent and creates the grant and completion audit in one transaction. A missing, expired or reused intent returns 409 and is audited. The grant is bound to the intended replacement fingerprint; a different certificate receives 403 without consuming it. Both Agent and Admin paths write durable audit events. A failed completion audit rolls back the intent claim and grant. The migration invalidates unconsumed replacement grants issued by older code, because those grants have no intended replacement fingerprint. The lab integration test exercises the real mTLS ports, denied unbound Agent, replay and expiry; PostgreSQL tests cover a wrong replacement certificate and old-certificate revocation.
+
+The Agent presents a certificate already issued by the external Agent CA and the token to `POST /agent/enroll` on the Agent mTLS port. Kestrel verifies the certificate chain and client-authentication purpose during the TLS handshake, proving possession of the private key. Core also checks its SAN `DeviceId`, validity and client-authentication extensions. A matching, unexpired token is consumed and the certificate digest is bound to that device in one Core transaction. Concurrent redemptions of one token cannot bind two certificates. The normal `/agent/identity` route then accepts the binding; a second grant can register a replacement certificate on the same device during rotation. A revoked certificate cannot reenroll itself.
+
+Authorization decisions and denied/accepted enrollment attempts are written to the durable Platform audit. The grant or binding change, completion event and export-queue entry share one PostgreSQL transaction. Audit failure rolls back the grant or binding change, so the same token can retry after an enrollment failure. A lost commit acknowledgement still requires inspection of the grant, binding and audit by correlation ID; a new grant can safely retry with an already-bound certificate. The Admin and Agent routes remain isolated from the web listener. Real mTLS/PostgreSQL tests cover denied grants, malformed identities, expiry, replay, rotation, audit failure and concurrent redemption.
+
+### Recovery after a lost commit acknowledgement
+
+For an interrupted grant, enrollment or revocation request, first wait until the original Server request has ended. Use the request's correlation ID to read `platform.audit_events` on the same PostgreSQL instance:
+
+```sql
+SELECT action, target_type, target_id, context_json, recorded_at
+FROM platform.audit_events
+WHERE correlation_id = :correlation_id
+ORDER BY recorded_at;
+```
+
+The matching `grant_created`, `completed` or `revoke_completed` event means the Core change and export-queue entry committed with that event. For enrollment, confirm the expected `device_id` and certificate SHA-256 in `core.agent_certificates`; for revocation, also confirm `revoked_at` or the audited `unchanged` outcome. If the matching completion event is absent after the original transaction has ended, its Core change did not commit; an earlier request event may remain. Retry enrollment with the same unexpired token or retry revocation with a fresh correlation ID. If a grant committed but its response was lost, the token cannot be recovered from storage or audit; request a new grant and let the first expire after five minutes. For a replacement, the Agent must first create a fresh rotation intent because the prior intent was consumed with the committed grant. Do not copy a token or private key into the incident record. A mismatch between completion audit and Core state requires investigation before any further administrative change.
+
+Fleetory Server does not issue or sign certificates and has no Agent CA private key. A replacement now requires the active old private key, both Admin permissions and the new certificate fingerprint. This proves possession of the old key, not physical-device identity if that key was copied. The production approval process must verify the device and custody of the new key before delivering the intent reference or grant token. Loss of the old certificate/key has no bypass through this route; use the separate two-person recovery flow below. External CA issuance, secure grant delivery and CA rotation remain open. This enrollment route is a PHASE 7 identity operation, not the PHASE 8 Agent Protocol.
+
+### Lost-key Agent certificate recovery
+
+When the old Agent private key is unavailable, two distinct Admin identities can run a separate recovery flow. No recovery permission is seeded. The incident owner must verify the physical device, the new certificate's approved CA, exact `DeviceId` SAN and private-key custody outside Fleetory, then retain the evidence bundle in the approved incident system. Fleetory receives only an incident reference and uppercase SHA-256 of that bundle; it cannot validate the bundle's contents or physical custody.
+
+The requester needs global `core.agent_certificate.recover.request` and calls `POST /admin/devices/{deviceId}/certificate-recoveries` with `expectedCertificateSha256`, `replacementCertificateSha256`, `evidenceSha256` and `incidentReference`. The old fingerprint must already be bound to that device; its certificate may be expired or revoked. The replacement fingerprint must not be bound elsewhere. The request lasts 15 minutes and only one unexpired request or unconsumed recovery grant may exist for a device. It returns a `recoveryId`, not an enrollment token.
+
+A different Admin identity needs global `core.agent_certificate.recover.approve` and calls `POST /admin/devices/{deviceId}/certificate-recoveries/{recoveryId}/approve`, independently supplying the exact replacement fingerprint, evidence hash and incident reference. The endpoint returns 403 for the original requester, 409 for mismatched or expired state, and 429 under the Admin rate limit. On approval, Core locks the device, revokes **all** unrevoked Agent certificate bindings for it, invalidates its outstanding unconsumed enrollment grants and rotation intents, marks the recovery approved, creates a five-minute grant for the exact replacement certificate, and writes the completion audit plus export entry in one PostgreSQL transaction. Audit failure rolls all of those changes back. The token is returned once with `Cache-Control: no-store` and must be delivered through the approved secure channel. The new Agent certificate still has to pass the Agent CA mTLS handshake, SAN and key checks at `/agent/enroll`; another certificate cannot consume the grant. Existing Agent certificates lose access immediately after approval, before new enrollment.
+
+Both Admin endpoints use the Admin mTLS listener and the mandatory OIDC/WebAuthn gate outside Development. The test suite checks separate actors and permissions, evidence mismatch, expiry and replay, audit rollback, old-certificate revocation and the full mTLS route. If the approval response is lost, inspect the completion audit and database state by correlation ID; an approved token cannot be recovered. Wait for the five-minute grant to expire, then start a new two-person request. The local flow provides an enforceable two-person gate and an audit link to the incident evidence; production physical-device verification, evidence retention, CA issuance and secure token delivery still require a deployment procedure.
+
+### Certificate deadlines after database contention
+
+Enrollment, rotation-intent creation/claim and recovery request/approval sample
+current UTC inside the protected device transaction after acquiring the device-row
+lock. Time captured before that wait is retained only where it describes the
+earlier request; it cannot authorize an expired grant, intent or recovery request.
+Freshly issued grants/intents and recovery requests receive their full five- and
+15-minute lifetimes from the protected decision time, respectively.
+
+Enrollment repeats local certificate/binding verification under the lock and
+checks the leaf validity again before its conditional grant consumption. A leaf
+that expired while waiting cannot gain a binding. Grant consumption and recovery
+approval also apply their expiry predicates to a freshly sampled time. If recovery
+expires after revocation/deletion work has started, the failed conditional approval
+rolls back that transaction, restoring old bindings, intents and existing grants.
+
+Eleven PostgreSQL integration cases cover exact-expiry rejection, valid late
+operations with fresh timestamps/lifetimes, new/old leaf expiry and late recovery
+rollback. The contention cases hold a row lock on a second connection and observe
+`pg_blocking_pids` before advancing an injected clock. Another case advances the
+clock after a real revocation SQL command to verify complete rollback. Authority
+is stubbed only in this focused time-control fixture; existing real authorization,
+mTLS, concurrent redemption and audit-failure tests run alongside it. These tests
+do not establish production CA custody, physical-device approval or clock trust.
+
+## Signed artifact verification
+
+The standalone signed-artifact verifier checks the exact manifest bytes, P-256 IEEE P1363 signature, artifact SHA-256 and protected anti-rollback anchor before installation. Repeated acceptance is idempotent; lower versions, same-version conflicts, changed artifacts and invalid signatures fail closed. The verifier is outside the normal request path; release key custody, approval and installer integration remain deployment controls.
+
+The Agent command policy now exposes a risk decision before dispatch. The only enabled command, an argument-free `Inventory.Refresh`, is low risk and needs no approval. Unsupported commands are classified as high risk, and command types prefixed with `Fleet.Bulk.` are classified as bulk; both require `TwoPerson` approval and remain denied by the local policy. No command transport or approval endpoint is enabled by this slice.
+
+## immudb receipt export package
+
+The `export-immudb-receipt-anchor.ps1` operation re-validates the receipt chain and writes a deterministic, atomic export package containing the database, transaction range, receipt count and source-anchor SHA-256. The read-only `verify-immudb-receipt-export.ps1` operation independently checks that package. When an anchor is supplied, both its exact byte hash and each receipt's content/order must match the package; matching only the claimed hash is insufficient. Export and verification hash and parse one bounded 8 MiB buffer, and the verifier can additionally check every receipt signature against the independently pinned P-256 key. Neither operation contacts the external destination; operators retain the successful comparison and signature flags and copy the verified package to the independently administered WORM/SIEM destination. A trusted external anchor/tip is still needed to detect replacement of both local inputs with an older snapshot.
+
+The verifier also accepts a previously approved export with its independently
+retained SHA-256 as a checkpoint. With the pinned key, it verifies that package
+and requires its complete receipt history to remain an unchanged prefix of the
+candidate. Joint rollback of the candidate and local anchor, a signed historical
+fork or a database mismatch fails. `checkpointVerified` remains false when the
+optional checkpoint inputs are absent. The operation is read-only; checkpoint
+selection, latest-version custody and WORM retention remain independent
+deployment responsibilities, as documented in [ImmudbReceiptExport](../operations/ImmudbReceiptExport.md).
+
+## Scope hierarchy change preflight
+
+The read-only [scope reparenting preflight](ScopeReparenting.md) reports both candidate ancestor grants and actual actor/permission/descendant access changes when a subtree changes parent and rejects missing scopes, missing parents, existing hierarchy cycles and no-op moves. Its PostgreSQL test verifies the output and confirms the hierarchy is unchanged. After independent impact review, [reparent-scope.sql](../../eng/reparent-scope.sql) applies the change only with a distinct operator and approver reference, an incident ID and an expected revision; its update, version snapshot and audit/outbox entry commit together. No parent mutation route is exposed over HTTP.
+
+The independent signer journal now has a bounded read-only evidence extract.
+`export-signing-journal.sql` observes requests, results, HTTP rejections and client
+revocations under one repeatable-read snapshot, with explicit column projection,
+5000-row-per-table and 8 MiB output limits. A dedicated SELECT-only operator can
+retain the single JSON observation for independent archival without signer
+credentials or journal writes. Concurrent commits cannot change the captured
+snapshot; limits and read failures produce errors rather than partial evidence.
+The extract neither proves external custody nor supplies incremental delivery or
+restore freshness. External WORM/SIEM transfer and retention remain open controls.
+
+An independent read-only signer snapshot verifier now checks received artifact
+bytes against an externally supplied approved SHA-256, strict UTF-8/schema/field
+types, UTC/digest/UUID shapes and row/byte bounds. It hashes and parses the same
+bounded buffer, preserves native newline bytes and emits only compact metadata.
+The shared evidence-file reader also serves immudb receipt tools. This establishes
+file/digest consistency; original database authenticity, historical completeness,
+latest evidence selection and independent retention still need external controls.
+
+Signer snapshot verification can additionally pin an independently retained
+previous snapshot and its digest. It rejects lost/changed known journal rows,
+duplicate primary identities, different database names and earlier observations;
+new records and late result completion remain allowed. UUID/UTC representation
+differences and exporter-login rotation preserve row meaning. This read-only
+continuity check supports recovery review without advancing local trust state.
+Latest checkpoint custody, new-row authenticity and actual database/backup
+lineage remain independently verified deployment inputs.
+
+The quality entry point now enforces explicit all-severity NuGet auditing for
+direct/transitive dependencies and verifies actual coverage of every solution
+project during forced restore. Missing advisory data, incomplete counters,
+skipped projects and weak audit modes fail rather than producing a successful
+quality result. This package-advisory check complements source SAST; see the
+[dependency audit gate](../quality/DependencyAudit.md) for its exact scope.
+
+## Bounded JSON request bodies
+
+Security endpoints now enforce their 1 KiB Core and 4 KiB Platform JSON limits
+in the reader itself, including unknown-length bodies and hosts whose size
+feature is absent, read-only or does not enforce the configured limit. The
+counter measures input-stream bytes before charset conversion, buffers at most
+the configured payload and consumes at most one additional probe byte. Exact
+limits remain accepted; oversized input returns the existing bad-request result
+before a model can reach application services. Unsupported media types are
+rejected before reading, client cancellation propagates, and the host-owned body
+stream is restored and left open.
+
+A shared non-owning bounded-stream reader also backs the existing OpenBao and
+immudb response wrapper, retaining their distinct caps, response error and caller
+deadlines. ModuleAbstractions gains no project dependency. Twelve cases cover
+host-feature modes, exact/oversized UTF-8 and UTF-16 input, declared oversize,
+malformed JSON, media type, cancellation and stream ownership; four cases
+accepted oversized input before the fix. These are byte-budget guarantees at the
+reader boundary; upstream hosting limits and request-timeout policies remain
+separate controls.
+
+## Secret-root validation on uncached reads
+
+The file secret provider now repeats its root-directory validation before each
+uncached file read. A directory replaced by a symbolic link or Windows junction
+after provider creation is refused; Unix group/other write permissions are
+rechecked at the same boundary. Constructor and read paths share one validator.
+Already cached secrets retain their validated process-lifetime snapshot, while a
+later uncached name cannot load replacement material through the changed root.
+
+Windows junction tests reproduce cold/warm-provider replacement, and Linux
+tests cover symbolic replacement and changed group/other write permissions.
+A valid-root control retains later secret reads. The Windows CI job now runs
+the complete Server test project as well as Core, so the junction and existing
+JSON/OIDC/secret-reader checks remain exercised on both server platforms.
+These are pre-open filesystem observations, not an atomic protection against a
+privileged concurrent path replacement. Protected root/parent ownership,
+Windows mount ACL provisioning, credential custody and rotation remain
+deployment controls.
+
+## Remaining PHASE 7 work
+
+- External Agent CA issuance and grant delivery, CA lifecycle, full rotation administration with physical device verification, Admin certificate lifecycle, and revocation propagation to future long-lived Agent streams. The [production certificate lifecycle runbook](../operations/CertificateLifecycle.md) defines the required issuance, custody, rotation, recovery and rollback evidence.
+- A separately deployed protected signing service with authenticated requests, auditable approvals and secure trust-file distribution, plus integration of the execution gate into the future Agent host before any command transport is enabled. High-risk and bulk command types require an approval protocol before they can be enabled. The current isolated mTLS host supports only `Inventory.Refresh` signing and exposes no Agent command dispatch. The [signer deployment runbook](../operations/CommandSignerDeployment.md) defines the production key custody, mTLS, two-person approval and trust-rotation evidence.
+- Production approval records, impact-review retention and enforcement at future privileged routes. The first-admin bootstrap, controlled recovery, scope reparenting procedure and last-global-grant safeguard are tested; the [privileged change evidence runbook](../operations/PrivilegedChangeEvidence.md) defines the independent approval, retention, WORM/SIEM and recovery records still required from deployment.
+- Maintain Windows host CA-store provisioning and root-only wire-chain regression checks alongside the existing Linux result; verify the production certificate-management procedure during deployment.
+- Production immudb hardening: the local lab now uses dedicated read/write credentials limited to `defaultdb`; [the TLS deployment runbook](../operations/ImmudbTlsDeployment.md) defines root-only wire validation, network isolation and rotation evidence. Production still needs the operator's TLS, retention/backup and independently anchored records. Wire audited security call sites as those flows are implemented.
+- Abuse, negative authorization, recovery and cross-platform security tests, then the full Sonar Quality Gate.
+
+PHASE 7 remains open until these controls are integrated and independently verified. No Agent execution endpoint or privileged command route is exposed by this slice.
+
+The final deployment gate can be checked with the read-only [PHASE 7 readiness verifier](../operations/Phase7Readiness.md). It validates the shape and consistency of approval/evidence records; it does not create or substitute for production custody records.

@@ -1,0 +1,15 @@
+<Project>
+  <Target Name="AssertFleetoryDependencyAudit" AfterTargets="Restore"
+          Condition="'$(FleetoryRequireDependencyAudit)' == 'true'">
+    <Error Condition="'$(NuGetAudit)' != 'true' or '$(NuGetAuditMode)' != 'all' or '$(NuGetAuditLevel)' != 'low'"
+           Text="Dependency audit requires NuGetAudit=true, all dependencies and low-or-higher severity." />
+    <Error Condition="'$(RestoreUseStaticGraphEvaluation)' == 'true'"
+           Text="Dependency audit requires restore coverage counters; static graph restore is not accepted." />
+    <Error Condition="!$([System.Text.RegularExpressions.Regex]::IsMatch('$(RestoreProjectCount)', '\A[1-9][0-9]*\z'))"
+           Text="Dependency audit requires a nonempty restored project graph." />
+    <Error Condition="'$(RestoreProjectsAuditedCount)' != '$(RestoreProjectCount)' or '$(RestoreSkippedCount)' != '0'"
+           Text="Dependency audit did not cover every project in this forced restore. Expected=$(RestoreProjectCount); audited=$(RestoreProjectsAuditedCount); skipped=$(RestoreSkippedCount)." />
+    <Message Importance="high"
+             Text="DEPENDENCY AUDIT COVERAGE: $(RestoreProjectsAuditedCount)/$(RestoreProjectCount) projects; direct and transitive dependencies; all known advisory severities; zero skipped projects." />
+  </Target>
+</Project>

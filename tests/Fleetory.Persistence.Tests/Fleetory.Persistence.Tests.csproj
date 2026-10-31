@@ -4,6 +4,7 @@
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
   <ItemGroup>
+    <ProjectReference Include="../../src/Fleetory.CommandSigner.Host/Fleetory.CommandSigner.Host.csproj" />
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
   <ItemGroup>
@@ -17,10 +18,49 @@
     </PackageReference>
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="../../src/Fleetory.CommandSigning/Fleetory.CommandSigning.csproj" />
     <ProjectReference Include="../../src/Fleetory.Platform/Fleetory.Platform.csproj" />
     <ProjectReference Include="../../src/Fleetory.Platform.Contracts/Fleetory.Platform.Contracts.csproj" />
     <ProjectReference Include="../../src/Fleetory.Core/Fleetory.Core.csproj" />
     <ProjectReference Include="../../src/Fleetory.Core.Contracts/Fleetory.Core.Contracts.csproj" />
     <ProjectReference Include="../../src/Fleetory.Server/Fleetory.Server.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="../../eng/verify-signing-journal-snapshot.ps1"
+          Link="verify-signing-journal-snapshot.ps1"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../eng/evidence-file-helpers.ps1"
+          Link="evidence-file-helpers.ps1"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../eng/export-signing-journal.sql"
+          Link="export-signing-journal.sql"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../eng/reconcile-signing-request.sql"
+          Link="reconcile-signing-request.sql"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../eng/revoke-signing-client.sql"
+          Link="revoke-signing-client.sql"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../eng/provision-signing-journal.sql"
+          Link="provision-signing-journal.sql"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../eng/bootstrap-first-admin.sql"
+          Link="bootstrap-first-admin.sql"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../eng/preview-scope-reparent.sql"
+          Link="preview-scope-reparent.sql"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../eng/recover-admin-access.sql"
+          Link="recover-admin-access.sql"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../eng/revoke-admin-certificate.sql"
+          Link="revoke-admin-certificate.sql"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../eng/register-admin-certificate.sql"
+          Link="register-admin-certificate.sql"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="../../eng/reparent-scope.sql"
+          Link="reparent-scope.sql"
+          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

@@ -15,6 +15,7 @@ $CoverageDirectory = Split-Path -Parent $CoveragePath
 $Phase6PersistenceTestProject = Join-Path $RepoRoot 'tests/Fleetory.Persistence.Tests/Fleetory.Persistence.Tests.csproj'
 
 $StrictBuildStatus = 'NOT RUN'
+$DependencyAuditStatus = 'NOT RUN'
 $TestsStatus = 'NOT RUN'
 $ArchitectureTestsStatus = 'NOT RUN'
 $CoverageStatus = 'NOT RUN'
@@ -27,6 +28,7 @@ function Write-Summary {
     Write-Host 'Fleetory quality verification summary'
     Write-Host '-------------------------------------'
     Write-Host ("STRICT BUILD        {0}" -f $StrictBuildStatus)
+    Write-Host ("DEPENDENCY AUDIT    {0}" -f $DependencyAuditStatus)
     Write-Host ("TESTS               {0}" -f $TestsStatus)
     Write-Host ("ARCHITECTURE TESTS  {0}" -f $ArchitectureTestsStatus)
     Write-Host ("COVERAGE            {0} / {1}" -f $CoverageDisplay, $CoverageStatus)
@@ -81,23 +83,22 @@ if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
 if (Test-Path -LiteralPath $Phase6PersistenceTestProject -PathType Leaf) {
     $phase6ConnectionString = [Environment]::GetEnvironmentVariable('FLEETORY_TEST_CONNECTION_STRING')
 
-    if ([string]::IsNullOrWhiteSpace($phase6ConnectionString)) {
-        if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-            $TestsStatus = 'FAIL (Docker unavailable for PHASE 6 PostgreSQL tests)'
-            Write-Warning 'PHASE 6 PostgreSQL tests require Docker or an explicit FLEETORY_TEST_CONNECTION_STRING.'
-            Write-Summary
-            exit 1
-        }
-
-        & docker info --format '{{.ServerVersion}}' *> $null
-        if ($LASTEXITCODE -ne 0) {
-            $TestsStatus = 'FAIL (Docker unavailable for PHASE 6 PostgreSQL tests)'
-            Write-Warning 'PHASE 6 PostgreSQL tests require Docker or an explicit FLEETORY_TEST_CONNECTION_STRING.'
-            Write-Summary
-            exit 1
-        }
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        $TestsStatus = 'FAIL (Docker unavailable for signer process isolation)'
+        Write-Warning 'The full suite requires Docker for signer process isolation, including with an external PostgreSQL test database.'
+        Write-Summary
+        exit 1
     }
-    else {
+
+    & docker info --format '{{.ServerVersion}}' *> $null
+    if ($LASTEXITCODE -ne 0) {
+        $TestsStatus = 'FAIL (Docker unavailable for signer process isolation)'
+        Write-Warning 'The full suite requires a running Docker engine for signer process isolation.'
+        Write-Summary
+        exit 1
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($phase6ConnectionString)) {
         $builder = [System.Data.Common.DbConnectionStringBuilder]::new()
         try {
             $builder.ConnectionString = $phase6ConnectionString
@@ -121,11 +122,18 @@ if (Test-Path -LiteralPath $Phase6PersistenceTestProject -PathType Leaf) {
 
 Push-Location $RepoRoot
 try {
-    if ((Invoke-DotnetStep @('restore', 'Fleetory.sln')) -ne 0) {
-        $StrictBuildStatus = 'FAIL (restore)'
+    if ((Invoke-DotnetStep @(
+        'restore', 'Fleetory.sln', '--force', '-warnaserror',
+        '-p:FleetoryRequireDependencyAudit=true', '-p:NuGetAudit=true',
+        '-p:NuGetAuditMode=all', '-p:NuGetAuditLevel=low', '-p:RestoreUseStaticGraphEvaluation=false'
+    )) -ne 0) {
+        $StrictBuildStatus = 'FAIL (restore/dependency audit)'
+        $DependencyAuditStatus = 'FAIL'
         Write-Summary
         exit 1
     }
+
+    $DependencyAuditStatus = 'PASS'
 
     if ((Invoke-DotnetStep @('build', 'Fleetory.sln', '-c', 'Release', '--no-restore')) -ne 0) {
         $StrictBuildStatus = 'FAIL'

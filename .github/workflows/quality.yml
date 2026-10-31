@@ -21,10 +21,94 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  windows-tls-chain:
+    name: Windows root-only TLS chain
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6, Node.js 24
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: eng/global.ci.json
+
+      - name: Select the pinned CI SDK
+        shell: pwsh
+        run: Copy-Item -LiteralPath eng/global.ci.json -Destination global.json
+
+      - name: Build Server
+        shell: pwsh
+        run: dotnet build src/Fleetory.Server/Fleetory.Server.csproj -c Release
+
+      - name: Verify Agent security on Windows
+        shell: pwsh
+        run: dotnet test tests/Fleetory.Core.Tests/Fleetory.Core.Tests.csproj -c Release --nologo --warnaserror
+
+      - name: Verify Server security on Windows
+        shell: pwsh
+        run: dotnet test tests/Fleetory.Server.Tests/Fleetory.Server.Tests.csproj -c Release --nologo --warnaserror
+
+      - name: Verify signed artifact anti-rollback on Windows
+        shell: pwsh
+        run: |
+          ./tests/Fleetory.Tools.Tests/SignedArtifactVerification.Tests.ps1
+          ./tests/Fleetory.Tools.Tests/SignedArtifactConcurrency.Tests.ps1
+
+      - name: Verify signer evidence snapshot on Windows
+        shell: pwsh
+        run: |
+          ./tests/Fleetory.Tools.Tests/SigningJournalSnapshot.Tests.ps1
+          ./tests/Fleetory.Tools.Tests/SigningJournalCheckpoint.Tests.ps1
+
+      - name: Verify dependency audit gate on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/DependencyAudit.Tests.ps1
+
+      - name: Verify Sonar issue gate on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/SonarIssueGate.Tests.ps1
+
+      - name: Verify root-only Windows TLS chain
+        shell: pwsh
+        run: ./eng/verify-windows-tls-chain.ps1
+
+      - name: Verify immudb TLS probe on Windows PowerShell 5.1
+        shell: powershell
+        run: ./tests/Fleetory.Tools.Tests/ImmudbTlsProbe.Tests.ps1
+
+      - name: Verify PHASE 7 readiness on Windows PowerShell 5.1
+        shell: powershell
+        run: ./tests/Fleetory.Tools.Tests/Phase7Readiness.Tests.ps1
+
+      - name: Verify immudb authenticated TLS transport on Windows PowerShell 5.1
+        shell: powershell
+        run: ./tests/Fleetory.Tools.Tests/ImmudbHttpTransport.Tests.ps1
+
+      - name: Verify receipt export and anchor binding on Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          ./tests/Fleetory.Tools.Tests/ImmudbReceiptExport.Tests.ps1
+          ./tests/Fleetory.Tools.Tests/ImmudbReceiptExportVerification.Tests.ps1
+
+      - name: Verify receipt checkpoint rollback guard on Windows PowerShell 5.1
+        shell: powershell
+        run: ./tests/Fleetory.Tools.Tests/ImmudbReceiptCheckpoint.Tests.ps1
+
+      - name: Verify restore point and deferred anchor on Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          ./tests/Fleetory.Tools.Tests/ImmudbStateVerification.Tests.ps1
+          ./tests/Fleetory.Tools.Tests/ImmudbRestoreCheckpoint.Tests.ps1
+
   quality:
     name: Strict build, tests, coverage and Sonar
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
+    permissions:
+      contents: read
+      checks: read
 
     env:
       SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
@@ -36,17 +120,21 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6, Node.js 24
         with:
           fetch-depth: 0
 
       - name: Set up .NET 10
-        uses: actions/setup-dotnet@v6
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
-          dotnet-version: '10.0.x'
+          global-json-file: eng/global.ci.json
+
+      - name: Select the pinned CI SDK
+        shell: pwsh
+        run: Copy-Item -LiteralPath eng/global.ci.json -Destination global.json
 
       - name: Set up JDK 21
-        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5, Node.js 24
         with:
           java-version: '21'
           distribution: 'zulu'
@@ -58,10 +146,89 @@ jobs:
           java -version
           docker info --format '{{.ServerVersion}}'
 
-      - name: Run Fleetory quality verification
+      - name: Verify lab certificate rotation and rollback
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/CertificateProvisioning.Tests.ps1
+
+      - name: Verify secret scan gate and committed history
         shell: pwsh
         run: |
-          ./eng/verify-quality.ps1
+          ./tests/Fleetory.Tools.Tests/SecretScan.Tests.ps1
+          ./eng/verify-secret-scan.ps1
+
+      - name: Verify Windows gateway PKI policy
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/WindowsPkiProvisioning.Tests.ps1
+
+      - name: Verify signed artifact anti-rollback
+        shell: pwsh
+        run: |
+          ./tests/Fleetory.Tools.Tests/SignedArtifactVerification.Tests.ps1
+          ./tests/Fleetory.Tools.Tests/SignedArtifactConcurrency.Tests.ps1
+
+      - name: Verify command trust reconciliation
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/CommandTrustReconciliation.Tests.ps1
+
+      - name: Verify immudb signed-state receipt anchor
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ImmudbStateVerification.Tests.ps1
+
+      - name: Verify immudb restore acceptance
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ImmudbRestoreAcceptance.Tests.ps1
+
+      - name: Verify restore point and deferred anchor
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ImmudbRestoreCheckpoint.Tests.ps1
+
+      - name: Verify immudb authenticated TLS transport
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ImmudbHttpTransport.Tests.ps1
+
+      - name: Verify immudb receipt export package
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ImmudbReceiptExport.Tests.ps1
+
+      - name: Verify immudb receipt export independently
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ImmudbReceiptExportVerification.Tests.ps1
+
+      - name: Verify receipt checkpoint rollback guard
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ImmudbReceiptCheckpoint.Tests.ps1
+
+      - name: Verify PHASE 7 readiness record
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/Phase7Readiness.Tests.ps1
+
+      - name: Verify immudb TLS probe over a real TLS connection
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ImmudbTlsProbe.Tests.ps1
+
+      - name: Verify retained signer evidence snapshot
+        shell: pwsh
+        run: |
+          ./tests/Fleetory.Tools.Tests/SigningJournalSnapshot.Tests.ps1
+          ./tests/Fleetory.Tools.Tests/SigningJournalCheckpoint.Tests.ps1
+
+      - name: Verify dependency audit gate
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/DependencyAudit.Tests.ps1
+
+      - name: Verify Sonar issue gate
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/SonarIssueGate.Tests.ps1
+
+      - name: Run Fleetory quality verification
+        shell: pwsh
+        run: ./eng/verify-quality.ps1
+
+      - name: Enforce zero Sonar issues
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./eng/verify-sonar-issues.ps1
 
       - name: Report Sonar percentages
         if: always()

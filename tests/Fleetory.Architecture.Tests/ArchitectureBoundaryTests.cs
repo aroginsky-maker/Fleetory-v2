@@ -64,12 +64,13 @@ public sealed partial class ArchitectureBoundaryTests
         "PasswordHasher",
         "LdapConnection",
         "OpenIdConnect",
-        "X509Certificate2",
-        "ISecretProvider"
+        "X509Certificate2"
     ];
 
     private static readonly string[] OsNeutralServerSideProjects =
     [
+        "Fleetory.Security.Infrastructure",
+        "Fleetory.CommandSigner.Host",
         "Fleetory.Server",
         "Fleetory.Platform",
         "Fleetory.Platform.Contracts",
@@ -274,6 +275,13 @@ public sealed partial class ArchitectureBoundaryTests
             "LicenseSnapshot",
             "SearchRequest",
             "SearchResult",
+            "SignedCommandEnvelope",
+            "ICommandVerificationKeys",
+            "ICommandReplayStore",
+            "ICommandExecutionPolicy",
+            "AgentCertificateBinding",
+            "IAgentCertificateBindingStore",
+            "IAgentCertificateBindingVerifier",
             "GenericEntityId"
         };
 
@@ -333,6 +341,52 @@ public sealed partial class ArchitectureBoundaryTests
             {
                 var otherTypes = GetDeclaredTypeNames(ProjectPath(root, otherProject).Directory!);
                 Assert.DoesNotContain(requiredType, otherTypes);
+            }
+        }
+    }
+
+    [Fact]
+    public void Phase7_secret_provider_contract_must_remain_owned_by_platform_contracts()
+    {
+        var root = FindSolutionRoot();
+        var platformTypes = GetDeclaredTypeNames(
+            ProjectPath(root, "Fleetory.Platform.Contracts").Directory!);
+        Assert.Contains("ISecretProvider", platformTypes);
+
+        foreach (var otherProject in ContractProjects.Where(project =>
+                     !project.Equals("Fleetory.Platform.Contracts", StringComparison.OrdinalIgnoreCase)))
+        {
+            Assert.DoesNotContain("ISecretProvider",
+                GetDeclaredTypeNames(ProjectPath(root, otherProject).Directory!));
+        }
+    }
+
+    [Fact]
+    public void Phase7_core_security_contracts_must_remain_owned_by_core_contracts()
+    {
+        var root = FindSolutionRoot();
+        var requiredTypes = new[]
+        {
+            "SignedCommandEnvelope",
+            "ICommandVerificationKeys",
+            "ICommandReplayStore",
+            "ICommandExecutionPolicy",
+            "AgentCertificateBinding",
+            "IAgentCertificateBindingStore",
+            "IAgentCertificateBindingVerifier"
+        };
+        var coreTypes = GetDeclaredTypeNames(
+            ProjectPath(root, "Fleetory.Core.Contracts").Directory!);
+
+        foreach (var requiredType in requiredTypes)
+        {
+            Assert.Contains(requiredType, coreTypes);
+
+            foreach (var otherProject in ContractProjects.Where(project =>
+                         !project.Equals("Fleetory.Core.Contracts", StringComparison.OrdinalIgnoreCase)))
+            {
+                Assert.DoesNotContain(requiredType,
+                    GetDeclaredTypeNames(ProjectPath(root, otherProject).Directory!));
             }
         }
     }
@@ -604,6 +658,7 @@ public sealed partial class ArchitectureBoundaryTests
             {
                 expected.Add("Fleetory.Platform.Contracts");
             }
+            else { expected.Add("Fleetory.Security.Infrastructure"); }
 
             AssertProjectReferencesEqual(projectName, expected, references);
         }
@@ -616,7 +671,8 @@ public sealed partial class ArchitectureBoundaryTests
         var references = GetProjectReferences(ProjectPath(root, "Fleetory.Server"));
         var expected = new HashSet<string>(ImplementationProjects, StringComparer.OrdinalIgnoreCase)
         {
-            "Fleetory.ModuleAbstractions"
+            "Fleetory.ModuleAbstractions",
+            "Fleetory.Security.Infrastructure"
         };
 
         AssertProjectReferencesEqual("Fleetory.Server", expected, references);
@@ -635,6 +691,53 @@ public sealed partial class ArchitectureBoundaryTests
     {
         var root = FindSolutionRoot();
         Assert.Empty(GetProjectReferences(ProjectPath(root, "Fleetory.ModuleAbstractions")));
+    }
+
+    [Fact]
+    public void Agent_security_must_not_depend_on_server_implementations()
+    {
+        var root = FindSolutionRoot();
+        var references = GetProjectReferences(ProjectPath(root, "Fleetory.Agent.Security"));
+        AssertProjectReferencesEqual("Fleetory.Agent.Security",
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "Fleetory.Core.Contracts",
+                "Fleetory.SharedKernel"
+            }, references);
+    }
+
+    [Fact]
+    public void Command_signer_must_remain_outside_server_dependency_graph()
+    {
+        var root = FindSolutionRoot();
+        AssertProjectReferencesEqual("Fleetory.CommandSigning",
+            new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "Fleetory.Core.Contracts"
+            }, GetProjectReferences(ProjectPath(root, "Fleetory.CommandSigning")));
+
+        foreach (var projectName in ImplementationProjects.Concat(ContractProjects)
+                     .Append("Fleetory.Server").Append("Fleetory.Agent.Security")
+                     .Append("Fleetory.SharedKernel").Append("Fleetory.ModuleAbstractions"))
+        {
+            Assert.DoesNotContain("Fleetory.CommandSigning",
+                GetProjectReferences(ProjectPath(root, projectName)));
+        }
+    }
+
+    [Fact]
+    public void Signing_host_must_be_isolated_from_application_implementations()
+    {
+        var root = FindSolutionRoot();
+        AssertProjectReferencesEqual("Fleetory.CommandSigner.Host",
+            ["Fleetory.CommandSigning", "Fleetory.Core.Contracts", "Fleetory.ModuleAbstractions", "Fleetory.Security.Infrastructure"],
+            GetProjectReferences(ProjectPath(root, "Fleetory.CommandSigner.Host")));
+        AssertProjectReferencesEqual("Fleetory.Security.Infrastructure", ["Fleetory.Platform.Contracts"],
+            GetProjectReferences(ProjectPath(root, "Fleetory.Security.Infrastructure")));
+        foreach (var project in ImplementationProjects.Append("Fleetory.Server").Append("Fleetory.Agent.Security"))
+        {
+            Assert.DoesNotContain("Fleetory.CommandSigner.Host", GetProjectReferences(ProjectPath(root, project)));
+        }
     }
 
     [Fact]
@@ -688,6 +791,13 @@ public sealed partial class ArchitectureBoundaryTests
                 var source = File.ReadAllText(sourceFile.FullName);
                 foreach (var token in forbiddenSourceTokens)
                 {
+                    if (projectName == "Fleetory.Security.Infrastructure" &&
+                        sourceFile.Name == "FileSecretProvider.cs" &&
+                        token == "OperatingSystem.IsWindows()")
+                    {
+                        continue;
+                    }
+
                     Assert.DoesNotContain(token, source, StringComparison.Ordinal);
                 }
             }
