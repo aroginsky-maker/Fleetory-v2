@@ -52,7 +52,9 @@ jobs:
 
       - name: Verify signed artifact anti-rollback on Windows
         shell: pwsh
-        run: ./tests/Fleetory.Tools.Tests/SignedArtifactVerification.Tests.ps1
+        run: |
+          ./tests/Fleetory.Tools.Tests/SignedArtifactVerification.Tests.ps1
+          ./tests/Fleetory.Tools.Tests/SignedArtifactConcurrency.Tests.ps1
 
       - name: Verify signer evidence snapshot on Windows
         shell: pwsh
@@ -160,7 +162,9 @@ jobs:
 
       - name: Verify signed artifact anti-rollback
         shell: pwsh
-        run: ./tests/Fleetory.Tools.Tests/SignedArtifactVerification.Tests.ps1
+        run: |
+          ./tests/Fleetory.Tools.Tests/SignedArtifactVerification.Tests.ps1
+          ./tests/Fleetory.Tools.Tests/SignedArtifactConcurrency.Tests.ps1
 
       - name: Verify command trust reconciliation
         shell: pwsh

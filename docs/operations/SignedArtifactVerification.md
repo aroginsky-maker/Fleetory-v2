@@ -47,6 +47,30 @@ failure. Protect the anchor directory and serialize deployment writers per ancho
 The UTC field is structural metadata, not an authenticated approval or trusted
 clock attestation.
 
+## Concurrent verification
+
+After artifact/signature validation, each verifier acquires an exclusive handle
+on the adjacent `<AnchorPath>.lock` file before loading the current anchor.
+The handle covers the read, version/hash/key comparison, optional atomic
+replacement and result emission. A waiting process therefore checks the latest
+anchor after acquisition. File-share contention is polled against a monotonic
+five-second deadline; timeout refuses the update without changing anchor bytes.
+
+The marker is a persistent regular file in the protected anchor directory.
+The lease is the open OS handle using
+[`FileShare.None`](https://learn.microsoft.com/en-us/dotnet/api/system.io.fileshare),
+rather than the marker's presence or contents. Process exit releases that handle;
+a later verifier can reuse the marker without stale-PID cleanup. Preserve the
+marker while any deployment process may be active: deleting it could create
+separate lock identities. Directories and symbolic-link/reparse-point lock paths
+are refused. Authorized deployment writers need access to this coordination file.
+
+This coordinates cooperating verifiers using the same canonical anchor path on
+a local filesystem. Installer orchestration must still serialize verification
+and installation as one deployment operation; the CLI releases its handle when
+verification ends. Distributed/network-filesystem coordination, protected
+ownership and independently retained recovery records remain deployment controls.
+
 The checked-in test covers first acceptance, idempotence, forward versioning,
 rollback, content tampering and invalid signatures. It proves verifier behavior;
 production key custody, release approval and installer integration remain

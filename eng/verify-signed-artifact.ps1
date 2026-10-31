@@ -99,6 +99,34 @@ function Assert-ArtifactSignature([byte[]] $ManifestBytes, [string] $SignaturePa
     finally { $ecdsa.Dispose() }
 }
 
+function Assert-ArtifactLockPath([string] $Path, [bool] $Required = $false) {
+    $entry = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
+    if ($null -eq $entry) {
+        if ($Required) { throw 'The artifact anchor lock file disappeared.' }
+        return
+    }
+    if ($entry.Attributes -band ([IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::Directory)) {
+        throw 'The artifact anchor lock must be a regular file without a reparse point.'
+    }
+}
+
+function Enter-ArtifactAnchorLock([string] $AnchorPath) {
+    Assert-ArtifactPathIsSafe (Split-Path -Parent $AnchorPath) 'The artifact anchor directory'
+    $path = $AnchorPath + '.lock'
+    $elapsed = [Diagnostics.Stopwatch]::StartNew()
+    while ($true) {
+        Assert-ArtifactLockPath $path
+        if ($elapsed.ElapsedMilliseconds -ge 5000) { throw 'Timed out waiting for the artifact anchor lock.' }
+        try { $held = [IO.File]::Open($path, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None) }
+        catch [IO.IOException] { Start-Sleep -Milliseconds 50; continue }
+        try {
+            Assert-ArtifactLockPath $path $true
+            return $held
+        }
+        catch { $held.Dispose(); throw }
+    }
+}
+
 function Read-ArtifactAnchor([string] $Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
     Assert-ArtifactPathIsSafe $Path 'The artifact anchor'
@@ -192,30 +220,34 @@ $actualSha256 = Get-ArtifactSha256 $artifact
 if ($actualSha256 -ine [string]$manifest.sha256) { throw 'The artifact SHA-256 does not match its signed manifest.' }
 Assert-ArtifactSignature $manifestBytes $signaturePath $publicKeyPath
 
-$existing = Read-ArtifactAnchor $anchor
-if ($null -ne $existing) {
-    if ([string]$existing.artifactId -ne [string]$manifest.artifactId) {
-        throw 'The artifact anchor belongs to another artifact.'
+$anchorLock = Enter-ArtifactAnchorLock $anchor
+try {
+    $existing = Read-ArtifactAnchor $anchor
+    if ($null -ne $existing) {
+        if ([string]$existing.artifactId -ne [string]$manifest.artifactId) {
+            throw 'The artifact anchor belongs to another artifact.'
+        }
+        $oldVersion = [long]$existing.version
+        $newVersion = [long]$manifest.version
+        if ($newVersion -lt $oldVersion) { throw 'The artifact version is older than the anti-rollback anchor.' }
+        if ($newVersion -eq $oldVersion -and
+            ([string]$existing.sha256 -ine [string]$manifest.sha256 -or
+                [string]$existing.signingKeyId -ne [string]$manifest.signingKeyId)) {
+            throw 'The artifact version conflicts with the anti-rollback anchor.'
+        }
     }
-    $oldVersion = [long]$existing.version
-    $newVersion = [long]$manifest.version
-    if ($newVersion -lt $oldVersion) { throw 'The artifact version is older than the anti-rollback anchor.' }
-    if ($newVersion -eq $oldVersion -and
-        ([string]$existing.sha256 -ine [string]$manifest.sha256 -or
-            [string]$existing.signingKeyId -ne [string]$manifest.signingKeyId)) {
-        throw 'The artifact version conflicts with the anti-rollback anchor.'
-    }
-}
 
-$status = if ($null -eq $existing -or [long]$manifest.version -gt [long]$existing.version) {
-    Write-ArtifactAnchor $anchor $manifest
-    'accepted'
-} else { 'idempotent' }
-Write-Output (ConvertTo-Json ([ordered]@{
-    schema = 'fleetory.signed-artifact-verification.v1'
-    artifactId = [string]$manifest.artifactId
-    version = [long]$manifest.version
-    sha256 = ([string]$manifest.sha256).ToUpperInvariant()
-    signingKeyId = [string]$manifest.signingKeyId
-    status = $status
-}) -Compress)
+    $status = if ($null -eq $existing -or [long]$manifest.version -gt [long]$existing.version) {
+        Write-ArtifactAnchor $anchor $manifest
+        'accepted'
+    } else { 'idempotent' }
+    Write-Output (ConvertTo-Json ([ordered]@{
+        schema = 'fleetory.signed-artifact-verification.v1'
+        artifactId = [string]$manifest.artifactId
+        version = [long]$manifest.version
+        sha256 = ([string]$manifest.sha256).ToUpperInvariant()
+        signingKeyId = [string]$manifest.signingKeyId
+        status = $status
+    }) -Compress)
+}
+finally { $anchorLock.Dispose() }
