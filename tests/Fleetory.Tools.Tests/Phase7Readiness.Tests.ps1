@@ -4,8 +4,9 @@ Set-StrictMode -Version Latest
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $verifyScript = Join-Path $repoRoot 'eng/verify-phase7-readiness.ps1'
+. (Join-Path $repoRoot 'eng/evidence-file-helpers.ps1')
 . (Join-Path $PSScriptRoot 'TestProvisionerHelpers.ps1') -Source $verifyScript -Names @(
-    'Test-ReadinessAbsolutePath', 'Read-ReadinessRecord', 'Get-ReadinessProperty',
+    'Test-ReadinessAbsolutePath', 'Assert-ReadinessJsonProperties', 'Read-ReadinessRecord', 'Get-ReadinessProperty',
     'Get-RequiredString', 'Get-RequiredObject', 'Assert-ReadinessConfirmation',
     'Get-RequiredActor', 'Get-RequiredUtc', 'Get-RequiredReadinessUri',
     'Get-ReadinessCoverage', 'Test-Phase7Readiness')
@@ -190,7 +191,62 @@ try {
         [IO.File]::WriteAllBytes($recordPath, (New-Object byte[] $bytes))
         Assert-Throws { Read-ReadinessRecord $recordPath } 'Invalid file size was accepted.' 'size is outside'
     }
-    Write-Host "PHASE 7 READINESS TESTS PASS: $script:rejections negative cases, clock boundaries, typed confirmations, per-control evidence and record hash."
+
+    # The last value must not silently replace a conflicting approved field.
+    Write-Record (New-Record)
+    $canonical = [IO.File]::ReadAllText($recordPath)
+    $ambiguousDocuments = @(
+        $canonical.Replace('"signer":true', '"signer":false,"signer":true'),
+        $canonical.Replace('"signer":true', '"signer":false,"si\u0067ner":true'),
+        $canonical.Replace('"requestedBy":"person:requester"', '"requestedBy":"person:approver","requestedBy":"person:requester"'),
+        $canonical.Replace('"approvedAt":"2030-01-01T10:00:00Z"', '"approvedAt":"2030-01-01T11:00:00Z","approvedAt":"2030-01-01T10:00:00Z"'),
+        $canonical.Replace('"sonarQualityGate":"PASS"', '"sonarQualityGate":"FAIL","sonarQualityGate":"PASS"'),
+        $canonical.Replace('"sha256":"', '"sha256":"bad","sha256":"'),
+        $canonical.Replace('"validated":true', '"validated":false,"validated":true')
+    )
+    foreach ($json in $ambiguousDocuments) {
+        if ($json -ceq $canonical) { throw 'Duplicate-property fixture did not change the JSON.' }
+        [IO.File]::WriteAllText($recordPath, $json, [Text.UTF8Encoding]::new($false))
+        Assert-Throws { Test-RecordAtClock } 'Ambiguous readiness JSON was accepted.' 'UTF-8 JSON object'
+    }
+
+    $nested = ('{"child":' * 18) + 'true' + ('}' * 18)
+    foreach ($json in @(
+        $canonical.Replace('"signer":true', '"signer":false,"Signer":true'),
+        ('{"__type":"unexpected:metadata",' + $canonical.Substring(1)),
+        ('{"extra":' + $nested + ',' + $canonical.Substring(1))
+    )) {
+        [IO.File]::WriteAllText($recordPath, $json, [Text.UTF8Encoding]::new($false))
+        Assert-Throws { Test-RecordAtClock } 'Unbounded or ambiguous JSON structure was accepted.' 'UTF-8 JSON object'
+    }
+
+    # Escaped names remain valid when unique, and every accepted raw byte is hashed.
+    $unique = $canonical.Replace('"signer":true', '"si\u0067ner":true')
+    [IO.File]::WriteAllText($recordPath, $unique, [Text.UTF8Encoding]::new($true))
+    $document = Read-ReadinessRecord $recordPath
+    if (-not (Test-Phase7Readiness $document.Record -Now $clock).verified -or
+        $document.Sha256 -cne (Get-FileHash $recordPath -Algorithm SHA256).Hash) {
+        throw 'Unique escaped fields or their original BOM bytes were not preserved.'
+    }
+    $boundary = New-Record
+    $boundary.rollback.plan = 'Restore approved trust versions; восстановить журнал.'
+    Write-Record $boundary
+    $payload = [IO.File]::ReadAllBytes($recordPath)
+    $padded = New-Object byte[] 65536
+    [Buffer]::BlockCopy($payload, 0, $padded, 0, $payload.Length)
+    for ($offset = $payload.Length; $offset -lt $padded.Length; $offset++) { $padded[$offset] = 32 }
+    [IO.File]::WriteAllBytes($recordPath, $padded)
+    $document = Read-ReadinessRecord $recordPath
+    if (-not (Test-Phase7Readiness $document.Record -Now $clock).verified -or
+        $document.Sha256 -cne (Get-FileHash $recordPath -Algorithm SHA256).Hash) {
+        throw 'Exact 64-KiB UTF-8 readiness snapshot or exact-byte hash was rejected.'
+    }
+    if ($env:OS -ne 'Windows_NT') {
+        $link = Join-Path $work 'readiness-link.json'
+        [void](New-Item -ItemType SymbolicLink -Path $link -Target $recordPath)
+        Assert-Throws { Read-ReadinessRecord $link } 'A linked readiness record was accepted.' 'symbolic link'
+    }
+    Write-Host "PHASE 7 READINESS TESTS PASS: $script:rejections negative cases, clock boundaries, typed confirmations, unique JSON fields, 64-KiB bound, per-control evidence and exact-byte record hash."
 }
 finally {
     Remove-FleetoryTestArtifacts $work $repoRoot

@@ -36,6 +36,19 @@ The read-only verifier requires a UTF-8 JSON object of at most 64 KiB using the
 - `rollback`: an object with a plan of at least 16 characters and `validated`
   equal to the JSON boolean `true`.
 
+JSON member names must be unique within each object after escape decoding.
+Comparison ignores case, matching PowerShell property lookup; a second spelling
+such as `signer`, `Signer` or `si\u0067ner` cannot override an earlier value.
+This applies to actors, timestamps, controls, CI results, evidence items and
+rollback fields. The nesting limit is 16 levels, and serializer `__type`
+metadata is unsupported. A single unique escaped field remains valid.
+
+The shared evidence reader enforces the 64-KiB byte limit while reading from one
+open file handle, including an overflow probe, instead of reading an arbitrarily
+grown file before rejecting it. JSON validation and SHA-256 use the same retained
+buffer. An optional UTF-8 BOM and trailing whitespace remain part of the raw-byte
+hash; an exact 64-KiB record with valid UTF-8 is accepted.
+
 For example, an evidence item for the signer is:
 
 ```json

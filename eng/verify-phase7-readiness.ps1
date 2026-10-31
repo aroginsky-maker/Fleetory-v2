@@ -7,6 +7,7 @@ param(
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'evidence-file-helpers.ps1')
 
 function Test-ReadinessAbsolutePath([string] $Path) {
     if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
@@ -14,28 +15,50 @@ function Test-ReadinessAbsolutePath([string] $Path) {
     return $false
 }
 
+function Assert-ReadinessJsonProperties([string] $Json) {
+    # The framework reader preserves members before ConvertFrom-Json can collapse
+    # duplicates. It is available on Windows PowerShell 5.1 and PowerShell 7.
+    Add-Type -AssemblyName System.Runtime.Serialization
+    $quotas = [Xml.XmlDictionaryReaderQuotas]::new()
+    $quotas.MaxDepth = 16
+    $quotas.MaxStringContentLength = 64KB
+    $quotas.MaxArrayLength = 64KB
+    $quotas.MaxNameTableCharCount = 64KB
+    $reader = [Runtime.Serialization.Json.JsonReaderWriterFactory]::CreateJsonReader(
+        [Text.Encoding]::UTF8.GetBytes($Json), $quotas)
+    $objects = @{}
+    try {
+        while ($reader.Read()) {
+            if ($reader.NodeType -eq [Xml.XmlNodeType]::Element) {
+                if ($null -ne $reader.GetAttribute('__type')) { throw 'JSON serializer metadata is unsupported.' }
+                $parentDepth = $reader.Depth - 1
+                if ($objects.ContainsKey($parentDepth)) {
+                    $name = $reader.GetAttribute('item')
+                    if ($null -eq $name) { $name = $reader.LocalName }
+                    if (-not $objects[$parentDepth].Add($name)) { throw 'Readiness JSON fields must be unique.' }
+                }
+                if ($reader.GetAttribute('type') -eq 'object') {
+                    $objects[$reader.Depth] = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+                }
+                if ($reader.IsEmptyElement) { $objects.Remove($reader.Depth) }
+            }
+            elseif ($reader.NodeType -eq [Xml.XmlNodeType]::EndElement) { $objects.Remove($reader.Depth) }
+        }
+    }
+    finally { $reader.Close() }
+}
+
 function Read-ReadinessRecord([string] $Path) {
     if (-not (Test-ReadinessAbsolutePath $Path)) {
         throw 'The readiness record path must be absolute.'
     }
     $fullPath = [IO.Path]::GetFullPath($Path)
-    if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
-        throw 'The readiness record does not exist.'
-    }
-    $item = Get-Item -LiteralPath $fullPath -Force
-    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
-        throw 'The readiness record cannot be a symbolic link.'
-    }
-    if ($item.Length -le 0 -or $item.Length -gt 64KB) {
-        throw 'The readiness record size is outside the permitted range.'
-    }
-    $bytes = [IO.File]::ReadAllBytes($fullPath)
-    if ($bytes.Length -le 0 -or $bytes.Length -gt 64KB) {
-        throw 'The readiness record size is outside the permitted range.'
-    }
+    $snapshot = Read-BoundedEvidenceSnapshot $fullPath 'The readiness record' 64KB
+    $bytes = $snapshot.Bytes
     try {
         $json = [Text.UTF8Encoding]::new($false, $true).GetString($bytes).TrimStart([char]0xFEFF)
         if ($json -notmatch '^\s*\{') { throw 'Expected a JSON object.' }
+        Assert-ReadinessJsonProperties $json
         $options = @{ InputObject = $json; ErrorAction = 'Stop' }
         # Preserve timestamp lexemes so automatic JSON date conversion cannot
         # normalize a non-UTC or non-ISO input before policy validation.
@@ -60,11 +83,8 @@ function Read-ReadinessRecord([string] $Path) {
             finally { $reader.Close(); $textReader.Dispose() }
         }
     }
-    catch { throw 'The readiness record is not a UTF-8 JSON object.' }
-    $sha256 = [Security.Cryptography.SHA256]::Create()
-    try { $digest = [BitConverter]::ToString($sha256.ComputeHash($bytes)).Replace('-', '') }
-    finally { $sha256.Dispose() }
-    return [pscustomobject]@{ Record = $record; Sha256 = $digest }
+    catch { throw 'The readiness record is not an unambiguous UTF-8 JSON object within the nesting limit.' }
+    return [pscustomobject]@{ Record = $record; Sha256 = $snapshot.Sha256 }
 }
 
 function Get-ReadinessProperty($Object, [string] $Name) {
