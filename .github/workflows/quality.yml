@@ -60,6 +60,10 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/DependencyAudit.Tests.ps1
 
+      - name: Verify Sonar issue gate on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/SonarIssueGate.Tests.ps1
+
       - name: Verify root-only Windows TLS chain
         shell: pwsh
         run: ./eng/verify-windows-tls-chain.ps1
@@ -96,6 +100,9 @@ jobs:
     name: Strict build, tests, coverage and Sonar
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    permissions:
+      contents: read
+      checks: read
 
     env:
       SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
@@ -201,9 +208,19 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/DependencyAudit.Tests.ps1
 
+      - name: Verify Sonar issue gate
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/SonarIssueGate.Tests.ps1
+
       - name: Run Fleetory quality verification
         shell: pwsh
         run: ./eng/verify-quality.ps1
+
+      - name: Enforce zero Sonar issues
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./eng/verify-sonar-issues.ps1
 
       - name: Report Sonar percentages
         if: always()

@@ -224,7 +224,7 @@ These changes are not reported as Sonar findings. They are ordinary maintainabil
 
 ## 13. CI-ready behavior
 
-Recommended current sequence for PHASE 6:
+Current strict/coverage/server sequence for PHASE 7:
 
 ```text
 1. start Docker (default Testcontainers PostgreSQL path)
@@ -243,6 +243,27 @@ FLEETORY_TEST_CONNECTION_STRING=<external test PostgreSQL>
 This prevents a Sonar/coverage run from silently treating skipped PostgreSQL integration tests as a complete PHASE 6 quality result. The connection string is not printed or stored by the script.
 
 A full quality PASS is valid only when strict verification, real PostgreSQL tests and the external Sonar Quality Gate are green.
+
+### Additional CI requirement: zero new and accepted issues
+
+The server's Sonar Way result alone does not enforce Fleetory's zero-issue policy in every case. The official check for commit `f0307cee4ad7fb8205bf9c8e7d72754d50aca6bc` concluded successfully with **2 New issues**. The repository guard rejects that real report; it does not change the assigned server gate or profile.
+
+After `verify-quality.ps1`, the Linux CI job runs `eng/verify-sonar-issues.ps1`. This separate guard:
+
+- reads the GitHub Checks API over a fixed HTTPS endpoint with redirects disabled and a 15-second request timeout;
+- accepts only the `SonarCloud Code Analysis` check from app ID `12526`, slug `sonarqubecloud`, for the exact analysis revision;
+- uses the PR event's head SHA instead of the synthetic merge SHA; push/manual runs use the exact branch revision;
+- requires a bounded, matching `.sonarqube/out/.sonar/report-task.txt` submission artifact and a completion time at or after its UTC modification time (second precision);
+- requires a successful check and exactly one canonical **0 New issues** and **0 Accepted issues** link, with matching SonarCloud project and PR/branch in both issue links and dashboard URL;
+- waits up to 90 seconds for a completed current report, including replacement of an older report for the same SHA.
+
+API errors, incomplete/paginated responses, ambiguous checks, unknown issue counts, positive counts and report mismatches fail the CI job. An absent report never means zero issues. The artifact and completion-time checks establish submission freshness; they do not bind the GitHub check to a Sonar compute-task ID. The scanner's independent server Quality Gate wait remains required.
+
+Only this job adds `checks: read` alongside `contents: read`; `GITHUB_TOKEN` is supplied only to the guard step and is never printed. The [GitHub Checks API](https://docs.github.com/en/rest/checks/runs?apiVersion=2022-11-28) supplies the publisher, revision, completion and summary evidence. The guard neither follows report links nor needs a separate Sonar token. A provider app/schema change requires review of the policy and its fixtures; do not bypass the failure or substitute unauthenticated empty issue responses.
+
+`tests/Fleetory.Tools.Tests/SonarIssueGate.Tests.ps1` runs on Windows and Linux. It exercises 23 malformed/unsafe policy cases, publisher/revision/pending/missing evidence, 14 CLI rejection cases, successful PR-head and feature-branch checks, and an old-to-current report retry. Transport failures must not disclose the fixture credential.
+
+A standalone local SonarQube scan remains local evidence. It cannot satisfy this official SonarCloud PR integration check or replace the official PR result.
 
 ## 14. Troubleshooting
 
