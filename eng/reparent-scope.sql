@@ -1,7 +1,7 @@
 -- Controlled scope-parent mutation. Run with ON_ERROR_STOP in an approved
 -- transaction. Set LOCAL fleetory.scope_reparent.scope_id, new_parent_id
 -- (empty for root), expected_revision, incident_reference, operator_reference
--- and approver_reference. Operator and approver references must be distinct.
+-- and approver_reference. ASCII actor references must be distinct ignoring case.
 DO $fleetory_scope_reparent$
 DECLARE
     raw_scope_id text := current_setting('fleetory.scope_reparent.scope_id', true);
@@ -37,7 +37,7 @@ BEGIN
     IF incident IS NULL OR incident !~ '^[A-Za-z0-9][A-Za-z0-9._/-]{3,127}$' OR
        operator_id IS NULL OR operator_id !~ '^[A-Za-z0-9][A-Za-z0-9._@/-]{0,127}$' OR
        approver_id IS NULL OR approver_id !~ '^[A-Za-z0-9][A-Za-z0-9._@/-]{0,127}$' OR
-       operator_id = approver_id THEN
+       lower(operator_id COLLATE "C") = lower(approver_id COLLATE "C") THEN
         RAISE EXCEPTION 'Incident, operator and distinct approver references are required.';
     END IF;
 

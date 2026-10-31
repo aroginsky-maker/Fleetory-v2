@@ -31,3 +31,14 @@ COMMIT;
 ```
 
 Use `ROLLBACK` if the procedure raises an error. The approver and operator references identify the independently retained approval record; they are not credentials.
+
+Actor references must be stable ASCII identifiers from the independently retained
+approval record. Whitespace is rejected, and operator/approver comparison ignores
+ASCII case using PostgreSQL's fixed `C` collation. For example, `operator-a` and
+`OPERATOR-A` identify the same reference and cannot authorize a change together.
+Different actor references keep their original spelling in audit evidence.
+
+A rejected reference pair leaves the parent, version history, audit events and
+export queue unchanged. Distinct strings cannot prove two independent people:
+operators must also check immutable principal identities and approval authenticity
+in the independent control plane before executing the script.
