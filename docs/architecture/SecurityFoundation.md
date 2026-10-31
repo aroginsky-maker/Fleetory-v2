@@ -434,6 +434,27 @@ skipped projects and weak audit modes fail rather than producing a successful
 quality result. This package-advisory check complements source SAST; see the
 [dependency audit gate](../quality/DependencyAudit.md) for its exact scope.
 
+## Bounded JSON request bodies
+
+Security endpoints now enforce their 1 KiB Core and 4 KiB Platform JSON limits
+in the reader itself, including unknown-length bodies and hosts whose size
+feature is absent, read-only or does not enforce the configured limit. The
+counter measures input-stream bytes before charset conversion, buffers at most
+the configured payload and consumes at most one additional probe byte. Exact
+limits remain accepted; oversized input returns the existing bad-request result
+before a model can reach application services. Unsupported media types are
+rejected before reading, client cancellation propagates, and the host-owned body
+stream is restored and left open.
+
+A shared non-owning bounded-stream reader also backs the existing OpenBao and
+immudb response wrapper, retaining their distinct caps, response error and caller
+deadlines. ModuleAbstractions gains no project dependency. Twelve cases cover
+host-feature modes, exact/oversized UTF-8 and UTF-16 input, declared oversize,
+malformed JSON, media type, cancellation and stream ownership; four cases
+accepted oversized input before the fix. These are byte-budget guarantees at the
+reader boundary; upstream hosting limits and request-timeout policies remain
+separate controls.
+
 ## Remaining PHASE 7 work
 
 - External Agent CA issuance and grant delivery, CA lifecycle, full rotation administration with physical device verification, Admin certificate lifecycle, and revocation propagation to future long-lived Agent streams. The [production certificate lifecycle runbook](../operations/CertificateLifecycle.md) defines the required issuance, custody, rotation, recovery and rollback evidence.
