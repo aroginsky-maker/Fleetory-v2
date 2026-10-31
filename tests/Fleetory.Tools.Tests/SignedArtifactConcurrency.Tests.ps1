@@ -4,7 +4,7 @@ Set-StrictMode -Version Latest
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $verifier = Join-Path $repoRoot 'eng/verify-signed-artifact.ps1'
 . (Join-Path $PSScriptRoot 'TestProvisionerHelpers.ps1') -Source (
-    Join-Path $PSScriptRoot 'SignedArtifactVerification.Tests.ps1') -Names @('Get-TestSha256', 'Write-SignedArtifact')
+    Join-Path $PSScriptRoot 'SignedArtifactVerification.Tests.ps1') -Names @('Get-TestSha256', 'Write-ManifestSignature', 'Write-SignedArtifact')
 $work = Join-Path $repoRoot ('artifacts/artifact-concurrency-' + [Guid]::NewGuid().ToString('N'))
 $anchorPath = Join-Path $work 'release.anchor.json'
 $lockPath = $anchorPath + '.lock'
