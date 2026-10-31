@@ -64,7 +64,7 @@ public sealed class DirectoryCommandVerificationKeys : ICommandVerificationKeys
                 return null;
             }
 
-            if ((file.Attributes & FileAttributes.ReparsePoint) != 0)
+            if ((file.Attributes & FileAttributes.ReparsePoint) != 0 || file.Length is < 1 or > MaximumPublicKeyBytes)
             {
                 throw new InvalidOperationException("Command trust file is invalid.");
             }
@@ -82,6 +82,7 @@ public sealed class DirectoryCommandVerificationKeys : ICommandVerificationKeys
                 }
             }
 
+            // Metadata can change before open; enforce the limit again while reading.
             await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read,
                 bufferSize: MaximumPublicKeyBytes, options: FileOptions.Asynchronous | FileOptions.SequentialScan);
             return await ReadPublicKeyBytesAsync(stream, cancellationToken).ConfigureAwait(false);
