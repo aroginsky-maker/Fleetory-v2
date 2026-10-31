@@ -84,13 +84,43 @@ function Import-ArtifactPublicKey([string] $Text) {
     }
 }
 
-function Get-ArtifactManifest([byte[]] $Bytes) {
+function ConvertFrom-ArtifactRecord([byte[]] $Bytes, [switch] $IncludeAcceptedAt) {
+    $document = $null
     try {
         $text = [Text.UTF8Encoding]::new($false, $true).GetString($Bytes)
         if ($text.Length -gt 0 -and $text[0] -eq [char]0xFEFF) { $text = $text.Substring(1) }
-        return ConvertFrom-Json -InputObject $text -Depth 5
+        $options = [Text.Json.JsonDocumentOptions]::new()
+        $options.MaxDepth = 2
+        $document = [Text.Json.JsonDocument]::Parse($text, $options)
+        $root = $document.RootElement
+        if ($root.ValueKind -ne [Text.Json.JsonValueKind]::Object) { throw 'Expected a metadata object.' }
+        $fields = @('artifactId', 'version', 'sha256', 'signingKeyId')
+        if ($IncludeAcceptedAt) { $fields += 'acceptedAt' }
+        $members = @($root.EnumerateObject())
+        if ($members.Count -ne $fields.Count) { throw 'Metadata fields are missing or unsupported.' }
+        foreach ($field in $fields) {
+            if (@($members | Where-Object { $_.Name -ceq $field }).Count -ne 1) {
+                throw 'Metadata fields must be unique and supported.'
+            }
+            if ($field -cne 'version' -and $root.GetProperty($field).ValueKind -ne [Text.Json.JsonValueKind]::String) {
+                throw 'Expected string metadata.'
+            }
+        }
+        $version = 0L
+        if (-not $root.GetProperty('version').TryGetInt64([ref]$version) -or $version -lt 1) {
+            throw 'Expected a positive integer metadata version.'
+        }
+        $record = [ordered]@{
+            artifactId = $root.GetProperty('artifactId').GetString()
+            version = $version
+            sha256 = $root.GetProperty('sha256').GetString()
+            signingKeyId = $root.GetProperty('signingKeyId').GetString()
+        }
+        if ($IncludeAcceptedAt) { $record.acceptedAt = $root.GetProperty('acceptedAt').GetString() }
+        return [pscustomobject]$record
     }
-    catch { throw 'The artifact manifest is not valid UTF-8 JSON.' }
+    catch { throw 'Artifact metadata must be a UTF-8 JSON object with unique supported fields and valid types.' }
+    finally { if ($null -ne $document) { $document.Dispose() } }
 }
 
 function Assert-ArtifactManifest($Manifest, [string] $ExpectedArtifactId) {
@@ -171,33 +201,8 @@ function Read-ArtifactAnchor([string] $Path) {
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
     Assert-ArtifactPathIsSafe $Path 'The artifact anchor'
     $snapshot = Read-BoundedEvidenceSnapshot $Path 'The artifact anchor' 4KB
-    $document = $null
     try {
-        $text = [Text.UTF8Encoding]::new($false, $true).GetString($snapshot.Bytes).TrimStart([char]0xFEFF)
-        $options = [Text.Json.JsonDocumentOptions]::new()
-        $options.MaxDepth = 2
-        $document = [Text.Json.JsonDocument]::Parse($text, $options)
-        $root = $document.RootElement
-        if ($root.ValueKind -ne [Text.Json.JsonValueKind]::Object) { throw 'Expected an anchor object.' }
-        $fields = @('artifactId', 'version', 'sha256', 'signingKeyId', 'acceptedAt')
-        $members = @($root.EnumerateObject())
-        if ($members.Count -ne $fields.Count) { throw 'Anchor fields are missing or unsupported.' }
-        foreach ($field in $fields) {
-            if (@($members | Where-Object { $_.Name -ceq $field }).Count -ne 1) {
-                throw 'Anchor fields must be unique and supported.'
-            }
-        }
-        $version = 0L
-        if (-not $root.GetProperty('version').TryGetInt64([ref]$version) -or $version -lt 1) {
-            throw 'Expected a positive integer anchor version.'
-        }
-        $anchor = [pscustomobject]@{
-            artifactId = $root.GetProperty('artifactId').GetString()
-            version = $version
-            sha256 = $root.GetProperty('sha256').GetString()
-            signingKeyId = $root.GetProperty('signingKeyId').GetString()
-            acceptedAt = $root.GetProperty('acceptedAt').GetString()
-        }
+        $anchor = ConvertFrom-ArtifactRecord $snapshot.Bytes -IncludeAcceptedAt
         Assert-ArtifactManifest $anchor ''
         $accepted = [DateTimeOffset]::MinValue
         if ($anchor.acceptedAt -cnotmatch '\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?(?:Z|\+00:00)\z' -or
@@ -207,7 +212,6 @@ function Read-ArtifactAnchor([string] $Path) {
         return $anchor
     }
     catch { throw 'The artifact anti-rollback anchor is invalid.' }
-    finally { if ($null -ne $document) { $document.Dispose() } }
 }
 
 function Write-ArtifactAnchor([string] $Path, $Manifest) {
@@ -254,7 +258,7 @@ if ((Get-Item -LiteralPath $anchorParent -Force).Attributes -band [IO.FileAttrib
 }
 
 $manifestBytes = (Read-BoundedEvidenceSnapshot $manifestPath 'The artifact manifest' 64KB).Bytes
-$manifest = Get-ArtifactManifest $manifestBytes
+$manifest = ConvertFrom-ArtifactRecord $manifestBytes
 Assert-ArtifactManifest $manifest $ExpectedArtifactId
 Assert-ArtifactSignature $manifestBytes $signaturePath $publicKeyPath
 $actualSha256 = Get-ArtifactSha256 $artifact

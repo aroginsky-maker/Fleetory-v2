@@ -11,6 +11,18 @@ Create four release-side files:
 - a Base64 P-256 IEEE P1363 signature over the exact manifest bytes;
 - the approved P-256 public key in PUBLIC KEY PEM format (SubjectPublicKeyInfo).
 
+The manifest is one JSON object with exactly four case-sensitive members:
+`artifactId`, `version`, `sha256` and `signingKeyId`. The identifiers and digest
+must be JSON strings satisfying the identifier/hash checks; `version` must be a positive
+JSON integer from 1 through 9223372036854775807. Numeric strings, decimal or
+exponent spellings, nulls, arrays and objects cannot substitute for those types.
+
+Missing, unknown or duplicate members, including duplicates hidden by JSON
+escapes, are refused even when the manifest has a valid signature. A singleton
+array cannot stand in for the object. Unique escaped names/values, property
+ordering and whitespace remain supported; sign the exact bytes of that spelling.
+The same record parser enforces the shared metadata rules in the anchor.
+
 Release metadata is read through bounded file handles: the manifest is at most
 **65536 bytes**, and the signature and public-key files are each at most
 **4096 bytes**. These limits include any UTF-8 BOM and whitespace. Invalid UTF-8
@@ -88,8 +100,8 @@ verification ends. Distributed/network-filesystem coordination, protected
 ownership and independently retained recovery records remain deployment controls.
 
 The checked-in tests cover first acceptance, idempotence, forward versioning,
-rollback, content tampering, strict public-key import, bounded metadata and
-streaming-hash allocation, as well as actual-process anchor coordination. These
-tests prove verifier behavior;
-production key custody, release approval and installer integration remain
+rollback, content tampering, unambiguous typed manifests, strict public-key import,
+bounded metadata, streaming-hash allocation and actual-process anchor coordination.
+These tests prove verifier behavior; production key custody, release approval and
+installer integration remain
 deployment controls.

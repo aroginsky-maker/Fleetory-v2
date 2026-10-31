@@ -52,14 +52,22 @@ function Invoke-ArtifactVerifier {
 }
 
 function Assert-VerifierFails([string] $Message) {
-    $before = [Convert]::ToBase64String([IO.File]::ReadAllBytes($anchorPath))
+    $existed = Test-Path -LiteralPath $anchorPath
+    $before = if ($existed) { [Convert]::ToBase64String([IO.File]::ReadAllBytes($anchorPath)) } else { $null }
     & pwsh -NoProfile -File $source -ArtifactPath $artifactPath -ManifestPath $manifestPath -SignaturePath $signaturePath -PublicKeyPath $publicKeyPath -AnchorPath $anchorPath -ExpectedArtifactId 'fleetory.server' *> $null
     if ($LASTEXITCODE -eq 0) { throw $Message }
-    if ($before -cne [Convert]::ToBase64String([IO.File]::ReadAllBytes($anchorPath))) {
+    if ($existed -ne (Test-Path -LiteralPath $anchorPath) -or
+        ($existed -and $before -cne [Convert]::ToBase64String([IO.File]::ReadAllBytes($anchorPath)))) {
         throw 'A failed verification changed the anti-rollback anchor bytes.'
     }
     $script:rejections++
     $global:LASTEXITCODE = 0
+}
+
+function Assert-SignedManifestFails([string] $Json, [string] $Reason) {
+    [IO.File]::WriteAllText($manifestPath, $Json, [Text.UTF8Encoding]::new($false))
+    Write-ManifestSignature
+    Assert-VerifierFails "$Reason was accepted despite an invalid signed manifest."
 }
 
 try {
@@ -167,6 +175,98 @@ try {
     Assert-VerifierFails 'A same-version key identifier conflict was accepted.'
     Write-SignedArtifact 3 'release-three'
     if ((Invoke-ArtifactVerifier).status -ne 'accepted') { throw 'Valid forward acceptance was lost.' }
+
+    # A valid signature must not permit ambiguous shapes or coercible field types.
+    Write-SignedArtifact 4 'release-four'
+    $manifestText = [IO.File]::ReadAllText($manifestPath)
+    $manifestRecord = $manifestText | ConvertFrom-Json
+    function New-ManifestFixture {
+        return [ordered]@{
+            artifactId = 'fleetory.server'; version = 4L
+            sha256 = $manifestRecord.sha256; signingKeyId = 'fleetory-release-v1'
+        }
+    }
+    $invalidManifests = [ordered]@{
+        singletonArray = '[' + $manifestText + ']'
+        multipleObjects = '[' + $manifestText + ',' + $manifestText + ']'
+        nullRoot = 'null'
+        emptyArray = '[]'
+        booleanRoot = 'false'
+        numericRoot = '4'
+        wrongCase = $manifestText.Replace('"version":4', '"Version":4')
+        unknownField = $manifestText.Replace('}', ',"unapproved":true}')
+        duplicateVersion = $manifestText.Replace('"version":4', '"version":0,"version":4')
+        escapedDuplicate = $manifestText.Replace('"version":4', '"version":0,"vers\u0069on":4')
+        duplicateArtifact = $manifestText.Replace('"artifactId":', '"artifactId":"wrong","artifactId":')
+        duplicateHash = $manifestText.Replace('"sha256":', '"sha256":"bad","sha\u003256":')
+        duplicateKey = $manifestText.Replace('"signingKeyId":', '"signingKeyId":"wrong","signingKeyId":')
+        decimalVersion = $manifestText.Replace('"version":4', '"version":4.0')
+        exponentVersion = $manifestText.Replace('"version":4', '"version":4e0')
+        overflowVersion = $manifestText.Replace('"version":4', '"version":9223372036854775808')
+    }
+    foreach ($entry in $invalidManifests.GetEnumerator()) {
+        Assert-SignedManifestFails $entry.Value $entry.Key
+    }
+    foreach ($version in @('4', $false, $null, 0, -1)) {
+        $fixture = New-ManifestFixture
+        $fixture.version = $version
+        Assert-SignedManifestFails ($fixture | ConvertTo-Json -Compress) 'A nonpositive or non-integer version'
+    }
+    foreach ($field in @('artifactId', 'sha256', 'signingKeyId')) {
+        foreach ($mutation in @(
+            { param($m, $f) $m[$f] = @($m[$f]) },
+            { param($m, $f) $m[$f] = @{ value = $m[$f] } },
+            { param($m, $f) $m[$f] = $null },
+            { param($m, $f) $m[$f] = 123 }
+        )) {
+            $fixture = New-ManifestFixture
+            & $mutation $fixture $field
+            Assert-SignedManifestFails ($fixture | ConvertTo-Json -Depth 4 -Compress) "Non-string $field"
+        }
+    }
+    foreach ($field in @('artifactId', 'version', 'sha256', 'signingKeyId')) {
+        $fixture = New-ManifestFixture
+        $fixture.Remove($field)
+        Assert-SignedManifestFails ($fixture | ConvertTo-Json -Compress) "Missing $field"
+    }
+
+    # Unique decoded names, escaped values, property order and whitespace remain valid.
+    Write-SignedArtifact 3 'release-three'
+    $manifestText = [IO.File]::ReadAllText($manifestPath)
+    $manifestRecord = $manifestText | ConvertFrom-Json
+    $reordered = [ordered]@{
+        signingKeyId = $manifestRecord.signingKeyId; sha256 = $manifestRecord.sha256.ToLowerInvariant()
+        version = 3L; artifactId = $manifestRecord.artifactId
+    } | ConvertTo-Json
+    $escaped = $manifestText.Replace('"artifactId"', '"artifact\u0049d"').Replace(
+        '"version"', '"vers\u0069on"').Replace('"sha256"', '"sha\u003256"').Replace(
+        '"signingKeyId"', '"signingKey\u0049d"').Replace('fleetory.server', 'fleetory\u002eserver')
+    foreach ($json in @($reordered, $escaped)) {
+        $before = [Convert]::ToBase64String([IO.File]::ReadAllBytes($anchorPath))
+        [IO.File]::WriteAllText($manifestPath, $json, [Text.UTF8Encoding]::new($true))
+        Write-ManifestSignature
+        if ((Invoke-ArtifactVerifier).status -ne 'idempotent' -or
+            $before -cne [Convert]::ToBase64String([IO.File]::ReadAllBytes($anchorPath))) {
+            throw 'Valid unique manifest JSON did not preserve idempotence and anchor bytes.'
+        }
+    }
+
+    $normalAnchorPath = $anchorPath
+    try {
+        $anchorPath = Join-Path $work 'invalid-first.anchor.json'
+        Write-SignedArtifact 4 'release-four'
+        Assert-SignedManifestFails ('[' + [IO.File]::ReadAllText($manifestPath) + ']') 'A singleton array on first acceptance'
+        if (Test-Path -LiteralPath ($anchorPath + '.lock')) { throw 'Invalid metadata created an anchor coordination file.' }
+
+        $anchorPath = Join-Path $work 'max-version.anchor.json'
+        Write-SignedArtifact ([long]::MaxValue) 'max-version'
+        $maximum = Invoke-ArtifactVerifier
+        if ($maximum.status -ne 'accepted' -or $maximum.version -ne [long]::MaxValue -or
+            (Invoke-ArtifactVerifier).status -ne 'idempotent') { throw 'The maximum signed 64-bit version was not retained.' }
+        Write-SignedArtifact ([long]::MaxValue - 1) 'older-max-version'
+        Assert-VerifierFails 'Rollback from the maximum signed 64-bit version was accepted.'
+    }
+    finally { $anchorPath = $normalAnchorPath }
 
     $publicBytes = [IO.File]::ReadAllBytes($publicKeyPath)
     $publicPem = $key.ExportSubjectPublicKeyInfoPem()
