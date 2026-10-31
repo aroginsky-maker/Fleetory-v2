@@ -179,3 +179,5 @@ function Start-Sleep {
     Write-Host 'SONAR ISSUE CLI TESTS PASS: exact PR head/feature branch and stale-to-fresh retry accepted; 14 bad/unknown/transport/submission cases fail without a success marker or credential disclosure.'
 }
 finally { Remove-FleetoryTestArtifacts -Work $work -RepoRoot $repo }
+# All child exit codes have been asserted; do not propagate an expected denial to the CI shell.
+$global:LASTEXITCODE = 0
