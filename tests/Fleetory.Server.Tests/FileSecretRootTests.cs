@@ -11,9 +11,9 @@ public sealed class FileSecretRootTests
     public async Task Uncached_read_rejects_a_root_replaced_by_a_link(bool warmCache)
     {
         using var files = new SecretRoot();
-        files.Write(files.Secrets, "cached", "original");
-        files.Write(files.Alternate, "fresh", "replacement");
-        files.Write(files.Alternate, "cached", "replacement");
+        SecretRoot.Write(files.Secrets, "cached", "original");
+        SecretRoot.Write(files.Alternate, "fresh", "replacement");
+        SecretRoot.Write(files.Alternate, "cached", "replacement");
         var provider = new FileSecretProvider(files.Secrets);
         if (warmCache) { Assert.Equal("original", provider.GetRequiredSecret("cached")); }
 
@@ -30,8 +30,8 @@ public sealed class FileSecretRootTests
     {
         if (OperatingSystem.IsWindows()) { return; }
         using var files = new SecretRoot();
-        files.Write(files.Secrets, "cached", "original");
-        files.Write(files.Secrets, "fresh", "fresh-private-value");
+        SecretRoot.Write(files.Secrets, "cached", "original");
+        SecretRoot.Write(files.Secrets, "fresh", "fresh-private-value");
         var provider = new FileSecretProvider(files.Secrets);
         Assert.Equal("original", provider.GetRequiredSecret("cached"));
         var original = File.GetUnixFileMode(files.Secrets);
@@ -49,10 +49,10 @@ public sealed class FileSecretRootTests
     public void Protected_unchanged_root_allows_a_later_uncached_secret()
     {
         using var files = new SecretRoot();
-        files.Write(files.Secrets, "cached", "original");
+        SecretRoot.Write(files.Secrets, "cached", "original");
         var provider = new FileSecretProvider(files.Secrets);
         Assert.Equal("original", provider.GetRequiredSecret("cached"));
-        files.Write(files.Secrets, "fresh", "later-value");
+        SecretRoot.Write(files.Secrets, "fresh", "later-value");
         Assert.Equal("later-value", provider.GetRequiredSecret("fresh"));
     }
 
@@ -69,7 +69,7 @@ public sealed class FileSecretRootTests
             Directory.CreateDirectory(Alternate);
         }
 
-        public void Write(string directory, string name, string value)
+        public static void Write(string directory, string name, string value)
         {
             var path = Path.Combine(directory, name);
             File.WriteAllText(path, value);
@@ -98,7 +98,7 @@ public sealed class FileSecretRootTests
                 Assert.Equal(0, process.ExitCode);
             }
             else { Directory.CreateSymbolicLink(Secrets, Alternate); }
-            Assert.True((File.GetAttributes(Secrets) & FileAttributes.ReparsePoint) != 0);
+            Assert.NotEqual((FileAttributes)0, File.GetAttributes(Secrets) & FileAttributes.ReparsePoint);
         }
 
         public void Dispose()
