@@ -3,7 +3,7 @@ Set-StrictMode -Version Latest
 
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $source = Join-Path $repoRoot 'eng/verify-signed-artifact.ps1'
-. (Join-Path $PSScriptRoot 'TestProvisionerHelpers.ps1') -Source $source -Names @()
+. (Join-Path $PSScriptRoot 'TestProvisionerHelpers.ps1') -Source $source -Names @('Get-ArtifactSha256')
 $work = Join-Path $repoRoot ('artifacts/signed-artifact-test-' + [Guid]::NewGuid().ToString('N'))
 $artifactPath = Join-Path $work 'Fleetory.Server.zip'
 $manifestPath = Join-Path $work 'Fleetory.Server.manifest.json'
@@ -19,6 +19,14 @@ function Get-TestSha256([byte[]] $Bytes) {
     finally { $sha.Dispose() }
 }
 
+function Write-ManifestSignature {
+    $signature = $key.SignData([IO.File]::ReadAllBytes($manifestPath),
+        [Security.Cryptography.HashAlgorithmName]::SHA256,
+        [Security.Cryptography.DSASignatureFormat]::IeeeP1363FixedFieldConcatenation)
+    [IO.File]::WriteAllText($signaturePath, [Convert]::ToBase64String($signature),
+        [Text.UTF8Encoding]::new($false))
+}
+
 function Write-SignedArtifact([long] $Version, [string] $Content, [string] $KeyId = 'fleetory-release-v1') {
     $artifactBytes = [Text.UTF8Encoding]::new($false).GetBytes($Content)
     [IO.File]::WriteAllBytes($artifactPath, $artifactBytes)
@@ -30,11 +38,7 @@ function Write-SignedArtifact([long] $Version, [string] $Content, [string] $KeyI
     } | ConvertTo-Json -Compress
     $manifestBytes = [Text.UTF8Encoding]::new($false).GetBytes($manifest)
     [IO.File]::WriteAllBytes($manifestPath, $manifestBytes)
-    $signature = $key.SignData($manifestBytes,
-        [Security.Cryptography.HashAlgorithmName]::SHA256,
-        [Security.Cryptography.DSASignatureFormat]::IeeeP1363FixedFieldConcatenation)
-    [IO.File]::WriteAllText($signaturePath, [Convert]::ToBase64String($signature),
-        [Text.UTF8Encoding]::new($false))
+    Write-ManifestSignature
     if (-not (Test-Path -LiteralPath $publicKeyPath)) {
         [IO.File]::WriteAllText($publicKeyPath, $key.ExportSubjectPublicKeyInfoPem(),
             [Text.UTF8Encoding]::new($false))
@@ -163,7 +167,87 @@ try {
     Assert-VerifierFails 'A same-version key identifier conflict was accepted.'
     Write-SignedArtifact 3 'release-three'
     if ((Invoke-ArtifactVerifier).status -ne 'accepted') { throw 'Valid forward acceptance was lost.' }
-    Write-Host "SIGNED ARTIFACT TESTS PASS: $script:rejections rejection cases; strict bounded anchor, unchanged rejected bytes, signature/hash, idempotence and forward acceptance."
+
+    $publicBytes = [IO.File]::ReadAllBytes($publicKeyPath)
+    $publicPem = $key.ExportSubjectPublicKeyInfoPem()
+    $otherCurve = [Security.Cryptography.ECDsa]::Create([Security.Cryptography.ECCurve]::CreateFromFriendlyName('nistP384'))
+    $rsa = [Security.Cryptography.RSA]::Create(2048)
+    try {
+        $privateDer = [Security.Cryptography.PemEncoding]::WriteString('PUBLIC KEY', $key.ExportPkcs8PrivateKey())
+        $trailingDer = [Security.Cryptography.PemEncoding]::WriteString('PUBLIC KEY', [byte[]]($key.ExportSubjectPublicKeyInfo() + 0))
+        foreach ($invalidPem in @(
+            $key.ExportPkcs8PrivateKeyPem(),
+            $key.ExportECPrivateKeyPem(),
+            ($publicPem + "`n" + $publicPem),
+            ('unexpected' + $publicPem),
+            ($publicPem + 'unexpected'),
+            $privateDer,
+            $trailingDer,
+            $otherCurve.ExportSubjectPublicKeyInfoPem(),
+            $rsa.ExportSubjectPublicKeyInfoPem(),
+            $publicPem.PadRight(4097)
+        )) {
+            Write-SignedArtifact 4 'release-four'
+            [IO.File]::WriteAllText($publicKeyPath, $invalidPem, [Text.UTF8Encoding]::new($false))
+            Assert-VerifierFails 'An unsupported, ambiguous or oversized public key was accepted.'
+        }
+        [IO.File]::WriteAllBytes($publicKeyPath, [byte[]]@(0xFF))
+        Assert-VerifierFails 'Invalid public-key UTF-8 was accepted.'
+    }
+    finally {
+        [IO.File]::WriteAllBytes($publicKeyPath, $publicBytes)
+        $otherCurve.Dispose()
+        $rsa.Dispose()
+    }
+
+    Write-SignedArtifact 4 'release-four'
+    $signatureText = [IO.File]::ReadAllText($signaturePath)
+    foreach ($invalidSignature in @($signatureText.PadRight(4097), 'invalid-base64', [Convert]::ToBase64String([byte[]](0..62)))) {
+        [IO.File]::WriteAllText($signaturePath, $invalidSignature, [Text.UTF8Encoding]::new($false))
+        Assert-VerifierFails 'An oversized or malformed signature was accepted.'
+    }
+    [IO.File]::WriteAllBytes($signaturePath, [byte[]]@(0xFF))
+    Assert-VerifierFails 'Invalid signature UTF-8 was accepted.'
+
+    # Both oversized and exact-boundary manifests carry valid signatures.
+    Write-SignedArtifact 4 'release-four'
+    $manifestText = [IO.File]::ReadAllText($manifestPath)
+    [IO.File]::WriteAllText($manifestPath, $manifestText.PadRight(65537), [Text.UTF8Encoding]::new($false))
+    Write-ManifestSignature
+    Assert-VerifierFails 'A validly signed oversized manifest was accepted.'
+    [IO.File]::WriteAllBytes($manifestPath, [byte[]]@(0xFF))
+    Write-ManifestSignature
+    Assert-VerifierFails 'Invalid signed manifest UTF-8 was accepted.'
+
+    Write-SignedArtifact 3 'release-three'
+    $anchorBefore = [Convert]::ToBase64String([IO.File]::ReadAllBytes($anchorPath))
+    $manifestText = [IO.File]::ReadAllText($manifestPath)
+    [IO.File]::WriteAllText($manifestPath, $manifestText.PadRight(65536 - 3), [Text.UTF8Encoding]::new($true))
+    Write-ManifestSignature
+    $signatureText = [IO.File]::ReadAllText($signaturePath)
+    [IO.File]::WriteAllText($signaturePath, $signatureText.PadRight(4096 - 3), [Text.UTF8Encoding]::new($true))
+    [IO.File]::WriteAllText($publicKeyPath, (" `n" + $publicPem + "`n ").PadRight(4096 - 3), [Text.UTF8Encoding]::new($true))
+    if ((Get-Item -LiteralPath $manifestPath).Length -ne 65536 -or
+        (Get-Item -LiteralPath $signaturePath).Length -ne 4096 -or
+        (Get-Item -LiteralPath $publicKeyPath).Length -ne 4096) { throw 'Metadata boundary fixtures have the wrong byte lengths.' }
+    if ((Invoke-ArtifactVerifier).status -ne 'idempotent' -or
+        $anchorBefore -cne [Convert]::ToBase64String([IO.File]::ReadAllBytes($anchorPath))) {
+        throw 'Valid metadata at its byte limits did not preserve idempotence and anchor bytes.'
+    }
+
+    # Package size must not determine the managed buffer allocation.
+    $largePath = Join-Path $work 'large-artifact.bin'
+    $large = [IO.File]::Open($largePath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+    try { $large.SetLength(32MB) } finally { $large.Dispose() }
+    $expected = (Get-FileHash -LiteralPath $largePath -Algorithm SHA256).Hash
+    [void](Get-ArtifactSha256 $artifactPath)
+    $allocatedBefore = [GC]::GetAllocatedBytesForCurrentThread()
+    $largeDigest = Get-ArtifactSha256 $largePath
+    $allocated = [GC]::GetAllocatedBytesForCurrentThread() - $allocatedBefore
+    if ($largeDigest -cne $expected -or $allocated -ge 8MB) {
+        throw 'Artifact hashing did not preserve its digest within the bounded allocation budget.'
+    }
+    Write-Host "SIGNED ARTIFACT TESTS PASS: $script:rejections rejection cases; strict bounded metadata and anchor, public-only keys, unchanged rejected bytes, idempotence, forward acceptance; 32 MiB hashing allocated $allocated bytes (budget <8 MiB)."
 }
 finally {
     $key.Dispose()

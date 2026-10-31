@@ -1,7 +1,7 @@
 # Signed artifact verification
 
 Fleetory release artifacts are verified before installation or update. The verifier
-does not run in the normal request path and never receives a private signing key.
+runs outside the normal request path and accepts only the approved public verification key.
 
 Create four release-side files:
 
@@ -9,14 +9,30 @@ Create four release-side files:
 - a compact UTF-8 JSON manifest with artifactId, positive integer version,
   uppercase or lowercase sha256, and signingKeyId;
 - a Base64 P-256 IEEE P1363 signature over the exact manifest bytes;
-- the approved P-256 public key in PEM format.
+- the approved P-256 public key in PUBLIC KEY PEM format (SubjectPublicKeyInfo).
+
+Release metadata is read through bounded file handles: the manifest is at most
+**65536 bytes**, and the signature and public-key files are each at most
+**4096 bytes**. These limits include any UTF-8 BOM and whitespace. Invalid UTF-8
+fails closed. The signature authenticates the exact manifest bytes, including
+any BOM or padding.
+
+The key input accepts exactly one `PUBLIC KEY` PEM block containing a complete
+P-256 SubjectPublicKeyInfo value, with optional surrounding whitespace. Private
+PKCS#8/SEC1 keys, other algorithms/curves, multiple blocks, extra text and trailing
+DER bytes are refused. Keep private signing keys in the separate release system.
+
+Manifest and signature validation precede payload hashing. The artifact SHA-256
+is computed from a file stream with bounded buffering; package size does not
+require an equally sized managed byte array. No anchor lock or state update
+occurs until all validation succeeds.
 
 Use PowerShell 7, and keep `evidence-file-helpers.ps1` beside the verifier when
 packaging the tool. Run it with absolute paths and a protected anchor directory:
 
     ./eng/verify-signed-artifact.ps1 -ArtifactPath C:\ProgramData\Fleetory\releases\Fleetory.Server.zip -ManifestPath C:\ProgramData\Fleetory\releases\Fleetory.Server.manifest.json -SignaturePath C:\ProgramData\Fleetory\releases\Fleetory.Server.manifest.sig -PublicKeyPath C:\ProgramData\Fleetory\trust\Fleetory.release.public.pem -AnchorPath C:\ProgramData\Fleetory\state\Fleetory.Server.anchor.json -ExpectedArtifactId fleetory.server
 
-The verifier checks the artifact hash, signature, P-256 key, manifest fields and
+The verifier checks the signed manifest, P-256 public key, artifact hash and
 symbolic-link/reparse-point safety. The anchor is written atomically after a valid
 release. Repeating the same version and hash is idempotent; a lower version or a
 same-version hash/key conflict fails closed. Keep the public key and anchor under
@@ -71,7 +87,9 @@ and installation as one deployment operation; the CLI releases its handle when
 verification ends. Distributed/network-filesystem coordination, protected
 ownership and independently retained recovery records remain deployment controls.
 
-The checked-in test covers first acceptance, idempotence, forward versioning,
-rollback, content tampering and invalid signatures. It proves verifier behavior;
+The checked-in tests cover first acceptance, idempotence, forward versioning,
+rollback, content tampering, strict public-key import, bounded metadata and
+streaming-hash allocation, as well as actual-process anchor coordination. These
+tests prove verifier behavior;
 production key custody, release approval and installer integration remain
 deployment controls.

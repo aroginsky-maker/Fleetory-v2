@@ -35,8 +35,53 @@ function Assert-ArtifactPathIsSafe([string] $Path, [string] $Name) {
 
 function Get-ArtifactSha256([string] $Path) {
     $sha = [Security.Cryptography.SHA256]::Create()
-    try { return ([BitConverter]::ToString($sha.ComputeHash([IO.File]::ReadAllBytes($Path)))).Replace('-', '') }
-    finally { $sha.Dispose() }
+    $stream = $null
+    try {
+        $stream = [IO.File]::Open($Path, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        return ([BitConverter]::ToString($sha.ComputeHash($stream))).Replace('-', '')
+    }
+    finally {
+        if ($null -ne $stream) { $stream.Dispose() }
+        $sha.Dispose()
+    }
+}
+
+function Read-ArtifactText([string] $Path, [string] $Name) {
+    $snapshot = Read-BoundedEvidenceSnapshot $Path $Name 4KB
+    try { return [Text.UTF8Encoding]::new($false, $true).GetString($snapshot.Bytes).TrimStart([char]0xFEFF) }
+    catch { throw "$Name must be valid UTF-8." }
+}
+
+function Get-ArtifactPemSlice([string] $Text, [Range] $Range) {
+    $start = $Range.Start.GetOffset($Text.Length)
+    return $Text.Substring($start, $Range.End.GetOffset($Text.Length) - $start)
+}
+
+function Import-ArtifactPublicKey([string] $Text) {
+    $ecdsa = [Security.Cryptography.ECDsa]::Create()
+    try {
+        $fields = [Security.Cryptography.PemEncoding]::Find($Text)
+        $start = $fields.Location.Start.GetOffset($Text.Length)
+        $end = $fields.Location.End.GetOffset($Text.Length)
+        if ((Get-ArtifactPemSlice $Text $fields.Label) -cne 'PUBLIC KEY' -or
+            -not [string]::IsNullOrWhiteSpace($Text.Substring(0, $start)) -or
+            -not [string]::IsNullOrWhiteSpace($Text.Substring($end))) {
+            throw 'Expected one public key PEM block.'
+        }
+        $der = [Convert]::FromBase64String((Get-ArtifactPemSlice $Text $fields.Base64Data))
+        $read = 0
+        $ecdsa.ImportSubjectPublicKeyInfo($der, [ref]$read)
+        if ($read -ne $der.Length -or $ecdsa.KeySize -ne 256 -or
+            $ecdsa.ExportParameters($false).Curve.Oid.Value -ne
+                [Security.Cryptography.ECCurve]::CreateFromFriendlyName('nistP256').Oid.Value) {
+            throw 'Expected a complete P-256 SubjectPublicKeyInfo value.'
+        }
+        return $ecdsa
+    }
+    catch {
+        $ecdsa.Dispose()
+        throw 'The artifact public key must contain exactly one P-256 PUBLIC KEY PEM block.'
+    }
 }
 
 function Get-ArtifactManifest([byte[]] $Bytes) {
@@ -75,18 +120,13 @@ function Assert-ArtifactManifest($Manifest, [string] $ExpectedArtifactId) {
 }
 
 function Assert-ArtifactSignature([byte[]] $ManifestBytes, [string] $SignaturePath, [string] $PublicKeyPath) {
-    try { $signature = [Convert]::FromBase64String([IO.File]::ReadAllText($SignaturePath).Trim()) }
+    $signatureText = Read-ArtifactText $SignaturePath 'The artifact signature'
+    try { $signature = [Convert]::FromBase64String($signatureText.Trim()) }
     catch { throw 'The artifact signature is not valid base64.' }
     if ($signature.Length -ne 64) { throw 'The artifact signature must be a P-256 IEEE P1363 signature.' }
 
-    $ecdsa = [Security.Cryptography.ECDsa]::Create()
+    $ecdsa = Import-ArtifactPublicKey (Read-ArtifactText $PublicKeyPath 'The artifact public key')
     try {
-        $ecdsa.ImportFromPem([IO.File]::ReadAllText($PublicKeyPath))
-        if ($ecdsa.KeySize -ne 256 -or
-            $ecdsa.ExportParameters($false).Curve.Oid.Value -ne
-                [Security.Cryptography.ECCurve]::CreateFromFriendlyName('nistP256').Oid.Value) {
-            throw 'The artifact public key must be P-256.'
-        }
         if (-not $ecdsa.VerifyData($ManifestBytes, $signature,
                 [Security.Cryptography.HashAlgorithmName]::SHA256,
                 [Security.Cryptography.DSASignatureFormat]::IeeeP1363FixedFieldConcatenation)) {
@@ -213,12 +253,12 @@ if ((Get-Item -LiteralPath $anchorParent -Force).Attributes -band [IO.FileAttrib
     throw 'The artifact anchor directory must not be a symbolic link or reparse point.'
 }
 
-$manifestBytes = [IO.File]::ReadAllBytes($manifestPath)
+$manifestBytes = (Read-BoundedEvidenceSnapshot $manifestPath 'The artifact manifest' 64KB).Bytes
 $manifest = Get-ArtifactManifest $manifestBytes
 Assert-ArtifactManifest $manifest $ExpectedArtifactId
+Assert-ArtifactSignature $manifestBytes $signaturePath $publicKeyPath
 $actualSha256 = Get-ArtifactSha256 $artifact
 if ($actualSha256 -ine [string]$manifest.sha256) { throw 'The artifact SHA-256 does not match its signed manifest.' }
-Assert-ArtifactSignature $manifestBytes $signaturePath $publicKeyPath
 
 $anchorLock = Enter-ArtifactAnchorLock $anchor
 try {
