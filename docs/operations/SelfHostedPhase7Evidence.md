@@ -75,6 +75,40 @@ review evidence for the implemented behavior and is not production custody.
   build/tests remained 401/401 with 93.68% production coverage. This is a known
   package-advisory check, not a production deployment or an OS/image scan.
 
+## Evidence collected on 1 November 2026
+
+The local containers had restarted, so OpenBao development storage and its
+short-lived credentials required reprovisioning. The following checks ran
+against application code at `52beb2b6e56e608559f408de84c69aa60dcc51ac`:
+
+- The existing lab startup procedure restored the PostgreSQL secret, dedicated
+  immudb writer secret and 24-hour, KV-read-only Server token. The Server was
+  rebuilt from the current checkout in Debug with zero warnings/errors before
+  the startup probe; the prior Debug output was not reused.
+- All four Agent/Admin lab leaf pairs were renewed through their separate CAs
+  and the gateway TLS secrets were republished to OpenBao. The provisioner
+  validated certificate/private-key pairs and retained the existing pairs in
+  the private lab history.
+- The command-signing preflight refused the stale Agent trust material after
+  the ephemeral Transit key ring restarted. The explicit disposable-lab reset
+  archived that stale public key, provisioned the current non-exportable P-256
+  key's trust file and refreshed the separate one-hour signer token.
+- The live Transit check then passed: Agent accepted one signed
+  `Inventory.Refresh`, rejected its replay through SQLite, and the Server's
+  KV-only token received HTTP 403 from Transit signing.
+- A temporary Fleetory process started with both Agent/Admin gateways enabled
+  and OpenBao-backed secrets; `/health/ready` returned HTTP 200. A fresh
+  PostgreSQL audit/outbox entry reached immudb through the dedicated writer,
+  and readback matched its EventId, action and revision 1. The verifier stopped
+  its temporary Server process afterward.
+
+This is recovery evidence for the disposable local lab. The trust reset is
+limited to that lab and is not a production key-rotation procedure. The startup
+probe does not establish root-only intermediate-chain delivery or exercise the
+Admin OIDC/WebAuthn flow. No production host, external approvals, independent
+WORM retention or deployment custody is inferred from these results. Current
+official CI/Sonar results remain recorded against their exact commits in PR #2.
+
 Production completion still requires independent CA/key custody, signer
 deployment, TLS/firewall records, WORM/SIEM object identifiers, retention/legal
 hold records and final approval/recovery evidence.
