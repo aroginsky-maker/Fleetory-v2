@@ -59,27 +59,36 @@ function Assert-NoNewCaptureDirectory([string[]] $Before, [string] $Message) {
     Assert-True ($newPaths.Count -eq 0) $Message
 }
 
-function Register-Capture([object] $Result) {
-    $directory = [string]$Result.outputDirectory
-    if (-not [IO.Path]::IsPathFullyQualified($directory)) { throw 'Capture output path is invalid.' }
-    $full = [IO.Path]::GetFullPath($directory)
+function Resolve-CaptureDirectory([string] $Path) {
+    if (-not [IO.Path]::IsPathFullyQualified($Path)) { throw 'Capture output path is invalid.' }
+    $full = [IO.Path]::GetFullPath($Path)
+    $comparison = if ([System.OperatingSystem]::IsWindows()) {
+        [StringComparison]::OrdinalIgnoreCase
+    } else { [StringComparison]::Ordinal }
     $tempPrefix = $tempRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
-    if (-not $full.StartsWith($tempPrefix,[StringComparison]::OrdinalIgnoreCase) -or
-        -not [IO.Path]::GetFileName($full).StartsWith('fleetory-identity-capture-',[StringComparison]::Ordinal) -or
+    $tempFull = $tempRoot.TrimEnd([IO.Path]::DirectorySeparatorChar)
+    if (-not $full.StartsWith($tempPrefix,$comparison) -or
+        -not [IO.Path]::GetFileName($full).StartsWith('fleetory-identity-capture-',$comparison) -or
+        -not [string]::Equals([IO.Path]::GetDirectoryName($full).TrimEnd([IO.Path]::DirectorySeparatorChar),
+            $tempFull,$comparison) -or
         -not (Test-Path -LiteralPath $full -PathType Container) -or
         ((Get-Item -LiteralPath $full -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
         throw 'Capture output directory is outside the fixture temp root.'
     }
     $cursor = Get-Item -LiteralPath $full -Force
-    $tempFull = $tempRoot.TrimEnd([IO.Path]::DirectorySeparatorChar)
+    $reachedTemp = $false
     while ($null -ne $cursor) {
-        if (($cursor.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-            throw 'Capture output ancestry contains a link.'
-        }
-        if ([IO.Path]::GetFullPath($cursor.FullName).TrimEnd([IO.Path]::DirectorySeparatorChar) -ceq $tempFull) { break }
+        if (($cursor.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Capture output ancestry contains a link.' }
+        if ([string]::Equals([IO.Path]::GetFullPath($cursor.FullName).TrimEnd([IO.Path]::DirectorySeparatorChar),
+            $tempFull,$comparison)) { $reachedTemp=$true; break }
         $cursor = $cursor.Parent
     }
-    if ($null -eq $cursor) { throw 'Capture output ancestry did not reach the temp root.' }
+    if (-not $reachedTemp) { throw 'Capture output ancestry did not reach the temp root.' }
+    return $full
+}
+
+function Register-Capture([object] $Result) {
+    $full = Resolve-CaptureDirectory ([string]$Result.outputDirectory)
     $entries = @(Get-ChildItem -LiteralPath $full -Force | Select-Object -ExpandProperty Name | Sort-Object)
     if ($entries.Count -ne 2 -or $entries[0] -cne 'database.dump' -or $entries[1] -cne 'manifest.json') {
         throw 'Capture output directory contains unexpected files.'
@@ -157,24 +166,7 @@ function Invoke-Verifier([hashtable] $Files, [string] $ManifestHash) {
 }
 
 function Remove-CaptureDirectory([string] $Path) {
-    $full = [IO.Path]::GetFullPath($Path)
-    $tempPrefix = $tempRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
-    if (-not $full.StartsWith($tempPrefix,[StringComparison]::OrdinalIgnoreCase) -or
-        -not [IO.Path]::GetFileName($full).StartsWith('fleetory-identity-capture-',[StringComparison]::Ordinal) -or
-        -not (Test-Path -LiteralPath $full -PathType Container) -or
-        ((Get-Item -LiteralPath $full -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-        throw 'Refusing to clean an unexpected capture directory.'
-    }
-    $cursor = Get-Item -LiteralPath $full -Force
-    $tempFull = $tempRoot.TrimEnd([IO.Path]::DirectorySeparatorChar)
-    while ($null -ne $cursor) {
-        if (($cursor.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-            throw 'Refusing to clean a linked capture ancestry.'
-        }
-        if ([IO.Path]::GetFullPath($cursor.FullName).TrimEnd([IO.Path]::DirectorySeparatorChar) -ceq $tempFull) { break }
-        $cursor = $cursor.Parent
-    }
-    if ($null -eq $cursor) { throw 'Refusing to clean outside the temp root.' }
+    $full = Resolve-CaptureDirectory $Path
     foreach ($name in @('database.dump','manifest.json')) {
         $file = Join-Path $full $name
         if (Test-Path -LiteralPath $file -PathType Leaf) {
