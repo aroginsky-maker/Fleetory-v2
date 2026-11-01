@@ -159,13 +159,18 @@ function Assert-Profile {
         }
 
         if ($serviceName -eq 'server' -or $serviceName -eq 'keycloak') {
-            $localDockerfile = Join-Path $PSScriptRoot "$serviceName.Dockerfile"
+            $sourceDockerfiles = @{ server = 'Server.Dockerfile'; keycloak = 'Keycloak.Dockerfile' }
+            $localDockerfile = Join-Path $PSScriptRoot $sourceDockerfiles[$serviceName]
         } elseif (-not (Test-Path -LiteralPath $localDockerfile -PathType Leaf)) {
             $localDockerfile = Join-Path $PSScriptRoot '..\command-signer\Dockerfile'
         }
 
         if (-not (Test-Path -LiteralPath $localDockerfile -PathType Leaf)) {
             throw "Pinned Dockerfile for local build '$serviceName' was not found."
+        }
+
+        if ((Get-Item -LiteralPath $localDockerfile).Name -cne [IO.Path]::GetFileName($localDockerfile)) {
+            throw 'Dockerfile path casing must match the tracked filename on Linux and Windows.'
         }
 
         $dockerfileText = Get-Content -LiteralPath $localDockerfile -Raw
