@@ -8,6 +8,8 @@ import urllib.request
 
 TARGETS = {
     "bao": ("https://localhost:18200", "/srv/fleetory/secrets/openbao/ca.crt"),
+    # Recovery requires the OpenBao network namespace; this port is never published.
+    "bao-recovery": ("https://localhost:8205", "/srv/fleetory/secrets/openbao/ca.crt"),
     "audit": ("https://localhost:18091", "/srv/fleetory/secrets/immudb/infrastructure-ca"),
     "audit-gateway": ("https://localhost:18090", "/srv/fleetory/secrets/audit-gateway/infrastructure-ca"),
     "keycloak": ("http://127.0.0.1:18080", None),

@@ -151,6 +151,14 @@ listener "tcp" {
  tls_cert_file = "/run/secrets/openbao/server.crt"
  tls_key_file = "/run/secrets/openbao/server.key"
  tls_min_version = "tls12"
+ disable_unauthed_generate_root_endpoints = true
+}
+audit "file" "pilot-file" {
+ options {
+  file_path = "/openbao/data/audit.log"
+  mode = "0600"
+  log_raw = "false"
+ }
 }
 "@
  Write-Private 'upload/config/postgresql.conf' @"

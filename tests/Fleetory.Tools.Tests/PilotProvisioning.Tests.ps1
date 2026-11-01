@@ -68,6 +68,9 @@ try {
     $clientEku = $client.Extensions | Where-Object { $_.Oid.Value -eq '2.5.29.37' }
     Assert-True (@($clientEku.EnhancedKeyUsages | Where-Object Value -EQ '1.3.6.1.5.5.7.3.2').Count -eq 1) 'Signer client purpose failed.'
     $policyText = Get-Content -LiteralPath (Join-Path $material 'upload/secrets/signer/signer-policy') -Raw
+    $baoConfig = [IO.File]::ReadAllText((Join-Path $material 'upload/config/openbao.hcl'))
+    Assert-True ($baoConfig -match 'disable_unauthed_generate_root_endpoints\s*=\s*true') 'Normal listener permits unauthenticated root recovery.'
+    Assert-True ($baoConfig -match 'audit "file" "pilot-file"' -and $baoConfig -match 'log_raw\s*=\s*"false"') 'OpenBao declarative audit is missing or logs raw secrets.'
     $policy = $policyText | ConvertFrom-Json
     $clientRoot = [Security.Cryptography.X509Certificates.X509Certificate2]::CreateFromPem([string]$policy.rootsPem)
     $resources.Add($clientRoot)
