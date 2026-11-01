@@ -391,7 +391,12 @@ try {
     . $tlsFactory
     $material = New-PilotDisposableTlsMaterial
     $stage = 'image'
-    $imageCheck = Invoke-Docker @('image','inspect','--format','{{json .RepoDigests}}',$image)
+    $imageInspectArguments = @('image','inspect','--format','{{json .RepoDigests}}',$image)
+    $imageCheck = Invoke-Docker $imageInspectArguments -AllowFailure
+    if ($imageCheck.ExitCode -ne 0) {
+        $null = Invoke-Docker @('pull',$image) -TimeoutSeconds 120
+        $imageCheck = Invoke-Docker $imageInspectArguments
+    }
     Assert-True ($imageCheck.Stdout -match [regex]::Escape($digest)) 'Pinned OpenBao image digest is not locally available.'
     $stage = 'create-source'
     $sourceId = New-Container 'source'
