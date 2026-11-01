@@ -235,6 +235,11 @@ jobs:
       - name: Verify Keycloak identity snapshot and isolated restore
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/IdentityBackup.Tests.ps1
+
+      - name: Verify isolated OpenBao Raft recovery
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/OpenBaoRaftRecovery.Tests.ps1
+
       - name: Enforce zero Sonar issues
         shell: pwsh
         env:

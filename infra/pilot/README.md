@@ -278,6 +278,16 @@ custody, full-system recovery or a fresh post-restore passkey login.
    remaining custody/approval/recovery gaps truthfully. Do not set Phase 7
    readiness controls or independent-WORM flags to true without actual evidence.
 
+## Secret-provider recovery acceptance
+
+OpenBao uses Integrated Storage (Raft). Its native encrypted snapshot and
+original seal material have separate custody requirements. The isolated
+synthetic recovery procedure is described in
+[OpenBaoRecovery](../../docs/operations/OpenBaoRecovery.md). It does not establish
+an actual pilot snapshot, independent custody or full-system recovery. New use
+of the real recovery share, administrative recovery, snapshot transfer and
+the provider restore target require a concrete approved operation.
+
 ## PostgreSQL permissions
 
 `postgres` is the cluster administrator and is never an application login.
