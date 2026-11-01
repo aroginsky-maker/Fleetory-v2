@@ -16,6 +16,7 @@ $network = 'fleetory-identity-' + [Guid]::NewGuid().ToString('N')
 $postgresName = 'fleetory-id-pg-' + [Guid]::NewGuid().ToString('N')
 $keycloakName = 'fleetory-id-kc-' + [Guid]::NewGuid().ToString('N')
 $containers = [Collections.Generic.List[string]]::new()
+$captureDirectories = [Collections.Generic.List[string]]::new()
 $networkCreated = $false
 $stage = 'preflight'
 $safeDetail = ''
@@ -40,6 +41,51 @@ function Invoke-Python([string[]] $Arguments) {
     $output = & $PythonExecutable @Arguments 2>$null
     if ($LASTEXITCODE -ne 0) { throw 'Identity backup helper rejected the disposable fixture.' }
     return (@($output) -join "`n").Trim()
+}
+
+function Assert-HelperRejects([string[]] $Arguments, [string] $Message) {
+    & $PythonExecutable $captureTool @Arguments 2>$null | Out-Null
+    Assert-True ($LASTEXITCODE -ne 0) $Message
+}
+
+function Get-CaptureDirectoryNames {
+    return @((Get-ChildItem -LiteralPath $tempRoot -Directory -Filter 'fleetory-identity-capture-*' -ErrorAction SilentlyContinue |
+        Select-Object -ExpandProperty Name) | Sort-Object -Unique)
+}
+
+function Assert-NoNewCaptureDirectory([string[]] $Before, [string] $Message) {
+    $after = Get-CaptureDirectoryNames
+    $newPaths = @($after | Where-Object { $_ -notin $Before })
+    Assert-True ($newPaths.Count -eq 0) $Message
+}
+
+function Register-Capture([object] $Result) {
+    $directory = [string]$Result.outputDirectory
+    if (-not [IO.Path]::IsPathFullyQualified($directory)) { throw 'Capture output path is invalid.' }
+    $full = [IO.Path]::GetFullPath($directory)
+    $tempPrefix = $tempRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    if (-not $full.StartsWith($tempPrefix,[StringComparison]::OrdinalIgnoreCase) -or
+        -not [IO.Path]::GetFileName($full).StartsWith('fleetory-identity-capture-',[StringComparison]::Ordinal) -or
+        -not (Test-Path -LiteralPath $full -PathType Container) -or
+        ((Get-Item -LiteralPath $full -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw 'Capture output directory is outside the fixture temp root.'
+    }
+    $cursor = Get-Item -LiteralPath $full -Force
+    $tempFull = $tempRoot.TrimEnd([IO.Path]::DirectorySeparatorChar)
+    while ($null -ne $cursor) {
+        if (($cursor.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw 'Capture output ancestry contains a link.'
+        }
+        if ([IO.Path]::GetFullPath($cursor.FullName).TrimEnd([IO.Path]::DirectorySeparatorChar) -ceq $tempFull) { break }
+        $cursor = $cursor.Parent
+    }
+    if ($null -eq $cursor) { throw 'Capture output ancestry did not reach the temp root.' }
+    $entries = @(Get-ChildItem -LiteralPath $full -Force | Select-Object -ExpandProperty Name | Sort-Object)
+    if ($entries.Count -ne 2 -or $entries[0] -cne 'database.dump' -or $entries[1] -cne 'manifest.json') {
+        throw 'Capture output directory contains unexpected files.'
+    }
+    $captureDirectories.Add($full)
+    return $full
 }
 
 function New-PrivateDirectory([string] $Path) {
@@ -110,6 +156,40 @@ function Invoke-Verifier([hashtable] $Files, [string] $ManifestHash) {
     }
 }
 
+function Remove-CaptureDirectory([string] $Path) {
+    $full = [IO.Path]::GetFullPath($Path)
+    $tempPrefix = $tempRoot.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+    if (-not $full.StartsWith($tempPrefix,[StringComparison]::OrdinalIgnoreCase) -or
+        -not [IO.Path]::GetFileName($full).StartsWith('fleetory-identity-capture-',[StringComparison]::Ordinal) -or
+        -not (Test-Path -LiteralPath $full -PathType Container) -or
+        ((Get-Item -LiteralPath $full -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+        throw 'Refusing to clean an unexpected capture directory.'
+    }
+    $cursor = Get-Item -LiteralPath $full -Force
+    $tempFull = $tempRoot.TrimEnd([IO.Path]::DirectorySeparatorChar)
+    while ($null -ne $cursor) {
+        if (($cursor.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+            throw 'Refusing to clean a linked capture ancestry.'
+        }
+        if ([IO.Path]::GetFullPath($cursor.FullName).TrimEnd([IO.Path]::DirectorySeparatorChar) -ceq $tempFull) { break }
+        $cursor = $cursor.Parent
+    }
+    if ($null -eq $cursor) { throw 'Refusing to clean outside the temp root.' }
+    foreach ($name in @('database.dump','manifest.json')) {
+        $file = Join-Path $full $name
+        if (Test-Path -LiteralPath $file -PathType Leaf) {
+            if (((Get-Item -LiteralPath $file -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw 'Refusing to clean linked capture material.'
+            }
+            Remove-Item -LiteralPath $file -Force
+        }
+    }
+    if (@(Get-ChildItem -LiteralPath $full -Force).Count -ne 0) {
+        throw 'Refusing to clean a capture directory with unexpected entries.'
+    }
+    Remove-Item -LiteralPath $full -Force
+}
+
 function Assert-VerifierRejects([hashtable] $Files, [string] $ManifestHash, [string] $ExpectedStage, [string] $Message) {
     $rejected = $false
     try {
@@ -136,6 +216,7 @@ $bootstrapPassword = New-RandomText
 $databasePassword = New-RandomText
 $ownerPassword = New-RandomText
 $ownerId = $null
+$sessionId = [Guid]::NewGuid().ToString('D').ToLowerInvariant()
 $webAuthnId = New-RandomText 18
 
 try {
@@ -151,6 +232,8 @@ try {
     $networkCreated = $true
     $postgresId = Invoke-Docker @('run','-d','--name',$postgresName,'--network',$network,
         '--network-alias','postgres','--memory','384m','--cpus','1','--pids-limit','128',
+        '--label','com.fleetory.identity-backup.role=fixture-source',
+        '--label',"com.fleetory.identity-backup.session=$sessionId",
         '-e','POSTGRES_USER=postgres','-e',"POSTGRES_PASSWORD=$databasePassword",
         '-e','POSTGRES_DB=keycloak',$postgresImage)
     $containers.Add($postgresId)
@@ -263,24 +346,36 @@ try {
         '-v','ON_ERROR_STOP=1','-c',$seedSql) | Out-Null
 
     $stage = 'actual database capture'
-    $backupDirectory = Join-Path $work 'captured'
-    $captureText = Invoke-Python @($captureTool,'capture','--container',$postgresId,'--database','keycloak',
-        '--realm','fleetory','--owner',$ownerId,'--output-directory',$backupDirectory)
+    $captureDirectoriesBeforeNegativeChecks = Get-CaptureDirectoryNames
+    $traversalOption = Join-Path (Join-Path $work '..') ('rejected-traversal-' + $sessionId)
+    $traversalTarget = [IO.Path]::GetFullPath($traversalOption)
+    $absoluteTarget = Join-Path $work 'rejected-absolute-target'
+    Assert-HelperRejects @('capture','--target','fixture','--session',$sessionId,'--owner',$ownerId,
+        '--output-directory',$traversalOption) 'Caller-supplied traversal output option was accepted.'
+    Assert-True (-not (Test-Path -LiteralPath $traversalTarget)) 'Traversal output option created a path.'
+    Assert-HelperRejects @('capture','--target','fixture','--session',$sessionId,'--owner',$ownerId,
+        '--output-directory',$absoluteTarget) 'Caller-supplied absolute output option was accepted.'
+    Assert-True (-not (Test-Path -LiteralPath $absoluteTarget)) 'Absolute output option created a path.'
+    foreach ($option in @('--container','--database','--db-user')) {
+        Assert-HelperRejects @('capture','--target','fixture','--session',$sessionId,'--owner',$ownerId,
+            $option,'untrusted-override') "Removed $option selector was accepted."
+    }
+    $wrongSession = [Guid]::NewGuid().ToString('D').ToLowerInvariant()
+    Assert-HelperRejects @('capture','--target','fixture','--session',$wrongSession,'--owner',$ownerId) 'A valid but unowned session was accepted.'
+    Assert-NoNewCaptureDirectory $captureDirectoriesBeforeNegativeChecks 'A failed session lookup created capture output.'
+    $wrongOwner = [Guid]::NewGuid().ToString('D').ToLowerInvariant()
+    Assert-HelperRejects @('capture','--target','fixture','--session',$sessionId,'--owner',$wrongOwner) 'A valid but unrelated owner was accepted.'
+    Assert-NoNewCaptureDirectory $captureDirectoriesBeforeNegativeChecks 'A failed owner check created capture output.'
+
+    $captureText = Invoke-Python @($captureTool,'capture','--target','fixture','--session',$sessionId,'--owner',$ownerId)
     $capture = $captureText | ConvertFrom-Json
+    $backupDirectory = Register-Capture $capture
     $backupDump = Join-Path $backupDirectory 'database.dump'
     $backupManifest = Join-Path $backupDirectory 'manifest.json'
     Assert-True (Test-Path -LiteralPath $backupDump -PathType Leaf) 'Capture did not create a dump.'
     Assert-True (Test-Path -LiteralPath $backupManifest -PathType Leaf) 'Capture did not create a manifest.'
     $manifestHash = [string]$capture.manifestSha256
     Assert-True ($manifestHash -match '^[0-9a-f]{64}$') 'Capture returned no manifest hash.'
-
-    $sourceInventoryText = Invoke-Python @($captureTool,'inventory','--container',$postgresId,'--database','keycloak',
-        '--realm','fleetory','--owner',$ownerId)
-    $sourceInventory = $sourceInventoryText | ConvertFrom-Json
-    if ($sourceInventory.inventorySha256 -cne $capture.inventorySha256) {
-        $safeDetail = 'Post-capture source inventory changed before restore.'
-        throw 'Source inventory was not stable after capture.'
-    }
 
     $stage = 'actual database restore and inventory comparison'
     Invoke-Verifier @{ Dump=$backupDump; Manifest=$backupManifest } $manifestHash
@@ -294,9 +389,8 @@ try {
         '-v','ON_ERROR_STOP=1','-c',"SELECT count(*) FROM public.credential WHERE user_id='$ownerId' AND type='webauthn' AND credential_data LIKE '%changed-fixture-data%'")
     Assert-True ($changedCount -eq '1') 'The opaque fixture credential field was not changed exactly once.'
     $stage = 'capture changed credential state'
-    $changedDirectory = Join-Path $work 'changed-capture'
-    $changedCapture = (Invoke-Python @($captureTool,'capture','--container',$postgresId,'--database','keycloak',
-        '--realm','fleetory','--owner',$ownerId,'--output-directory',$changedDirectory)) | ConvertFrom-Json
+    $changedCapture = (Invoke-Python @($captureTool,'capture','--target','fixture','--session',$sessionId,'--owner',$ownerId)) | ConvertFrom-Json
+    $changedDirectory = Register-Capture $changedCapture
     Assert-True ($changedCapture.inventorySha256 -cne $capture.inventorySha256) 'Opaque credential mutation did not change the real source inventory.'
     $stage = 'restore mismatched inventory candidate'
     $credentialMutation = Copy-Backup 'credential-mutation'
@@ -337,10 +431,13 @@ catch {
 }
 finally {
     foreach ($id in $containers) {
-        try { Invoke-Docker @('rm','-f',$id) | Out-Null } catch { }
+        Invoke-Docker @('rm','-f','-v',$id) | Out-Null
     }
     if ($networkCreated) {
-        try { Invoke-Docker @('network','rm',$network) | Out-Null } catch { }
+        Invoke-Docker @('network','rm',$network) | Out-Null
+    }
+    foreach ($directory in $captureDirectories) {
+        Remove-CaptureDirectory $directory
     }
     $fullWork = [IO.Path]::GetFullPath($work)
     if ($fullWork.StartsWith($tempRoot,[StringComparison]::OrdinalIgnoreCase) -and

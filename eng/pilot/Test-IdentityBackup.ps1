@@ -86,7 +86,7 @@ function Assert-Inventory([System.Text.Json.JsonElement]$Element,[bool]$IsManife
     $schema=if ($IsManifest) {'fleetory.keycloak-backup.v1'} else {'fleetory.keycloak-inventory.v1'}
     if ($Element.GetProperty('schema').GetString() -cne $schema -or
         $Element.GetProperty('inventoryAlgorithm').GetString() -cne 'fleetory.keycloak-inventory.v1' -or
-        $Element.GetProperty('realm').GetString() -cnotmatch '^[A-Za-z0-9_-]{1,64}$' -or
+        $Element.GetProperty('realm').GetString() -cne 'fleetory' -or
         $Element.GetProperty('owner').GetString() -cnotmatch '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' -or
         [Guid]::Parse($Element.GetProperty('owner').GetString()) -eq [Guid]::Empty -or
         $Element.GetProperty('postgresMajor').GetInt32() -ne 18 -or
@@ -140,8 +140,12 @@ try {
     if (-not (Test-Hash $dumpHash $manifest.GetProperty('dumpSha256').GetString())) {throw 'Backup digest mismatch.'}
 
     $stage='container'
+    # Capability-like session label binds discovery to this newly owned sandbox.
+    $restoreSession=[Guid]::NewGuid().ToString('D')
     $runArgs=@('run','--detach','--network','none','--read-only','--user','999:999','--cap-drop','ALL',
         '--security-opt','no-new-privileges:true','--pids-limit','128','--memory','768m','--cpus','1',
+        '--label','com.fleetory.identity-backup.role=restore',
+        '--label',"com.fleetory.identity-backup.session=$restoreSession",
         '--tmpfs','/var/lib/postgresql:rw,noexec,nosuid,nodev,uid=999,gid=999,mode=0700,size=512m',
         '--tmpfs','/var/run/postgresql:rw,noexec,nosuid,nodev,uid=999,gid=999,mode=0700,size=16m',
         '--tmpfs','/tmp:rw,noexec,nosuid,nodev,uid=999,gid=999,mode=0700,size=160m',
@@ -189,8 +193,8 @@ try {
         '--no-owner','--no-privileges','--exit-on-error','--single-transaction','/tmp/identity.dump') 120
     $pythonPath=Join-Path $PSScriptRoot 'identity_backup.py'
     $stage='inventory'
-    $inventoryOutput=& $PythonExecutable $pythonPath inventory --container $containerId --database keycloak_restore --db-user restore_owner `
-        --realm $manifest.GetProperty('realm').GetString() --owner $manifest.GetProperty('owner').GetString() 2>&1
+    $inventoryOutput=& $PythonExecutable $pythonPath inventory --session $restoreSession `
+        --owner $manifest.GetProperty('owner').GetString() 2>&1
     if ($LASTEXITCODE -ne 0) {throw 'Restored inventory failed.'}
     $inventoryText=$inventoryOutput -join "`n"
     if ([Text.Encoding]::UTF8.GetByteCount($inventoryText) -gt 65536) {throw 'Oversized restored inventory.'}

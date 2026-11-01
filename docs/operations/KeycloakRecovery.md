@@ -29,18 +29,29 @@ database, identities, credentials, passkeys, signing keys or grants.
 
 ## Capture one consistent snapshot
 
-Run the reviewed Python 3.11+ helper on the authorized Docker host, using a new
-absolute output directory whose parent already exists:
+Run the reviewed Python 3.11+ helper on the authorized Linux pilot host:
 
 ```sh
-python3 identity_backup.py capture \
-  --container fleetory-pilot-postgres-1 --database keycloak \
-  --realm fleetory --owner 11111111-1111-4111-8111-111111111111 \
-  --output-directory /srv/fleetory/operator-backups/keycloak-approved-capture
+sudo python3 identity_backup.py capture --target pilot \
+  --owner 11111111-1111-4111-8111-111111111111
 ```
 
+The pilot target fixes the database/realm/login to
+`keycloak`/`fleetory`/`postgres`. Docker discovery must find the exact running
+Compose project/service/name and pinned PostgreSQL image. Container names,
+database/login overrides and arbitrary output paths are not accepted.
+
+An operator must preprovision `/srv/fleetory/operator-backups` as an owner-only
+directory. The helper generates a fresh UUID child there and returns its
+`outputDirectory` in the safe capture summary. POSIX directory handles and
+no-follow/exclusive file creation bind writes to that verified directory.
+The fixture target requires the current test session's ownership labels and
+writes only to a helper-created private temporary directory; it cannot redirect
+the pilot target or enable database/login overrides.
+
 The UUID is an example: use the actual existing provider subject. The helper
-holds a read-only repeatable-read transaction, exports its PostgreSQL snapshot
+holds a read-only repeatable-read transaction, validates the required identity
+state before starting the dump, exports its PostgreSQL snapshot
 and gives that same snapshot to `pg_dump`. Its inventory is calculated in the
 held transaction, so concurrent credential/counter/session writes cannot put
 the dump and expected inventory at different points in time.
@@ -77,6 +88,12 @@ directory or Docker socket is mounted. A separate LOGIN `restore_owner` has no
 superuser, role-management, database-creation, replication, bypass-RLS or role
 membership privileges. `pg_restore` connects as that role, rather than using a
 superuser session with only `SET ROLE`.
+
+The verifier generates a fresh session nonce and labels its sandbox. The
+inventory helper discovers only that owned restore session, validates its
+pinned image, network/mount/read-only/user restrictions, and uses fixed
+`keycloak_restore`/`restore_owner` connection values. Arbitrary container, database
+or login arguments cannot redirect the inventory operation.
 
 PostgreSQL archives contain executable DDL. Accept only a snapshot captured
 from the reviewed, trusted source database; these checks are not a general
