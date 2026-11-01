@@ -148,7 +148,7 @@ jobs:
 
       - name: Verify external pilot Compose profile
         shell: pwsh
-        run: ./infra/pilot/Test-PilotProfile.ps1
+        run: ./eng/pilot/Test-PilotProfile.ps1
 
       - name: Verify lab certificate rotation and rollback
         shell: pwsh
@@ -227,6 +227,10 @@ jobs:
       - name: Run Fleetory quality verification
         shell: pwsh
         run: ./eng/verify-quality.ps1
+
+      - name: Verify isolated pilot PKI and database provisioning
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/PilotProvisioning.Tests.ps1
 
       - name: Enforce zero Sonar issues
         shell: pwsh

@@ -135,8 +135,8 @@ health-enabled=true
 "@
  $stateKey=[Security.Cryptography.ECDsa]::Create([Security.Cryptography.ECCurve+NamedCurves]::nistP256); $resources.Add($stateKey)
  Write-Private 'upload/secrets/immudb/state-signing.pem' ($stateKey.ExportECPrivateKeyPem())
- Write-Private 'upload/config/Caddyfile' (([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'Caddyfile.template'))).Replace('__FLEETORY_HOST__',$AppHost).Replace('__FLEETORY_AUTH_HOST__',$AuthHost))
- Write-Private 'upload/config/audit-gateway.conf' ([IO.File]::ReadAllText((Join-Path $PSScriptRoot 'audit-gateway.conf')))
+ Write-Private 'upload/config/Caddyfile' (([IO.File]::ReadAllText((Join-Path $repo 'infra/pilot/Caddyfile.template'))).Replace('__FLEETORY_HOST__',$AppHost).Replace('__FLEETORY_AUTH_HOST__',$AuthHost))
+ Write-Private 'upload/config/audit-gateway.conf' ([IO.File]::ReadAllText((Join-Path $repo 'infra/pilot/audit-gateway.conf')))
  Write-Private 'upload/config/openbao.hcl' @"
 ui = false
 api_addr = "https://openbao:8200"

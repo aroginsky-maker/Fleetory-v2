@@ -14,7 +14,7 @@ apt-get -qq update
 apt-get -qq -o Dpkg::Options::=--force-confold -y upgrade
 apt-get -qq install -y ca-certificates curl ufw jq openssl unattended-upgrades
 install -m 0755 -d /etc/apt/keyrings
-curl --fail --silent --show-error --location https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --tlsv1.2 https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
 chmod 0644 /etc/apt/keyrings/docker.asc
 arch="$(dpkg --print-architecture)"
 cat > /etc/apt/sources.list.d/docker.sources <<EOF

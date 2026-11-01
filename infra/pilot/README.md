@@ -16,6 +16,20 @@ agent on 2026-11-01 (this documentation update made no remote requests):
 - The app currently exposes health/API endpoints; there is no interactive UI
   or Admin OIDC login/callback implementation.
 
+
+Operator-only host/provisioning/verification tools live in `eng/pilot/`.
+Runtime Compose, Dockerfiles and TLS proxy templates remain in `infra/pilot/`.
+The existing quality policy still analyzes operator tools for issues and
+duplication; its .NET coverage provider measures production assemblies and does
+not instrument PowerShell/shell/Python operator execution. No production source,
+Quality Gate or coverage threshold was excluded or relaxed for this layout.
+
+`tests/Fleetory.Tools.Tests/PilotProvisioning.Tests.ps1` separately generates
+disposable PKI, validates trust/key/purpose/permissions and rejection paths,
+exports both actual EF contexts and provisions isolated PostgreSQL to verify
+database ownership and runtime grants. It never uses this VM, operator material,
+production credentials or OpenBao initialization.
+
 ## Verified pilot snapshot
 
 - Ubuntu was updated and rebooted; Docker `29.9.2`, Compose `5.6.1`. Public
@@ -92,7 +106,7 @@ an expected pending dependency, not a successful signer readiness result.
    `/srv/fleetory`; relative mounts/build paths in `compose.yaml` are interpreted
    from that directory. Review the resolved compose configuration privately.
    Never paste resolved secret-bearing configuration or SQL into logs/chat.
-2. Generate material locally using `New-PilotMaterial.ps1` into a new protected
+2. Generate material locally using `eng/pilot/New-PilotMaterial.ps1` into a new protected
    directory outside **all Git checkouts**. Upload only the `upload/` subtree.
    Keep `offline/`, CA private keys, `credentials.json`, operator client keys and
    later recovery/root material on the protected operator side. Never mount CA
@@ -106,7 +120,7 @@ an expected pending dependency, not a successful signer readiness result.
    to resolve a startup failure. Owner-readable `0400` files and `0500` secret
    directories are suitable after provisioning.
 4. Export actual idempotent Platform and Core EF migration SQL offline. Generate
-   fresh-cluster PostgreSQL initialization SQL with `New-PilotDatabaseScript.ps1`,
+   fresh-cluster PostgreSQL initialization SQL with `eng/pilot/New-PilotDatabaseScript.ps1`,
    using absolute existing input paths and a new private output outside Git.
    This SQL contains passwords: retain it only in the protected initialization
    path. It creates databases outside transactions and fails on existing roles

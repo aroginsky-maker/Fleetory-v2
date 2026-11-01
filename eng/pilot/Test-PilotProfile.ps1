@@ -4,17 +4,18 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$composePath = Join-Path $PSScriptRoot 'compose.yaml'
+$repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$composePath = Join-Path $repoRoot 'infra\pilot\compose.yaml'
 $passedChecks = 0
 $rejectedMutations = 0
 
 function Assert-Profile {
     param(
         [Parameter(Mandatory)]
-        [System.Collections.IDictionary] $Profile
+        [System.Collections.IDictionary] $ComposeModel
     )
 
-    $services = $Profile['services']
+    $services = $ComposeModel['services']
     $expectedNetworks = @{
         server = @('app_net')
         signer = @('signer_net')
@@ -159,10 +160,13 @@ function Assert-Profile {
         }
 
         if ($serviceName -eq 'server' -or $serviceName -eq 'keycloak') {
-            $sourceDockerfiles = @{ server = 'Server.Dockerfile'; keycloak = 'Keycloak.Dockerfile' }
-            $localDockerfile = Join-Path $PSScriptRoot $sourceDockerfiles[$serviceName]
+            $sourceDockerfiles = @{
+                server = 'infra\pilot\Server.Dockerfile'
+                keycloak = 'infra\pilot\Keycloak.Dockerfile'
+            }
+            $localDockerfile = Join-Path $repoRoot $sourceDockerfiles[$serviceName]
         } elseif (-not (Test-Path -LiteralPath $localDockerfile -PathType Leaf)) {
-            $localDockerfile = Join-Path $PSScriptRoot '..\command-signer\Dockerfile'
+            $localDockerfile = Join-Path $repoRoot 'infra\command-signer\Dockerfile'
         }
 
         if (-not (Test-Path -LiteralPath $localDockerfile -PathType Leaf)) {
@@ -183,13 +187,13 @@ function Assert-Profile {
 function Assert-RejectedMutation {
     param(
         [Parameter(Mandatory)]
-        [System.Collections.IDictionary] $Profile,
+        [System.Collections.IDictionary] $ComposeModel,
         [Parameter(Mandatory)]
         [string] $Name
     )
 
     try {
-        Assert-Profile -Profile $Profile
+        Assert-Profile -ComposeModel $ComposeModel
     } catch {
         $script:rejectedMutations++
         return
@@ -214,25 +218,25 @@ try {
         throw 'docker compose config --format json failed.'
     }
 
-    $profile = ($renderedJson -join [Environment]::NewLine) | ConvertFrom-Json -AsHashtable
-    Assert-Profile -Profile $profile
+    $composeModel = ($renderedJson -join [Environment]::NewLine) | ConvertFrom-Json -AsHashtable
+    Assert-Profile -ComposeModel $composeModel
     $passedChecks++
 
     $mutation = ($renderedJson -join [Environment]::NewLine) | ConvertFrom-Json -AsHashtable
     $mutation['services']['server']['ports'][0]['host_ip'] = '0.0.0.0'
-    Assert-RejectedMutation -Profile $mutation -Name 'public backend port'
+    Assert-RejectedMutation -ComposeModel $mutation -Name 'public backend port'
 
     $mutation = ($renderedJson -join [Environment]::NewLine) | ConvertFrom-Json -AsHashtable
     $mutation['services']['signer']['networks']['app_net'] = @{}
-    Assert-RejectedMutation -Profile $mutation -Name 'signer attached to app network'
+    Assert-RejectedMutation -ComposeModel $mutation -Name 'signer attached to app network'
 
     $mutation = ($renderedJson -join [Environment]::NewLine) | ConvertFrom-Json -AsHashtable
     $mutation['services']['signer']['profiles'] = @('other-profile')
-    Assert-RejectedMutation -Profile $mutation -Name 'signer profile removed'
+    Assert-RejectedMutation -ComposeModel $mutation -Name 'signer profile removed'
 
     $mutation = ($renderedJson -join [Environment]::NewLine) | ConvertFrom-Json -AsHashtable
     $mutation['services']['audit-gateway']['tmpfs'] = @('/tmp:rw', 'nosuid', 'noexec')
-    Assert-RejectedMutation -Profile $mutation -Name 'split tmpfs options'
+    Assert-RejectedMutation -ComposeModel $mutation -Name 'split tmpfs options'
 
     $passedChecks += $rejectedMutations
     Write-Output "PASS: $passedChecks contract checks ($rejectedMutations unsafe mutations rejected)."
