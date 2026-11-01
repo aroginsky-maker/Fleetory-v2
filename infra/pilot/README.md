@@ -164,6 +164,21 @@ This checkpoint closes the pilot's real Transit/mTLS signing verification.
 It does not close Phase 7's independent production custody, WORM retention,
 human approval, real owner WebAuthn login, or physical Agent recovery controls.
 
+## Native operator login
+
+The reviewed native client in `eng/AdminLogin` supplies the bounded real-browser
+Authorization Code + S256 PKCE callback for the pilot. It validates signed ID
+and access tokens, fresh authentication, state/nonce, subject, audience,
+client ID and provider-authenticated WebAuthn AMR before one audited read-only
+Admin request over the registered mTLS leaf. Tokens stay in memory.
+
+Follow [AdminOperatorLogin](../../docs/operations/AdminOperatorLogin.md) for the
+protected profile, strict pinned SSH wrapper and exact loopback redirect. A
+successful preflight or synthetic protocol fixture is not a real owner login.
+The owner must complete genuine password/passkey actions and a fresh WebAuthn
+authentication; do not mark that acceptance complete automatically. Client
+activation must follow a green exact-head CI/Sonar and reviewed provider config.
+
 ## Safe preparation and startup order
 
 1. Pin and review the deployed application revision and image digests. Copy the
@@ -262,7 +277,7 @@ schema changes need a fresh permission review; no default runtime grants exist.
   any future approved activation; changing the generator does not renew it.
 - The active HBA restricts each application database/login to its exact client address; all other TCP sources are rejected. Use the postgres Unix socket for reviewed operator/migration work.
 - Both actual owner-bootstrap events left the outbox successfully. Retain their readback and signed-state evidence; the signing key stored on this VM is not independent WORM custody.
-- Provide a real callback/client flow, let the owner update their password and
+- Use the reviewed native callback/client flow, let the owner update their password and
   enroll an actual passkey, then verify authenticated Admin access with matching
   OIDC identity and registered client leaf. Do not enable the OIDC client early.
 - Maintain the approved OpenBao recovery/root custody procedure; independently
