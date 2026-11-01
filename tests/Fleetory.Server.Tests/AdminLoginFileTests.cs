@@ -54,7 +54,7 @@ public sealed class AdminLoginFileTests
     {
         using var files = new OperatorFileFixture();
         var target = files.CreateDirectory("target");
-        files.WriteIn(target, "profile.json", PublicProfile);
+        OperatorFileFixture.WriteIn(target, "profile.json", PublicProfile);
         var linked = files.CreateDirectoryLink("linked", target);
 
         Assert.Throws<InvalidOperationException>(() =>
@@ -66,7 +66,7 @@ public sealed class AdminLoginFileTests
     {
         using var files = new OperatorFileFixture();
         var path = files.Write("profile.json", PublicProfile);
-        files.MakeFileReadableByOthers(path);
+        OperatorFileFixture.MakeFileReadableByOthers(path);
 
         Assert.Throws<InvalidOperationException>(() => OperatorFiles.Read(path));
     }
@@ -98,7 +98,7 @@ public sealed class AdminLoginFileTests
         public string Write(string name, string contents) =>
             WriteIn(_directory, name, contents);
 
-        public string WriteIn(string directory, string name, string contents)
+        public static string WriteIn(string directory, string name, string contents)
         {
             var path = Path.Combine(directory, name);
             File.WriteAllText(path, contents, new System.Text.UTF8Encoding(false));
@@ -157,7 +157,7 @@ public sealed class AdminLoginFileTests
             return link;
         }
 
-        public void MakeFileReadableByOthers(string path)
+        public static void MakeFileReadableByOthers(string path)
         {
             if (OperatingSystem.IsWindows())
             {

@@ -135,6 +135,9 @@ public sealed class AdminLoginProtocolTests
         private static readonly Uri Issuer = new("https://login.pilot.invalid/realms/fleetory");
         private const string Client = "pilot-client";
         private const string Audience = "fleetory-admin-api";
+        private static readonly string[] ResponseTypes = ["code"];
+        private static readonly string[] ChallengeMethods = ["S256"];
+        private static readonly string[] SigningAlgorithms = ["RS256"];
         private readonly RSA _rsa = RSA.Create(2048);
         private readonly RSA _foreign = RSA.Create(2048);
         private readonly Guid _person = Guid.NewGuid();
@@ -225,8 +228,8 @@ public sealed class AdminLoginProtocolTests
                     authorization_endpoint=Issuer+"/protocol/openid-connect/auth",
                     token_endpoint=Mutation=="metadata-origin" ? "https://foreign.invalid/token" : Issuer+"/protocol/openid-connect/token",
                     jwks_uri=Issuer+"/protocol/openid-connect/certs",
-                    response_types_supported=new[]{"code"},code_challenge_methods_supported=new[]{"S256"},
-                    id_token_signing_alg_values_supported=new[]{"RS256"}});
+                    response_types_supported=ResponseTypes,code_challenge_methods_supported=ChallengeMethods,
+                    id_token_signing_alg_values_supported=SigningAlgorithms});
                 if (Mutation=="metadata-duplicate") metadata=metadata.Insert(1,"\"issuer\":\"https://foreign.invalid\",");
                 return Json(metadata,request);
             }
