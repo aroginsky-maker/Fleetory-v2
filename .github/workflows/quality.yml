@@ -232,6 +232,9 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/PilotProvisioning.Tests.ps1
 
+      - name: Verify Keycloak identity snapshot and isolated restore
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/IdentityBackup.Tests.ps1
       - name: Enforce zero Sonar issues
         shell: pwsh
         env:

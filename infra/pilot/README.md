@@ -179,6 +179,33 @@ The owner must complete genuine password/passkey actions and a fresh WebAuthn
 authentication; do not mark that acceptance complete automatically. Client
 activation must follow a green exact-head CI/Sonar and reviewed provider config.
 
+## Verified real owner admission — 2026-11-01
+
+At 17:04:28 UTC, the actual owner completed the password/passkey actions and the
+live Admin API accepted the owner-bound OIDC/WebAuthn request over the registered
+mTLS leaf. The expected absent-role sentinel read was authorized and audited.
+The event's actor, target, correlation and timestamps matched PostgreSQL and
+immudb revision 1; pinned signed state reached transaction 5 and outbox was empty.
+This closes the pilot owner's real native-login checkpoint. Independent
+production custody, approval separation, immutable retention and full-system
+recovery controls remain open. Keep detailed evidence in protected operator
+storage and PR #2; never copy credentials or tokens into this repository.
+
+## Identity recovery acceptance
+
+The identity provider has its own PostgreSQL database. After real passkey
+registration, preserve that account/credential/configuration state with the
+snapshot and isolated restore procedure in
+[KeycloakRecovery](../../docs/operations/KeycloakRecovery.md). Capture and
+inventory use one exported PostgreSQL snapshot; the verifier restores only in
+an owned network-free scratch container and compares complete table data by
+aggregate hash. It starts no copied issuer and resets no credentials.
+
+Actual Keycloak dumps contain password hashes and signing private keys. Obtain
+specific approval for their transfer/custody and keep them outside Git. A
+passing data-preservation fixture does not establish independent production
+custody, full-system recovery or a fresh post-restore passkey login.
+
 ## Safe preparation and startup order
 
 1. Pin and review the deployed application revision and image digests. Copy the
@@ -277,9 +304,9 @@ schema changes need a fresh permission review; no default runtime grants exist.
   any future approved activation; changing the generator does not renew it.
 - The active HBA restricts each application database/login to its exact client address; all other TCP sources are rejected. Use the postgres Unix socket for reviewed operator/migration work.
 - Both actual owner-bootstrap events left the outbox successfully. Retain their readback and signed-state evidence; the signing key stored on this VM is not independent WORM custody.
-- Use the reviewed native callback/client flow, let the owner update their password and
-  enroll an actual passkey, then verify authenticated Admin access with matching
-  OIDC identity and registered client leaf. Do not enable the OIDC client early.
+- Preserve the verified owner/native-login admission and provision future
+  operators under their approved identity, certificate and actual passkey
+  procedures. The checkpoint above does not authenticate independent approvers.
 - Maintain the approved OpenBao recovery/root custody procedure; independently
   validate Transit and signer controls before enabling the signer profile.
 - Complete pending CI for the intended revision before attributing the local
@@ -291,5 +318,6 @@ schema changes need a fresh permission review; no default runtime grants exist.
   requirements.
 
 The snapshot records the deploying agent's verified results and their limits.
-WebAuthn enrollment, restore acceptance, independent retention and production
-approval remain incomplete; this pilot does not close the Baseline / Phase 7.
+Real owner WebAuthn admission is verified above. Full-system restore acceptance,
+independent retention and production approval remain incomplete; this pilot
+does not close the Baseline / Phase 7.

@@ -8,3 +8,4 @@
 TestResults/
 artifacts/
 .sonarqube/
+**/__pycache__/
