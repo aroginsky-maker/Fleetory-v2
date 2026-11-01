@@ -146,6 +146,10 @@ jobs:
           java -version
           docker info --format '{{.ServerVersion}}'
 
+      - name: Verify external pilot Compose profile
+        shell: pwsh
+        run: ./infra/pilot/Test-PilotProfile.ps1
+
       - name: Verify lab certificate rotation and rollback
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/CertificateProvisioning.Tests.ps1

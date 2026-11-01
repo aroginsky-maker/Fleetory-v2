@@ -23,7 +23,7 @@ namespace Fleetory.Core.Persistence.Migrations
             // must not remain redeemable after the new proof-of-possession rule starts.
             migrationBuilder.Sql("""
                 DELETE FROM core.agent_enrollment_grants
-                WHERE expected_certificate_sha256 IS NOT NULL AND consumed_at IS NULL
+                WHERE expected_certificate_sha256 IS NOT NULL AND consumed_at IS NULL;
                 """);
 
             migrationBuilder.Sql("""

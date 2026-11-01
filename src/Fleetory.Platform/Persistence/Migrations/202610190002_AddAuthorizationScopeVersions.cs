@@ -34,7 +34,7 @@ public sealed class AddAuthorizationScopeVersions : Migration
             INSERT INTO platform.authorization_scope_versions
                 (scope_id, revision, parent_scope_id, name, recorded_at)
             SELECT scope_id, 1, parent_scope_id, name, clock_timestamp()
-            FROM platform.authorization_scopes
+            FROM platform.authorization_scopes;
             """);
     }
 

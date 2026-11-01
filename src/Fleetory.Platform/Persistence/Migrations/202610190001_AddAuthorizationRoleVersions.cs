@@ -44,7 +44,7 @@ public sealed class AddAuthorizationRoleVersions : Migration
                          WHERE permission.role_id = role.role_id
                          ORDER BY permission.permission),
                    clock_timestamp()
-            FROM platform.authorization_roles AS role
+            FROM platform.authorization_roles AS role;
             """);
     }
 

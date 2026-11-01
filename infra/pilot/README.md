@@ -1,0 +1,198 @@
+# Fleetory single-node PILOT
+
+This directory describes a restricted integration pilot, not production approval
+or completion of the security Baseline / Phase 7. A single Ubuntu 24.04 VM hosts
+all services; its administrator controls every container, volume and database.
+Network separation and non-root processes do not provide independent custody
+against that administrator. Local snapshots copied off-host are recovery copies,
+not independent WORM retention.
+
+Deployment coordinates and verification results reported by the deploying root
+agent on 2026-11-01 (this documentation update made no remote requests):
+
+- VM: `195.209.221.38`.
+- App: `https://fleetory.195-209-221-38.sslip.io`.
+- Authentication: `https://auth.fleetory.195-209-221-38.sslip.io`.
+- The app currently exposes health/API endpoints; there is no interactive UI
+  or Admin OIDC login/callback implementation.
+
+## Verified pilot snapshot
+
+- Ubuntu was updated and rebooted; Docker `29.9.2`, Compose `5.6.1`. Public
+  ingress is limited to TCP 22/80/443.
+- Public HTTPS `/health/live` and `/health/ready` returned 200; public Admin
+  routing returned 404. Auth OIDC discovery returned 200 with issuer
+  `https://auth.fleetory.195-209-221-38.sslip.io/realms/fleetory`.
+- Corrected idempotent SQL applied to the existing database without a reset:
+  Platform has nine migrations and Core six. A backup taken beforehand is
+  preserved privately. Missing raw-SQL terminators were fixed in the sources;
+  new exports supersede the earlier scripts.
+- Both audit TLS hops passed. The writer has permission `2` on `fleetoryaudit`;
+  conditional write/readback returned revision `1`. Signed-state verification
+  passed with the pinned P-256 public key and rejected a tampered hash. The
+  gateway returned 404 for an administrative route. These results do not
+  establish independent custody or successful export of every app audit event.
+- Owner UUID `33e1e936-8ec6-4112-adc6-53689c26d3b3` exists with required actions
+  `UPDATE_PASSWORD` and `webauthn-register`. Its Admin client certificate was
+  issued; authorization bootstrap and certificate registration committed in one
+  transaction, creating two actual audit events. Both were exported; the outbox is empty. The real user's password update and passkey enrollment remain
+  outstanding. Client `fleetory-pilot` is disabled until a real callback exists.
+- OpenBao returned 501 with `initialized=false`, `sealed=true`; signer is OFF.
+- Local working-tree validation passed: both real EF context scripts applied
+  twice to fresh PostgreSQL, the full test suite passed `544/544`, and native
+  coverage was `93.80%`. CI is pending; these are not metrics for a new remote
+  HEAD or a successful remote CI run.
+
+## Trust and access boundaries
+
+Only SSH and the public HTTPS edge require public ingress: TCP 22, 80 and 443.
+Caddy uses host networking and forwards public web/auth traffic to loopback
+listeners. Do not proxy the Agent, Admin or signer management listeners through
+the public edge. Their host publications must remain `127.0.0.1` and management
+access must use the authorized SSH channel with hostname-validating TLS/mTLS.
+
+| Network | Members | Purpose |
+| --- | --- | --- |
+| `app_net`, `172.30.77.0/24` | PostgreSQL, Keycloak, Server, audit gateway | Application and restricted audit REST |
+| `signer_net`, `172.30.78.0/24` | PostgreSQL, OpenBao, signer | Separate signing trust domain |
+| `audit_net`, `172.30.79.0/24` | Audit store, audit gateway | Direct immudb administration isolated from Server |
+
+Server has one concrete address, `172.30.77.20`, for its Admin bind setting.
+Signer has one network/address so its entrypoint can enforce a specific listener.
+PostgreSQL intentionally spans application/signing networks; separate database
+roles, verified TLS and explicit permissions remain necessary. Docker/root
+administrators remain outside this boundary.
+
+Server resolves `immudb` to the audit gateway. Gateway TLS presents that hostname;
+the upstream connects to `audit-store` with SNI/hostname verification and the
+approved infrastructure root. `audit-gateway.conf` permits only login, selection
+of `fleetoryaudit`, set/get/state and a credential-free root probe; everything
+else is denied. The dedicated writer must have access only to `fleetoryaudit`.
+Backend administration uses host loopback `18091`; `18090` is the restricted
+gateway. Never disable certificate validation to diagnose a failed connection.
+
+## Current approval boundary
+
+OpenBao initialization has **not** been approved or executed. Its non-dev Raft
+service may run uninitialized, but must not be initialized/unsealed until the
+user explicitly approves a concrete recovery-share/root-token custody scheme.
+Automatic approval review rejected the proposed single-share/single-threshold
+scheme with locally retained recovery material and root token. Do not retry an
+equivalent operation through a different script, tool or agent.
+
+Signer remains OFF. Do not create substitute signing keys, mock Transit, invent
+approval actors or represent startup as production custody. Agent command
+execution and high-risk/bulk signing remain disabled. Uninitialized OpenBao is
+an expected pending dependency, not a successful signer readiness result.
+
+## Safe preparation and startup order
+
+1. Pin and review the deployed application revision and image digests. Copy the
+   reviewed compose/config/build files into the deployment layout rooted at
+   `/srv/fleetory`; relative mounts/build paths in `compose.yaml` are interpreted
+   from that directory. Review the resolved compose configuration privately.
+   Never paste resolved secret-bearing configuration or SQL into logs/chat.
+2. Generate material locally using `New-PilotMaterial.ps1` into a new protected
+   directory outside **all Git checkouts**. Upload only the `upload/` subtree.
+   Keep `offline/`, CA private keys, `credentials.json`, operator client keys and
+   later recovery/root material on the protected operator side. Never mount CA
+   private keys, signer credentials or Docker sockets in Server.
+3. Provision private Linux ownership/modes for each mounted service directory
+   and its files: PostgreSQL UID/GID `999:999`, Server/signer UID `1654`, OpenBao
+   `100:1000`, immudb `3322:3322`, nginx `101:101`; verify the pinned images.
+   Determine Keycloak's effective UID from its pinned image. Directories must be
+   traversable only by their service/administrator; application secret files
+   must have no group/other permission bits. Do not make everything world-readable
+   to resolve a startup failure. Owner-readable `0400` files and `0500` secret
+   directories are suitable after provisioning.
+4. Export actual idempotent Platform and Core EF migration SQL offline. Generate
+   fresh-cluster PostgreSQL initialization SQL with `New-PilotDatabaseScript.ps1`,
+   using absolute existing input paths and a new private output outside Git.
+   This SQL contains passwords: retain it only in the protected initialization
+   path. It creates databases outside transactions and fails on existing roles
+   or databases; it is not a reset or upgrade tool. Never delete existing data
+   directories to make initialization succeed.
+5. Start named unaffected services only, from `/srv/fleetory`:
+
+   ```sh
+   docker compose up -d postgres
+   docker compose up -d keycloak audit-store audit-gateway
+   # Provision the dedicated immudb database and restricted writer privately.
+   docker compose up -d server caddy
+   ```
+
+   Wait for each dependency to work before starting its consumer. `depends_on`
+   alone does not establish readiness. If desired, start `openbao` separately
+   only as an uninitialized service. Signer is guarded by the `signer-approved`
+   profile, which must remain disabled until explicit custody approval; do not
+   explicitly name/start signer as that can bypass the profile's default exclusion.
+6. Verify both external HTTPS names, intended host ingress and loopback-only
+   management publications. Verify PostgreSQL hostname/root validation from its
+   actual clients and both audit TLS hops. `/health/live` is process liveness;
+   PostgreSQL readiness uses `SELECT 1`, not schema/privilege validation. Check
+   both migration histories and actual runtime operations separately. An empty
+   audit queue does not prove successful delivery: retain evidence from an
+   actual audit write, readback and signed-state verification.
+7. Configure the `fleetory` Keycloak realm with required genuine WebAuthn
+   registration/authentication, an authentication-derived AMR mapper and audience
+   `fleetory-admin-api`. Do not copy lab password grants, virtual authenticators,
+   lab browser redirects or hardcoded `amr=webauthn`. Provision only the actual
+   intended authorization-code/PKCE client and redirect; Server expects
+   `azp=fleetory-pilot`. Real user enrollment cannot be performed by manufacturing
+   a test credential or marking a required action complete.
+8. On a new deployment, for initial Admin access, create the actual Keycloak user and query its exact
+   generated UUID. Issue an Admin client leaf with SAN
+   `urn:fleetory:admin:<UUID>`. In a controlled operator transaction run
+   `eng/bootstrap-first-admin.sql` and `eng/register-admin-certificate.sql` in
+   bootstrap mode with that UUID, the exact uppercase DER SHA-256, actual
+   deployment reference and operator identity. These initial scripts do not ask
+   for a second approver; never invent one. Runtime has read-only access to the
+   Admin certificate registry/denylist. An actual passkey login, matching bearer
+   `sub` and registered mTLS leaf are still required for authenticated use.
+   On the current VM this bootstrap has already committed: do not repeat or
+   reset it. Continue with the actual owner's outstanding required actions.
+9. Retain verification results and off-host recovery copies privately. Document
+   remaining custody/approval/recovery gaps truthfully. Do not set Phase 7
+   readiness controls or independent-WORM flags to true without actual evidence.
+
+## PostgreSQL permissions
+
+`postgres` is the cluster administrator and is never an application login.
+`fleetory_migrator` owns the Fleetory database; `fleetory_server` receives direct
+runtime grants without membership/ownership/CREATE/TEMP. Keycloak owns its own
+database. Signer tables are owned by NOLOGIN `fleetory_signer_owner` in a separate
+database; `fleetory_signer` receives only schema USAGE, SELECT/INSERT on the three
+journals and SELECT on certificate revocations. Revocation writer access is not
+seeded by the generator.
+
+Runtime receives SELECT only on both EF migration histories and the two Admin
+certificate tables; SELECT/INSERT on audit events and authorization role/scope
+version histories. Other application tables currently receive DML grants.
+This is a pilot permission profile, not a claim of fully minimized per-column
+access. Audit queue processing specifically requires UPDATE/DELETE. Future
+schema changes need a fresh permission review; no default runtime grants exist.
+
+## Enforced settings and remaining acceptance work
+
+- Signer has the `signer-approved` profile guard and remains OFF. The material
+  generator now limits caller grants to 24 hours independently of client-leaf
+  lifetime. Existing material must be reviewed for a current valid grant before
+  any future approved activation; changing the generator does not renew it.
+- The active HBA restricts each application database/login to its exact client address; all other TCP sources are rejected. Use the postgres Unix socket for reviewed operator/migration work.
+- Both actual owner-bootstrap events left the outbox successfully. Retain their readback and signed-state evidence; the signing key stored on this VM is not independent WORM custody.
+- Provide a real callback/client flow, let the owner update their password and
+  enroll an actual passkey, then verify authenticated Admin access with matching
+  OIDC identity and registered client leaf. Do not enable the OIDC client early.
+- Obtain explicit approval for the concrete OpenBao recovery/root custody scheme
+  before initialization; then independently validate Transit and signer controls.
+- Complete pending CI for the intended revision before attributing the local
+  test/coverage results to a remote commit.
+- Rotate/reissue the bounded-life internal leaf certificates before expiry and
+  test the documented restore/rotation procedures without deleting retained
+  evidence. Offline roots are protected filesystem material, not an HSM.
+- Further narrow the application's remaining DML rights by actual table/operation
+  requirements.
+
+The snapshot records the deploying agent's verified results and their limits.
+WebAuthn enrollment, restore acceptance, independent retention and production
+approval remain incomplete; this pilot does not close the Baseline / Phase 7.
