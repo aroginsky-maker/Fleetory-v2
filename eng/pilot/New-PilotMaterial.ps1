@@ -76,7 +76,7 @@ function New-Leaf($issuer,[string]$cn,[string[]]$dns,[bool]$client=$false,[int]$
  return @{Cert=$cert;Pem=$cert.ExportCertificatePem();Key=$key.ExportPkcs8PrivateKeyPem()}
 }
 try {
- foreach ($dir in @('offline','operator','upload/config','upload/secrets/postgres','upload/secrets/postgres-init','upload/secrets/server','upload/secrets/signer','upload/secrets/openbao','upload/secrets/immudb','upload/secrets/audit-gateway','upload/secrets/keycloak')) { New-PrivateDirectory $dir }
+ foreach ($dir in @('offline','operator','upload','upload/secrets','upload/config','upload/secrets/postgres','upload/secrets/postgres-init','upload/secrets/server','upload/secrets/signer','upload/secrets/openbao','upload/secrets/immudb','upload/secrets/audit-gateway','upload/secrets/keycloak')) { New-PrivateDirectory $dir }
  $roots=@{}
  foreach ($name in @('infrastructure','agent','admin','signer-client')) { $roots[$name]=New-Root $name }
  $infraPem=$roots.infrastructure.ExportCertificatePem()
