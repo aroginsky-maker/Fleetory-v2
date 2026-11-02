@@ -29,6 +29,8 @@ database principal. PostgreSQL is additionally forced read-only, with a
 10-second statement timeout and two-second lock timeout. The process bounds
 stdout and terminates its own Docker client on timeout/failure. This is a
 periodic operator operation, not a synchronous application request dependency.
+Server CLI commands also use the fixed `/var/lib/fleetory-audit-archive` root;
+there is no argument or environment override for that directory.
 
 Every changed snapshot receives a sequential receipt containing its SHA-256,
 capture time and the preceding receipt SHA-256. Exact repeats are idempotent.
@@ -96,9 +98,19 @@ copy/hash outside the VPS. The initial checkpoint relies on the operator's
 first trusted observation; it does not authenticate independent approval.
 
 ```text
-python eng/pilot/audit_archive.py verify-export --input EXPORT.json --expected-sha256 TRUSTED_SHA256
-python eng/pilot/audit_archive.py verify-export --input NEW.json --expected-sha256 NEW_TRUSTED_SHA256 --checkpoint OLD.json --expected-checkpoint-sha256 OLD_TRUSTED_SHA256
+cd PRIVATE_EXPORT_DIRECTORY
+python ABSOLUTE_PATH_TO_TOOL/audit_archive.py verify-export --input export.json --expected-sha256 TRUSTED_SHA256
+python ABSOLUTE_PATH_TO_TOOL/audit_archive.py verify-export --input export-new.json --expected-sha256 NEW_TRUSTED_SHA256 --checkpoint checkpoint-old.json --expected-checkpoint-sha256 OLD_TRUSTED_SHA256
 ```
+
+Choose the private working directory as the caller. File arguments are ASCII
+basenames only: `export.json`, `checkpoint.json`, or either prefix followed by a
+hyphen and up to 64 letters/digits/underscores/hyphens. Absolute paths, directory
+components, traversal, links and arbitrary JSON filenames are rejected before
+reading. Resolved inputs must remain immediate children of the chosen directory.
+Copy a retained checkpoint there and carry its separately retained trusted hash
+forward. These path checks do not establish Windows atomic path custody or ACLs;
+the caller must preserve the private working directory and trusted checkpoint.
 
 The portable verifier checks the retained bytes, unique/typed fields, chain,
 snapshot hash and, when supplied, the complete approved receipt prefix and

@@ -104,15 +104,42 @@ class PortableExportTests(unittest.TestCase):
 
     def test_cli_rejects_without_disclosing_event_content(self):
         with tempfile.TemporaryDirectory() as temporary:
-            path = Path(temporary) / 'input.json'
+            path = Path(temporary) / 'export.json'
             value = bundle()
             value['snapshot']['events'][0]['action'] = 'fixture-secret-must-not-be-printed'
             path.write_bytes(archive.canonical(value))
-            result = subprocess.run([sys.executable, archive.__file__, 'verify-export', '--input', str(path),
-                                     '--expected-sha256', 'a' * 64], capture_output=True, timeout=10)
+            result = subprocess.run([sys.executable, archive.__file__, 'verify-export', '--input', path.name,
+                                     '--expected-sha256', 'a' * 64], cwd=temporary, capture_output=True, timeout=10)
             self.assertEqual(1, result.returncode)
             self.assertEqual(b'', result.stdout)
             self.assertNotIn(b'fixture-secret', result.stderr)
+
+    def test_cli_names_cannot_escape_the_selected_private_directory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            private = root / 'private'
+            private.mkdir()
+            data = archive.canonical(bundle())
+            outside = root / 'export-outside.json'
+            outside.write_bytes(data)
+            (private / 'export.json').write_bytes(data)
+            (private / 'credentials.json').write_bytes(data)
+            def invoke(name):
+                return subprocess.run([sys.executable, archive.__file__, 'verify-export', '--input', name,
+                                       '--expected-sha256', checksum(data)], cwd=private,
+                                      capture_output=True, timeout=10)
+            self.assertEqual(0, invoke('export.json').returncode)
+            for name in ('../export-outside.json', str(outside), 'private/../export.json',
+                         'private\\export.json', 'credentials.json'):
+                with self.subTest(name=name):
+                    self.assertNotEqual(0, invoke(name).returncode)
+            linked = private / 'export-hardlinked.json'
+            os.link(outside, linked)
+            self.assertNotEqual(0, invoke(linked.name).returncode)
+            if os.name == 'posix':
+                symbolic = private / 'export-symbolic.json'
+                symbolic.symlink_to(outside)
+                self.assertNotEqual(0, invoke(symbolic.name).returncode)
 
 
 class RootArchiveTests(unittest.TestCase):
@@ -174,9 +201,17 @@ class RootArchiveTests(unittest.TestCase):
         self.assertEqual(1, self.read()[0][0]['sequence'])
 
     def test_nonprivileged_cli_cannot_initialize_archive(self):
-        result = subprocess.run([sys.executable, archive.__file__, 'init', '--root', str(self.root)],
+        result = subprocess.run([sys.executable, archive.__file__, 'init'],
                                 user=1654, group=1654, capture_output=True, timeout=10)
-        self.assertNotEqual(0, result.returncode)
+        self.assertEqual(1, result.returncode)
+        self.assertIn(b'Audit archive operation failed.', result.stderr)
+
+    def test_archive_cli_cannot_override_fixed_root(self):
+        for command in ('init', 'capture', 'verify', 'export'):
+            result = subprocess.run([sys.executable, archive.__file__, command, '--root', str(self.root)],
+                                    capture_output=True, timeout=10)
+            self.assertEqual(2, result.returncode)
+        self.assertEqual(([], None, 0), self.read())
 
     def test_symbolic_archive_root_is_rejected(self):
         alias = self.root.parent / 'alias'
@@ -294,7 +329,7 @@ class RootArchiveTests(unittest.TestCase):
 
     def test_real_postgres_snapshot_excludes_future_sensitive_columns(self):
         path = Path(os.environ['ARCHIVE_SQL_FIXTURE'])
-        data = archive.read_file(path, archive.MAX_SNAPSHOT)
+        data = archive.read_file(path, archive.MAX_SNAPSHOT, Path('/fixture'))
         self.assertNotIn(b'fixture-private-future-column', data)
         value = archive.parse(data, archive.MAX_SNAPSHOT)
         self.assertEqual(2, len(value['events']))
@@ -305,8 +340,8 @@ class RootArchiveTests(unittest.TestCase):
 
     def test_real_postgres_numeric_context_rewrite_cannot_collapse(self):
         path = Path(os.environ['ARCHIVE_SQL_FIXTURE'])
-        initial = archive.parse(archive.read_file(path, archive.MAX_SNAPSHOT), archive.MAX_SNAPSHOT)
-        changed = archive.parse(archive.read_file(path.with_name('rewritten.json'), archive.MAX_SNAPSHOT),
+        initial = archive.parse(archive.read_file(path, archive.MAX_SNAPSHOT, Path('/fixture')), archive.MAX_SNAPSHOT)
+        changed = archive.parse(archive.read_file(path.with_name('rewritten.json'), archive.MAX_SNAPSHOT, Path('/fixture')),
                                 archive.MAX_SNAPSHOT)
         before = initial['events'][0]['context_json']
         after = changed['events'][0]['context_json']

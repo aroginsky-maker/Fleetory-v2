@@ -23,6 +23,8 @@ MAX_ARCHIVE = 64 * 1024 * 1024
 MAX_ENTRIES = 4096
 MAX_EVENTS = 10000
 COMMAND_TIMEOUT = 25
+ARCHIVE_ROOT = Path('/var/lib/fleetory-audit-archive')
+EXPORT_NAME = re.compile(r'(?:export|checkpoint)(?:-[A-Za-z0-9_-]{1,64})?\.json\Z')
 ZERO = '0' * 64
 HEX = re.compile(r'[0-9a-f]{64}\Z')
 SEQUENCE = re.compile(r'[0-9]{12}\Z')
@@ -147,7 +149,11 @@ def receipt_chain(receipts):
     return previous
 
 
-def read_file(path, limit):
+def read_file(path, limit, trusted_parent):
+    parent = trusted_parent.resolve(strict=True)
+    require(not path.is_symlink())
+    resolved = path.resolve(strict=True)
+    require(resolved.is_relative_to(parent) and resolved.parent == parent)
     flags = os.O_RDONLY | getattr(os, 'O_NOFOLLOW', 0) | getattr(os, 'O_NONBLOCK', 0)
     descriptor = os.open(path, flags)
     with os.fdopen(descriptor, 'rb') as stream:
@@ -156,6 +162,12 @@ def read_file(path, limit):
         data = stream.read(limit + 1)
     require(0 < len(data) <= limit)
     return data
+
+
+def read_export_input(name, trusted_directory):
+    # CLI names have no directory authority. The caller selects a private cwd.
+    require(type(name) is str and EXPORT_NAME.fullmatch(name))
+    return read_file(trusted_directory / name, MAX_EXPORT, trusted_directory)
 
 
 def private_path(path, mode, directory):
@@ -216,7 +228,7 @@ def inspect(root):
         for name, limit in (('receipt', 1024), ('snapshot', MAX_SNAPSHOT)):
             path = entry / (name + '.json')
             private_path(path, 0o400, False)
-            data = read_file(path, limit)
+            data = read_file(path, limit, entry)
             values[name] = parse(data, limit)
             require(data == canonical(values[name]))
             total += len(data)
@@ -362,30 +374,30 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest='command', required=True)
     for name in ('init', 'capture', 'verify', 'export'):
-        command = commands.add_parser(name)
-        command.add_argument('--root', type=Path, default=Path('/var/lib/fleetory-audit-archive'))
+        commands.add_parser(name)
     command = commands.add_parser('verify-export')
-    command.add_argument('--input', type=Path, required=True)
+    command.add_argument('--input', required=True)
     command.add_argument('--expected-sha256', required=True)
-    command.add_argument('--checkpoint', type=Path)
+    command.add_argument('--checkpoint')
     command.add_argument('--expected-checkpoint-sha256')
     args = parser.parse_args()
     if args.command == 'verify-export':
-        result = verify_export(read_file(args.input, MAX_EXPORT), args.expected_sha256,
-                               read_file(args.checkpoint, MAX_EXPORT) if args.checkpoint else None,
+        trusted_directory = Path.cwd().resolve(strict=True)
+        result = verify_export(read_export_input(args.input, trusted_directory), args.expected_sha256,
+                               read_export_input(args.checkpoint, trusted_directory) if args.checkpoint else None,
                                args.expected_checkpoint_sha256)
     else:
         require(os.name == 'posix' and os.geteuid() == 0)
         if args.command == 'init':
-            initialize(args.root)
+            initialize(ARCHIVE_ROOT)
         if args.command == 'capture':
-            result = capture(args.root)
+            result = capture(ARCHIVE_ROOT)
         elif args.command == 'export':
-            sys.stdout.buffer.write(export(args.root))
+            sys.stdout.buffer.write(export(ARCHIVE_ROOT))
             return
         else:
-            with archive_lock(args.root):
-                receipts, snapshot, total = inspect(args.root)
+            with archive_lock(ARCHIVE_ROOT):
+                receipts, snapshot, total = inspect(ARCHIVE_ROOT)
                 result = summary(receipts, snapshot, total, 'verified')
     print(json.dumps(result, separators=(',', ':')))
 
