@@ -141,3 +141,8 @@ revision. It does not establish independent WORM/retention/legal hold, productio
 key custody, a coordinated cross-service restore point, PKI/revocation/Agent
 recovery, a production RPO/RTO or full-system recovery. No OpenBao source-root
 recovery was repeated. PHASE 7 remains open.
+
+The subsequent [application/signer database refresh](ApplicationDatabaseRecovery.md)
+verified a matching four-event audit snapshot, owners/ACLs/roles and restart.
+That database pair has an observed stable capture window; the remaining
+identity/provider/configuration/PKI/Agent and full-system controls stay open.
