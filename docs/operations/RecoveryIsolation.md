@@ -55,7 +55,7 @@ duplicate fields/nonfinite numbers are refused. Validation always reports
 
 ## Verified result on 2 November 2026
 
-Nineteen portable regression tests passed on Windows and unprivileged Linux;
+Twenty portable regression tests passed on Windows and unprivileged Linux;
 94 unsafe model mutations were rejected. The real local Docker rehearsal used
 eight probes on three internal isolated bridges. Inspection verified the
 runtime image, role membership, users, read-only roots, dropped capabilities,

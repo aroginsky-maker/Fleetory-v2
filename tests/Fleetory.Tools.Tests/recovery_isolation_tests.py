@@ -162,6 +162,13 @@ class ContractTests(unittest.TestCase):
                 self.assertNotIn(key,forwarded)
             self.assertEqual(os.environ['COMPOSE_DISABLE_ENV_FILE'],'0')
 
+    def test_decimal_cpu_limit_preserves_exact_values_without_rounding(self):
+        packet = json.dumps(self.model).encode()
+        equivalent = packet.replace(b'0.25',b'0.2500000000000000000000',1)
+        changed = packet.replace(b'0.25',b'0.2500000000000000000001',1)
+        self.assertEqual(self.cli(['--validate'],equivalent).returncode,0)
+        self.assertEqual(self.cli(['--validate'],changed).returncode,1)
+
 
 CLIENT = '''import json,socket,sys
 items=json.load(sys.stdin)

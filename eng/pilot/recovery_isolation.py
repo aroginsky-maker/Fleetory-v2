@@ -2,6 +2,7 @@
 """Render/check a synthetic recovery network rehearsal; never starts Docker or reads backups."""
 import argparse
 import copy
+from decimal import Decimal
 import json
 import re
 import sys
@@ -82,8 +83,9 @@ def validate_service(role, service, identity):
     archive.require(service['image'] == IMAGE and service['entrypoint'] == [] and service['command'] == command(role))
     archive.require(service['user'] == '65534:65534' and service['read_only'] is True and service['restart'] == 'no')
     archive.require(service['cap_drop'] == ['ALL'] and service['security_opt'] == ['no-new-privileges:true'])
-    archive.require(service['mem_limit'] == '64m' and type(service['cpus']) in (int, float, archive.Decimal)
-                    and service['cpus'] == 0.25 and type(service['pids_limit']) is int and service['pids_limit'] == 32)
+    archive.require(service['mem_limit'] == '64m' and type(service['cpus']) in (int, float, Decimal)
+                    and Decimal(str(service['cpus'])) == Decimal('0.25')
+                    and type(service['pids_limit']) is int and service['pids_limit'] == 32)
     labels = service['labels']
     archive.fields(labels, (SESSION, ROLE))
     archive.require(labels[SESSION] == identity and labels[ROLE] == role)
