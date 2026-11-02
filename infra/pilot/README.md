@@ -366,3 +366,10 @@ The snapshot records the deploying agent's verified results and their limits.
 Real owner WebAuthn admission is verified above. Full-system restore acceptance,
 independent retention and production approval remain incomplete; this pilot
 does not close the Baseline / Phase 7.
+
+## Synthetic recovery isolation rehearsal
+
+The separate [recovery isolation contract](../../docs/operations/RecoveryIsolation.md)
+uses only synthetic probes, internal isolated networks and no source mounts or
+published ports. It exercises the target network boundary without reusing this
+live host-network edge or loading real credentials, backups or PKI material.
