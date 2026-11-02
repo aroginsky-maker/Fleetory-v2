@@ -43,10 +43,10 @@ class RecoveryFilesTests(unittest.TestCase):
     def verify(self):
         return files.verify(self.root, 'set.json', self.expected)
 
-    def cli(self, expected=None):
-        return subprocess.run([sys.executable, '-B', str(Path(files.__file__)), '--root', str(self.root),
-                               '--manifest', 'set.json', '--expected-sha256', expected or self.expected],
-                              capture_output=True, timeout=5)
+    def cli(self, expected=None, extra=()):
+        command = [sys.executable, '-B', str(Path(files.__file__)), '--manifest', 'set.json',
+                   '--expected-sha256', expected or self.expected, *extra]
+        return subprocess.run(command, capture_output=True, timeout=5, cwd=self.root)
 
     def entry(self, kind='application-postgres'):
         return self.record['artifacts'][kind]
@@ -288,6 +288,25 @@ class RecoveryFilesTests(unittest.TestCase):
             self.assertTrue(0 < length < len(buffer))
             root = buffer.value
         self.assertEqual(files.verify(root, 'set.json', self.expected)['verifiedArtifacts'], 6)
+
+    def test_low_level_open_rejects_unvalidated_parts(self):
+        outside = self.root.parent / (self.root.name + '-scope-test')
+        outside.write_bytes(b'synthetic.outside.boundary')
+        self.addCleanup(outside.unlink)
+        with files.rooted(self.root) as (root, descriptor):
+            for name in (['..', outside.name], '../' + outside.name):
+                with self.subTest(name=name), self.assertRaises(Exception):
+                    opened = None
+                    try:
+                        opened = files.relative_open(root, descriptor, name)
+                    finally:
+                        if opened is not None:
+                            os.close(opened)
+
+    def test_cli_cannot_replace_operator_selected_root(self):
+        result = self.cli(extra=['--root', str(self.root.parent)])
+        self.assertEqual(result.returncode, 2)
+        self.assertEqual(result.stdout, b'')
 
 
 if __name__ == '__main__':

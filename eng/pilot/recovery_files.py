@@ -108,7 +108,9 @@ def windows_long_root(root):
     return Path(buffer.value)
 
 
-def relative_open(root, root_fd, parts):
+def relative_open(root, root_fd, name):
+    # Enforce lexical scope at the open boundary, including direct library callers.
+    parts = relative_parts(name)
     if os.name == 'nt':
         parent = root
         for part in parts[:-1]:
@@ -131,8 +133,8 @@ def file_state(info):
     return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
 
 
-def inspect_file(root, root_fd, parts, limit, retain=False):
-    with os.fdopen(relative_open(root, root_fd, parts), 'rb') as stream:
+def inspect_file(root, root_fd, name, limit, retain=False):
+    with os.fdopen(relative_open(root, root_fd, name), 'rb') as stream:
         before = os.fstat(stream.fileno())
         archive.require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1
                         and not getattr(before, 'st_file_attributes', 0) & 0x400
@@ -153,9 +155,8 @@ def inspect_file(root, root_fd, parts, limit, retain=False):
 
 def verify(root, manifest, expected):
     archive.require(type(expected) is str and re.fullmatch(r'[A-Fa-f0-9]{64}', expected))
-    manifest_parts = relative_parts(manifest)
     with rooted(root) as (directory, root_fd):
-        digest, _, packet = inspect_file(directory, root_fd, manifest_parts, MAX_MANIFEST, retain=True)
+        digest, _, packet = inspect_file(directory, root_fd, manifest, MAX_MANIFEST, retain=True)
         archive.require(digest == expected.lower())
         record = archive.parse(packet, MAX_MANIFEST)
         archive.fields(record, ('schema', 'artifacts'))
@@ -172,7 +173,7 @@ def verify(root, manifest, expected):
             archive.require(type(entry['sha256']) is str and archive.HEX.fullmatch(entry['sha256']))
         for kind in sorted(KINDS):
             entry = record['artifacts'][kind]
-            actual, size, _ = inspect_file(directory, root_fd, relative_parts(entry['path']), entry['bytes'])
+            actual, size, _ = inspect_file(directory, root_fd, entry['path'], entry['bytes'])
             archive.require(size == entry['bytes'] and actual == entry['sha256'])
             total += size
     return {'schema': 'fleetory.recovery-files-verification.v1', 'manifestSha256': digest,
@@ -183,12 +184,13 @@ def verify(root, manifest, expected):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--root', required=True)
     parser.add_argument('--manifest', required=True)
     parser.add_argument('--expected-sha256', required=True)
     args = parser.parse_args()
     try:
-        result = verify(args.root, args.manifest, args.expected_sha256)
+        # The invoking operator selects the private working directory; CLI names
+        # have no authority to replace it with an unrelated filesystem root.
+        result = verify(Path.cwd(), args.manifest, args.expected_sha256)
     except Exception:
         print('Recovery files verification failed; no input contents logged.', file=sys.stderr)
         return 1

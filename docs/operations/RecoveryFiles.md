@@ -2,11 +2,12 @@
 
 Baseline section 17 needs an identified set of retained files before a whole-service
 recovery exercise. `eng/pilot/recovery_files.py` verifies their exact bytes under
-a caller-selected protected directory. Keep the manifest, backups and detailed
+the protected working directory selected by the invoking operator. Keep the manifest, backups and detailed
 operator proofs outside Git and PR descriptions.
 
 ```text
-python -B ./eng/pilot/recovery_files.py --root <approved-private-directory> --manifest recovery-files.json --expected-sha256 <retained-manifest-sha256>
+# Start in the approved private directory; use the checked-out tool by absolute path.
+python -B <checkout>/eng/pilot/recovery_files.py --manifest recovery-files.json --expected-sha256 <retained-manifest-sha256>
 ```
 
 Pin the manifest's exact-byte SHA-256 in the separately retained operator
@@ -35,7 +36,7 @@ segments, each starting with a letter or digit; segments may additionally contai
 letters, digits, underscores, dots and hyphens. Absolute paths, traversal,
 backslashes, alternate streams, trailing dots and Windows reserved names are
 rejected. Component paths must be unique even ignoring case and cannot name the
-manifest itself. Unknown fields, duplicate JSON fields and incomplete component
+manifest itself. The CLI has no root-override option. The low-level opening function revalidates paths for direct library callers as well as the CLI. Unknown fields, duplicate JSON fields and incomplete component
 sets fail before artifact reads.
 
 All inputs must be regular, single-link files. Linux traverses child directories
@@ -64,10 +65,10 @@ The original artifacts remained unchanged; the temporary negative manifest was
 removed. No backup, restore, source-root recovery or sensitive-data transfer was
 repeated.
 
-The synthetic regression suite passes **23 tests on Windows and 23 on Linux**,
+The synthetic regression suite passes **25 tests on Windows and 25 on Linux**,
 without skips. It covers real path/link/special-file rejection, streamed memory
 bounds, changed and missing files, strict metadata, manifest substitution and
-live growth and an actual Windows 8.3 root alias. Windows refuses the concurrent writer; Linux detects the changed
+live growth, an actual Windows 8.3 root alias, a reproduced direct-call directory traversal and refusal of CLI root replacement. Windows refuses the concurrent writer; Linux detects the changed
 stream. The CLI success/failure cases also verify read-only behavior and absence
 of backup contents in output. Both existing CI jobs execute the suite.
 
