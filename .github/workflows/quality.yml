@@ -66,6 +66,10 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/DependencyAudit.Tests.ps1
 
+      - name: Verify quality command orchestration
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/QualityOrchestration.Tests.ps1
+
       - name: Verify Sonar issue gate on Windows
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/SonarIssueGate.Tests.ps1
@@ -219,6 +223,10 @@ jobs:
       - name: Verify dependency audit gate
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/DependencyAudit.Tests.ps1
+
+      - name: Verify quality command orchestration
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/QualityOrchestration.Tests.ps1
 
       - name: Verify Sonar issue gate
         shell: pwsh

@@ -142,6 +142,40 @@ and exits with code 2 so CI cannot mistake incomplete external verification for 
 
 If only some Sonar parameters are set, verification fails as a configuration error.
 
+### Local execution without Sonar credentials
+
+With all three Sonar values absent, the quality entrypoint runs the audited
+strict restore/build, then the full solution once under the pinned coverage
+collector and the explicit Architecture project gate. It removes only the old
+generated coverage.xml, rejects a directory/reparse-point report, and requires
+a fresh readable production report with the unchanged 80% floor. Other output
+in the coverage directory is retained. Successful local checks still exit 2
+and do not claim an external Sonar Quality Gate. Partial Sonar configuration
+fails before Docker, restore, build or tests.
+
+Configured Sonar execution retains both independent gates described above:
+strict build and tests before the unchanged scanner clean/begin/build/covered
+tests/end sequence. Those tests exercise different build outputs. This change
+does not reuse a prior report across those gates or add a skip/reuse option to
+standalone verify-sonar.ps1. The working coverage target remains about 90%.
+
+### Orchestration regression
+
+Run tests/Fleetory.Tools.Tests/QualityOrchestration.Tests.ps1 with PowerShell 7.3+
+and the pinned .NET toolchain. It copies the real entrypoints into generated
+fixtures and runs fresh PowerShell children, substituting only external dotnet
+and Docker commands to record the requested protocol. Twenty-eight CLI cases
+check suite counts, exact unfiltered Release/coverage calls, strict/scanner
+ordering, architecture, audit options, failure propagation, stale/malformed/low
+coverage, preserved output and unconfigured/partial configuration results.
+The pinned real collector also runs a separate disposable child that writes a
+marker and exits 17; the test requires that exact nonzero status to propagate.
+
+These fixtures prove orchestration and the observed collector exit contract.
+They do not replace the actual solution tests or establish an external Sonar
+result. Both Windows and Linux CI run this regression; no production service,
+test filter, quality threshold or coverage exclusion is changed.
+
 ## 8. Bash invocation
 
 On a supported Linux/macOS .NET environment:

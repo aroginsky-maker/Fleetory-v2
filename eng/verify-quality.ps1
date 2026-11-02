@@ -74,6 +74,18 @@ function Get-ProductionLineCoverage([string] $Path) {
     return [math]::Round(($covered * 100.0) / $total, 2)
 }
 
+$SonarHostUrl = [Environment]::GetEnvironmentVariable('SONAR_HOST_URL')
+$SonarProjectKey = [Environment]::GetEnvironmentVariable('SONAR_PROJECT_KEY')
+$SonarToken = [Environment]::GetEnvironmentVariable('SONAR_TOKEN')
+$sonarValues = @($SonarHostUrl, $SonarProjectKey, $SonarToken)
+$setSonarValues = @($sonarValues | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count
+if ($setSonarValues -ne 0 -and $setSonarValues -ne 3) {
+    $SonarAnalysisStatus = 'FAIL (incomplete environment)'
+    $SonarQualityGateStatus = 'FAIL (incomplete environment)'
+    Write-Summary
+    exit 1
+}
+
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
     $StrictBuildStatus = 'FAIL (.NET SDK missing)'
     Write-Summary
@@ -143,7 +155,32 @@ try {
 
     $StrictBuildStatus = 'PASS'
 
-    if ((Invoke-DotnetStep @('test', 'Fleetory.sln', '-c', 'Release', '--no-build', '--no-restore')) -ne 0) {
+    $testArguments = @('test', 'Fleetory.sln', '-c', 'Release', '--no-build', '--no-restore')
+    if ($setSonarValues -eq 0) {
+        if ((Invoke-DotnetStep @('tool', 'restore')) -ne 0) {
+            $CoverageStatus = 'FAIL (tool restore)'
+            Write-Summary
+            exit 1
+        }
+
+        # This path tests the strict build once, with coverage attached to that run.
+        # Delete only the generated report; an older successful report cannot satisfy this run.
+        if (Test-Path -LiteralPath $CoveragePath) {
+            if (-not (Test-Path -LiteralPath $CoveragePath -PathType Leaf) -or
+                ((Get-Item -LiteralPath $CoveragePath).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                throw 'Coverage output must be a regular generated file.'
+            }
+            Remove-Item -LiteralPath $CoveragePath -Force
+        }
+        New-Item -ItemType Directory -Path $CoverageDirectory -Force | Out-Null
+        $testArguments = @(
+            'tool', 'run', 'dotnet-coverage', '--allow-roll-forward', '--',
+            'collect', 'dotnet test Fleetory.sln -c Release --no-build --no-restore',
+            '-f', 'xml', '-o', $CoveragePath
+        )
+    }
+
+    if ((Invoke-DotnetStep $testArguments) -ne 0) {
         $TestsStatus = 'FAIL'
     }
     else {
@@ -165,12 +202,6 @@ try {
         exit 1
     }
 
-    $SonarHostUrl = [Environment]::GetEnvironmentVariable('SONAR_HOST_URL')
-    $SonarProjectKey = [Environment]::GetEnvironmentVariable('SONAR_PROJECT_KEY')
-    $SonarToken = [Environment]::GetEnvironmentVariable('SONAR_TOKEN')
-    $sonarValues = @($SonarHostUrl, $SonarProjectKey, $SonarToken)
-    $setSonarValues = @($sonarValues | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count
-
     if ($setSonarValues -eq 3) {
         try {
             & (Join-Path $PSScriptRoot 'verify-sonar.ps1')
@@ -183,35 +214,6 @@ try {
             Write-Warning $_.Exception.Message
         }
     }
-    elseif ($setSonarValues -eq 0) {
-        if ((Invoke-DotnetStep @('tool', 'restore')) -ne 0) {
-            $CoverageStatus = 'FAIL (tool restore)'
-            Write-Summary
-            exit 1
-        }
-
-        Remove-Item -Recurse -Force $CoverageDirectory -ErrorAction SilentlyContinue
-        New-Item -ItemType Directory -Path $CoverageDirectory -Force | Out-Null
-
-        $testCommand = 'dotnet test Fleetory.sln -c Release --no-build --no-restore'
-        if ((Invoke-DotnetStep @(
-            'tool', 'run', 'dotnet-coverage', '--allow-roll-forward', '--',
-            'collect', $testCommand,
-            '-f', 'xml',
-            '-o', $CoveragePath
-        )) -ne 0) {
-            $CoverageStatus = 'FAIL'
-            Write-Summary
-            exit 1
-        }
-    }
-    else {
-        $SonarAnalysisStatus = 'FAIL (incomplete environment)'
-        $SonarQualityGateStatus = 'FAIL (incomplete environment)'
-        Write-Summary
-        exit 1
-    }
-
     try {
         $coveragePercent = Get-ProductionLineCoverage $CoveragePath
         $CoverageDisplay = ('{0:N2}%' -f $coveragePercent)
