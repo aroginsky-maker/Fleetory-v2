@@ -156,9 +156,10 @@ try {
         '[IO.File]::WriteAllText((Join-Path $PSScriptRoot ''child-ran.txt''),''expected-failure''); exit 17',
         [Text.UTF8Encoding]::new($true))
     $childCommand = '"' + [Environment]::ProcessPath + '" -NoProfile -File "' + $failureChild + '"'
-    $null = & dotnet tool run dotnet-coverage --allow-roll-forward -- collect $childCommand -f xml -o (Join-Path $work 'failure.xml') 2>&1
+    $nativeOutput = & dotnet tool run dotnet-coverage --allow-roll-forward -- collect $childCommand -f xml -o (Join-Path $work 'failure.xml') 2>&1
     $nativeExit = $LASTEXITCODE
-    Assert-True ($nativeExit -eq 17 -and (Test-Path -LiteralPath (Join-Path $work 'child-ran.txt'))) 'Pinned collector did not propagate the failing child exit.'
+    $childRan = Test-Path -LiteralPath (Join-Path $work 'child-ran.txt')
+    Assert-True ($nativeExit -eq 17 -and $childRan) ("Pinned collector did not propagate the failing child exit: exit=$nativeExit; childRan=$childRan; host=$([Environment]::ProcessPath); output=" + ($nativeOutput -join [Environment]::NewLine))
 
     foreach ($mode in @('local','minimum','configured','standalone')) {
         $entry = if ($mode -eq 'standalone') { 'verify-sonar.ps1' } else { 'verify-quality.ps1' }
