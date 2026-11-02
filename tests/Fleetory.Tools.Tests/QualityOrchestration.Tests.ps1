@@ -233,4 +233,3 @@ try {
 }
 finally { Remove-FleetoryTestArtifacts -Work $work -RepoRoot $repo }
 $global:LASTEXITCODE = 0
-
