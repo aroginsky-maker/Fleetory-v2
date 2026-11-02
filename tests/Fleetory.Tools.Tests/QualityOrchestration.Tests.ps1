@@ -155,8 +155,9 @@ try {
     [IO.File]::WriteAllText($failureChild,
         '[IO.File]::WriteAllText((Join-Path $PSScriptRoot ''child-ran.txt''),''expected-failure''); exit 17',
         [Text.UTF8Encoding]::new($true))
-    $childCommand = '"' + [Environment]::ProcessPath + '" -NoProfile -File "' + $failureChild + '"'
-    $nativeOutput = & dotnet tool run dotnet-coverage --allow-roll-forward -- collect $childCommand -f xml -o (Join-Path $work 'failure.xml') 2>&1
+    # Pass executable and child arguments separately: the collector running on .NET 8
+    # treats embedded quotes in a combined command as part of the executable name.
+    $nativeOutput = & dotnet tool run dotnet-coverage --allow-roll-forward -- collect ([Environment]::ProcessPath) -NoProfile -File $failureChild -f xml -o (Join-Path $work 'failure.xml') 2>&1
     $nativeExit = $LASTEXITCODE
     $childRan = Test-Path -LiteralPath (Join-Path $work 'child-ran.txt')
     Assert-True ($nativeExit -eq 17 -and $childRan) ("Pinned collector did not propagate the failing child exit: exit=$nativeExit; childRan=$childRan; host=$([Environment]::ProcessPath); output=" + ($nativeOutput -join [Environment]::NewLine))
