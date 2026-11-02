@@ -29,6 +29,13 @@ try {
     $created = $true
     $ready = $false
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        # pg_isready can accept the entrypoint's temporary initialization server.
+        # Wait for PID 1 to exec the permanent postgres process before using it.
+        $processName = & docker exec $name cat /proc/1/comm 2>$null
+        if ($LASTEXITCODE -ne 0 -or (@($processName) -join '').Trim() -cne 'postgres') {
+            Start-Sleep -Seconds 1
+            continue
+        }
         & docker exec $name pg_isready -U postgres *> $null
         if ($LASTEXITCODE -eq 0) { $ready = $true; break }
         Start-Sleep -Seconds 1
@@ -50,8 +57,8 @@ SELECT ('00000000-0000-4000-8000-' || lpad(i::text,12,'0'))::uuid,
 FROM generate_series(1,2) i;
 INSERT INTO platform.audit_export_queue SELECT event_id FROM platform.audit_events LIMIT 1;
 '@
-    $sql | & docker exec -i $name psql -X -q -U postgres -v ON_ERROR_STOP=1 2>$null
-    if ($LASTEXITCODE -ne 0) { throw 'Synthetic audit initialization failed.' }
+    $initialization = $sql | & docker exec -i $name psql -X -q -U postgres -v ON_ERROR_STOP=1 2>&1
+    if ($LASTEXITCODE -ne 0) { throw ('Synthetic audit initialization failed: ' + ($initialization -join "`n")) }
     $moduleBind = 'type=bind,source=' + (Join-Path $repo 'eng/pilot') + ',target=/tool,readonly'
     $query = Invoke-TestDocker @('run', '--rm', '--network', 'none', '--read-only', '--cap-drop', 'ALL',
         '--mount', $moduleBind, $python, 'python', '-c', 'import sys;sys.path.insert(0,"/tool");import audit_archive;print(audit_archive.SQL)')
