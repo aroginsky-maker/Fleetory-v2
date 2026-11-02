@@ -148,24 +148,33 @@ public sealed class SqliteCommandReplayStore : ICommandReplayStore
     {
         foreach (var path in new[] { databasePath, databasePath + "-wal", databasePath + "-shm" })
         {
-            if (!File.Exists(path))
+            try
             {
+                if (!File.Exists(path))
+                {
+                    continue;
+                }
+
+                if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
+                {
+                    throw new InvalidOperationException("Replay storage must not use a symbolic link.");
+                }
+
+                if (OperatingSystem.IsWindows())
+                {
+                    WindowsAgentStorageAcl.ValidateFile(path, "Replay storage file");
+                }
+                else if ((File.GetUnixFileMode(path) &
+                          (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0)
+                {
+                    throw new InvalidOperationException("Replay storage file permissions are too broad.");
+                }
+            }
+            catch (FileNotFoundException) when (!path.Equals(databasePath, StringComparison.Ordinal))
+            {
+                // SQLite removes WAL/SHM when the last connection closes. Their
+                // disappearance during inspection is equivalent to initial absence.
                 continue;
-            }
-
-            if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
-            {
-                throw new InvalidOperationException("Replay storage must not use a symbolic link.");
-            }
-
-            if (OperatingSystem.IsWindows())
-            {
-                WindowsAgentStorageAcl.ValidateFile(path, "Replay storage file");
-            }
-            else if ((File.GetUnixFileMode(path) &
-                      (UnixFileMode.GroupWrite | UnixFileMode.OtherWrite)) != 0)
-            {
-                throw new InvalidOperationException("Replay storage file permissions are too broad.");
             }
         }
     }

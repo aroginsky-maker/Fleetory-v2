@@ -39,6 +39,16 @@ This is a security contract, **not** the PHASE 8 Agent wire protocol. Private si
 
 On Unix, existing replay database, WAL and shared-memory files must also deny group/other write permission. These modes are checked at construction and before each consumption without silently repairing the files. After an operator restores safe permissions, the original replay history remains authoritative. The private directory and file checks are admission guards; service ownership, atomic path custody, hard-link provisioning and protection against replacing or rolling back the complete database remain deployment responsibilities.
 
+SQLite normally removes WAL/SHM when its last connection closes. Replay admission
+tolerates only `FileNotFoundException` for one of those two transient sidecars
+disappearing during inspection; database-file errors, directory errors, unsafe
+ACL/mode and link checks still propagate. It neither deletes files nor resets
+history. The concurrency regression runs 24 rounds of 12 consumers across two
+store instances, checks one acceptance per round and verifies rejection after
+recreation. Windows negative cases retain live WAL/SHM while rejecting exposed
+database and sidecar ACLs; Unix permission regressions remain in place.
+The lifecycle is described in the [SQLite WAL documentation](https://sqlite.org/wal.html#the_wal_file).
+
 Agent trust-key reads enforce the 1-KiB limit on the bytes obtained from one
 open file handle. A fixed 1025-byte buffer includes one overflow byte, so growth
 after metadata inspection cannot cause an unbounded whole-file allocation.

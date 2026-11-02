@@ -2,6 +2,7 @@ using Fleetory.Agent.Security;
 using Fleetory.Core.Contracts;
 using System.Security.Cryptography;
 using Fleetory.AgentTestSupport;
+using Microsoft.Data.Sqlite;
 
 namespace Fleetory.Core.Tests;
 
@@ -39,13 +40,22 @@ public sealed class AgentCommandSecurityTests
         var directory = CreateTemporaryDirectory();
         try
         {
-            var store = new SqliteCommandReplayStore(Path.Combine(directory, "replay.db"));
-            var commandId = Guid.NewGuid();
-            var attempts = Enumerable.Range(0, 12).Select(_ => Task.Run(async () =>
-                await store.TryConsumeAsync(Device, commandId, "same-nonce-12345678", DateTimeOffset.UtcNow.AddMinutes(1))));
+            var path = Path.Combine(directory, "replay.db");
+            var stores = new[] { new SqliteCommandReplayStore(path), new SqliteCommandReplayStore(path) };
+            // Repeatedly let all connections close so SQLite removes and recreates WAL/SHM.
+            for (var round = 0; round < 24; round++)
+            {
+                var commandId = Guid.NewGuid();
+                var nonce = $"same-nonce-12345678-{round}";
+                var expiry = DateTimeOffset.UtcNow.AddMinutes(1);
+                var attempts = Enumerable.Range(0, 12).Select(index => Task.Run(async () =>
+                    await stores[index % stores.Length].TryConsumeAsync(Device, commandId, nonce, expiry)));
 
-            var results = await Task.WhenAll(attempts);
-            Assert.Single(results, accepted => accepted);
+                var results = await Task.WhenAll(attempts);
+                Assert.Single(results, accepted => accepted);
+                var restarted = new SqliteCommandReplayStore(path);
+                Assert.False(await restarted.TryConsumeAsync(Device, commandId, nonce, expiry));
+            }
         }
         finally
         {
@@ -95,8 +105,11 @@ public sealed class AgentCommandSecurityTests
         }
     }
 
-    [Fact]
-    public async Task Windows_replay_storage_rejects_exposed_existing_database()
+    [Theory]
+    [InlineData("")]
+    [InlineData("-wal")]
+    [InlineData("-shm")]
+    public async Task Windows_replay_storage_rejects_exposed_existing_files(string suffix)
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -108,7 +121,14 @@ public sealed class AgentCommandSecurityTests
         {
             var path = Path.Combine(directory, "replay.db");
             var store = new SqliteCommandReplayStore(path);
-            WindowsAgentAclTestHelper.GrantEveryoneWrite(path, directory: false);
+            await using var keeper = new SqliteConnection(
+                new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString());
+            await keeper.OpenAsync();
+            await using var read = keeper.CreateCommand();
+            read.CommandText = "SELECT count(*) FROM consumed_commands;";
+            Assert.Equal(0L, await read.ExecuteScalarAsync());
+            Assert.True(File.Exists(path + suffix));
+            WindowsAgentAclTestHelper.GrantEveryoneWrite(path + suffix, directory: false);
             Assert.Throws<InvalidOperationException>(() => new SqliteCommandReplayStore(path));
             await Assert.ThrowsAsync<InvalidOperationException>(async () =>
                 await store.TryConsumeAsync(Device, Guid.NewGuid(), "new-nonce-12345678", DateTimeOffset.UtcNow));
