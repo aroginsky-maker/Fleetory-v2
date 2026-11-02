@@ -94,6 +94,33 @@ else is denied. The dedicated writer must have access only to `fleetoryaudit`.
 Backend administration uses host loopback `18091`; `18090` is the restricted
 gateway. Never disable certificate validation to diagnose a failed connection.
 
+## Signer configuration acceptance
+
+The existing eng/pilot/Test-PilotProfile.ps1 gate checks the signer isolation
+settings after rendering the canonical Compose profile. Its current local run
+passes 38 contract checks, including 36 rejected unsafe mutations. Sixteen
+independently exercised unsafe models were accepted before this fix and are
+now refused; the canonical model and explicit nonprivileged,
+empty-capability/canonical-path spelling remain accepted.
+
+The signer must retain a read-only root and the single read-only bind from the
+profile directory's secrets/signer to /run/fleetory-signer. Extra volumes,
+substituted sources and tmpfs mounts shadowing protected paths are rejected;
+only the reviewed /tmp tmpfs is permitted. Privileged mode, capability additions
+and additional/conflicting security options are refused. User and namespace
+overrides, inherited volumes, devices/GPU reservations (including the deploy
+alternative), custom runtimes, engine-socket delegation, extra configs/secrets
+and lifecycle hooks are also refused. The process inherits the pinned image's
+nonroot user and runtime namespace defaults. Caddy's separate NET_BIND_SERVICE
+exception and other services' mounts remain unchanged.
+
+These are static checks on the reviewed repository profile, not a sandbox for
+arbitrary untrusted Compose files. They do not inspect a running container,
+filesystem ownership, private-key custody or a deployed/restored host. Review
+the exact rendered deployment configuration and independently verify actual
+runtime isolation after provisioning or recovery. No VPS change or production
+acceptance is inferred from these contract checks.
+
 ## OpenBao custody and initialization procedure
 
 OpenBao 2.7 requires the file audit device to be declared in its HCL

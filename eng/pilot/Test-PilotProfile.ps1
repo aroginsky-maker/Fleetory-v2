@@ -9,6 +9,77 @@ $composePath = Join-Path $repoRoot 'infra\pilot\compose.yaml'
 $passedChecks = 0
 $rejectedMutations = 0
 
+function Assert-SignerMounts {
+    param(
+        [System.Collections.IDictionary] $Service,
+        [string] $SecretSource
+    )
+
+    $mounts = @($Service['volumes'])
+    if ($mounts.Count -ne 1 -or $mounts[0] -isnot [System.Collections.IDictionary]) {
+        throw 'Signer must have exactly one reviewed secret bind mount.'
+    }
+
+    $mount = $mounts[0]
+    if ($mount['type'] -cne 'bind' -or $mount['target'] -cne '/run/fleetory-signer' -or
+        $mount['read_only'] -isnot [bool] -or -not $mount['read_only'] -or
+        $mount['source'] -isnot [string] -or [string]::IsNullOrWhiteSpace($mount['source'])) {
+        throw 'Signer secret bind must retain its target and read-only access.'
+    }
+
+    $actualSource = [IO.Path]::TrimEndingDirectorySeparator([IO.Path]::GetFullPath($mount['source']))
+    $expectedSource = [IO.Path]::TrimEndingDirectorySeparator([IO.Path]::GetFullPath($SecretSource))
+    $comparison = if ($IsWindows) { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+    if (-not $actualSource.Equals($expectedSource, $comparison)) {
+        throw 'Signer secret bind source differs from the reviewed directory.'
+    }
+
+    if ($Service.Contains('tmpfs')) {
+        $temporaryMounts = @($Service['tmpfs'])
+        if ($temporaryMounts.Count -ne 1 -or $temporaryMounts[0] -isnot [string] -or
+            -not $temporaryMounts[0].StartsWith('/tmp:', [StringComparison]::Ordinal)) {
+            throw 'Signer may mount tmpfs only at /tmp without shadowing protected paths.'
+        }
+    }
+}
+
+function Assert-SignerIsolation {
+    param(
+        [System.Collections.IDictionary] $Service,
+        [string] $SecretSource
+    )
+
+    if ($Service['read_only'] -isnot [bool] -or -not $Service['read_only']) {
+        throw 'Signer root filesystem must be read-only.'
+    }
+
+    if ($Service.Contains('privileged') -and
+        ($Service['privileged'] -isnot [bool] -or $Service['privileged'])) {
+        throw 'Signer must not use privileged mode.'
+    }
+
+    if ($Service.Contains('cap_add') -and @($Service['cap_add']).Count -ne 0) {
+        throw 'Signer must not add Linux capabilities.'
+    }
+
+    $options = @($Service['security_opt'])
+    if ($options.Count -ne 1 -or $options[0] -cne 'no-new-privileges:true') {
+        throw 'Signer must retain only the reviewed no-new-privileges security option.'
+    }
+
+    foreach ($name in @(
+        'user', 'pid', 'ipc', 'network_mode', 'userns_mode', 'uts',
+        'devices', 'device_cgroup_rules', 'gpus', 'volumes_from',
+        'configs', 'secrets', 'use_api_socket', 'post_start', 'pre_stop', 'deploy', 'runtime'
+    )) {
+        if ($Service.Contains($name)) {
+            throw "Signer must not override the reviewed isolation setting '$name'."
+        }
+    }
+
+    Assert-SignerMounts -Service $Service -SecretSource $SecretSource
+}
+
 function Assert-Profile {
     param(
         [Parameter(Mandatory)]
@@ -95,6 +166,9 @@ function Assert-Profile {
     if (@($services['signer']['profiles']) -notcontains 'signer-approved') {
         throw 'Signer must be gated by the signer-approved Compose profile.'
     }
+
+    Assert-SignerIsolation -Service $services['signer'] -SecretSource (
+        Join-Path (Split-Path -Parent $composePath) 'secrets/signer')
 
     if ($services['audit-store']['healthcheck']['disable'] -ne $true) {
         throw 'The inherited non-TLS immudb healthcheck must be disabled.'
@@ -221,6 +295,64 @@ try {
     $composeModel = ($renderedJson -join [Environment]::NewLine) | ConvertFrom-Json -AsHashtable
     Assert-Profile -ComposeModel $composeModel
     $passedChecks++
+
+    $equivalent = ($renderedJson -join [Environment]::NewLine) | ConvertFrom-Json -AsHashtable
+    $equivalent['services']['signer']['privileged'] = $false
+    $equivalent['services']['signer']['cap_add'] = @()
+    $equivalent['services']['signer']['volumes'][0]['source'] = Join-Path (
+        $equivalent['services']['signer']['volumes'][0]['source']) '.'
+    Assert-Profile -ComposeModel $equivalent
+    $passedChecks++
+
+    $signerMutations = [ordered]@{
+        'privileged signer' = { param($service) $service['privileged'] = $true }
+        'signer capability addition' = { param($service) $service['cap_add'] = @('SYS_ADMIN') }
+        'writable signer root' = { param($service) $service['read_only'] = $false }
+        'missing signer root protection' = { param($service) $service.Remove('read_only') }
+        'writable signer secrets' = { param($service) $service['volumes'][0]['read_only'] = $false }
+        'missing secret read-only flag' = { param($service) $service['volumes'][0].Remove('read_only') }
+        'substituted signer secret source' = { param($service) $service['volumes'][0]['source'] = '/var/run/docker.sock' }
+        'changed signer secret target' = { param($service) $service['volumes'][0]['target'] = '/run/unrelated' }
+        'non-bind signer secrets' = { param($service) $service['volumes'][0]['type'] = 'volume' }
+        'missing signer secret mount' = { param($service) $service['volumes'] = @() }
+        'extra signer socket bind' = {
+            param($service)
+            $service['volumes'] += @{ type = 'bind'; source = '/var/run/docker.sock'; target = '/var/run/docker.sock'; read_only = $true }
+        }
+        'shadowed signer secret mount' = { param($service) $service['tmpfs'] = @('/run/fleetory-signer:rw,noexec,nosuid,size=32m') }
+        'extra signer tmpfs' = { param($service) $service['tmpfs'] += '/app:rw,noexec,nosuid,size=32m' }
+        'unconfined signer security option' = { param($service) $service['security_opt'] += 'seccomp:unconfined' }
+        'conflicting signer privilege option' = { param($service) $service['security_opt'] += 'no-new-privileges:false' }
+    }
+    $overrideValues = [ordered]@{
+        user = '0:0'
+        pid = 'host'
+        ipc = 'host'
+        network_mode = 'service:server'
+        userns_mode = 'host'
+        uts = 'host'
+        devices = @('/dev/kvm:/dev/kvm')
+        device_cgroup_rules = @('c 1:3 rwm')
+        gpus = 'all'
+        volumes_from = @('server')
+        configs = @(@{ source = 'unrelated'; target = '/run/extra-config' })
+        secrets = @(@{ source = 'unrelated'; target = 'extra-key' })
+        use_api_socket = $true
+        post_start = @(@{ command = 'true'; privileged = $true })
+        pre_stop = @(@{ command = 'true'; user = 'root' })
+        deploy = @{ resources = @{ reservations = @{ devices = @(@{ driver = 'nvidia'; count = 'all'; capabilities = @('gpu') }) } } }
+        runtime = 'nvidia'
+    }
+    foreach ($name in $signerMutations.Keys) {
+        $mutation = ($renderedJson -join [Environment]::NewLine) | ConvertFrom-Json -AsHashtable
+        $null = & $signerMutations[$name] $mutation['services']['signer']
+        Assert-RejectedMutation -ComposeModel $mutation -Name $name
+    }
+    foreach ($name in $overrideValues.Keys) {
+        $mutation = ($renderedJson -join [Environment]::NewLine) | ConvertFrom-Json -AsHashtable
+        $mutation['services']['signer'][$name] = $overrideValues[$name]
+        Assert-RejectedMutation -ComposeModel $mutation -Name "signer $name override"
+    }
 
     $mutation = ($renderedJson -join [Environment]::NewLine) | ConvertFrom-Json -AsHashtable
     $mutation['services']['server']['ports'][0]['host_ip'] = '0.0.0.0'

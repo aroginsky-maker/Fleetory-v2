@@ -141,6 +141,44 @@ revocations, audit/checkpoints, application/signer histories and physical Agent
 trust. RPO/RTO and retention belong to the deployment profile. Keep Phase 7 and
 its PR open until the remaining Baseline controls have actual evidence.
 
+## Verified actual pilot acceptance - 1 November 2026 UTC
+
+This is a historical record of an explicitly approved operation, not a current
+provider-health assertion or standing authority for another root session.
+The retained protected capture and restore records were independently rechecked
+before adding this summary. Neither the encrypted backup nor private operator
+files are published here.
+
+The native barrier-encrypted snapshot contained 27,161 bytes, SHA-256
+e94f5c8457e0d56671a40ef2a3f8a25c73698fa0dfd332f54f2c64cdba268094.
+The one-time source root was revoked before capture, permanent configuration
+and health were restored, and the source maintenance window was 24.812 seconds.
+Temporary source credentials were revoked. The offline copy remains in the
+approved protected local destination outside Git.
+
+The same snapshot was restored in a fresh, same-VPS provider target with
+network none, no published ports or host mounts, a read-only root and tmpfs.
+The normal foreign-seal restore and fresh bootstrap share were rejected with
+HTTP 400; the original approved share unsealed the restored state. Cluster/key
+continuity and Transit P-256 version 1 were retained, with nonexportable key and
+plaintext backup disabled. Public SPKI SHA-256 was
+84f39cbc722afb27d0943ef09ecd25daf4c39b5fa70a2da617c86f3518171206.
+A new domain-separated non-command signature verified under that public key.
+Fresh bootstrap root and signer management returned 403, clone root generation
+returned 405, and audit mode/owner was 600:100:1000. The target was removed
+and source health checked after cleanup.
+
+The restore continuation used no second source-root recovery, token issuance
+or renewal. Existing signer self-lookup was denied on source and clone, so the
+clone credential's identity/expiry was **not independently introspected**.
+The retained original deadline is administrative metadata, not a verified new
+lease or proof of post-expiry behavior.
+
+This establishes same-VPS logical provider-key recovery. Independent production
+custody/quorum, separate-host/VPS-loss recovery, full configuration/PKI and
+revocation reconciliation, critical audit retention and physical-Agent trust
+remain open. Phase 7 and PR #2 remain incomplete.
+
 References: [OpenBao storage/backups](https://openbao.org/docs/concepts/storage/),
 [Integrated Storage](https://openbao.org/docs/internals/integrated-storage/),
 [Raft snapshot commands](https://openbao.org/docs/commands/operator/raft/) and
