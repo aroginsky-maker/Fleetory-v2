@@ -111,22 +111,43 @@ def windows_long_root(root):
 def relative_open(root, root_fd, name):
     # Enforce lexical scope at the open boundary, including direct library callers.
     parts = relative_parts(name)
+    root = Path(root).absolute()
+    canonical_root = root.resolve(strict=True)
+    candidate = root.joinpath(*parts)
+    canonical_file = candidate.resolve(strict=True)
+    if canonical_root != root or not canonical_file.is_relative_to(canonical_root) or canonical_file != candidate:
+        raise archive.ArchiveError('Recovery path boundary validation failed.')
+    parts = canonical_file.relative_to(canonical_root).parts
     if os.name == 'nt':
+        archive.require(root_fd is None)
         parent = root
         for part in parts[:-1]:
             parent /= part
             ordinary_directory(parent)
-        return windows_open(parent / parts[-1])
-    archive.require(os.name == 'posix')
-    parent = os.dup(root_fd)
-    try:
-        for part in parts[:-1]:
-            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+        descriptor = windows_open(canonical_file)
+    else:
+        archive.require(os.name == 'posix')
+        expected = root.stat(follow_symlinks=False)
+        held = os.fstat(root_fd)
+        if not stat.S_ISDIR(held.st_mode) or (held.st_dev, held.st_ino) != (expected.st_dev, expected.st_ino):
+            raise archive.ArchiveError('Recovery root descriptor does not match.')
+        parent = os.dup(root_fd)
+        try:
+            for part in parts[:-1]:
+                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+                os.close(parent)
+                parent = child
+            descriptor = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        finally:
             os.close(parent)
-            parent = child
-        return os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
-    finally:
-        os.close(parent)
+    try:
+        info = os.fstat(descriptor)
+        archive.require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1
+                        and not getattr(info, 'st_file_attributes', 0) & 0x400)
+        return descriptor
+    except Exception:
+        os.close(descriptor)
+        raise
 
 
 def file_state(info):

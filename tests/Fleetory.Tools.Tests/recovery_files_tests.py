@@ -308,6 +308,23 @@ class RecoveryFilesTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertEqual(result.stdout, b'')
 
+    def test_low_level_open_cannot_borrow_a_different_root_descriptor(self):
+        other = tempfile.TemporaryDirectory(prefix='fleetory-other-recovery-root-')
+        self.addCleanup(other.cleanup)
+        target = Path(other.name) / self.entry()['path']
+        target.parent.mkdir()
+        target.write_bytes(b'synthetic.other.root')
+        with files.rooted(other.name) as (_, other_descriptor):
+            if os.name == 'nt':
+                other_descriptor = 0  # Windows rooted handles require None.
+            with self.assertRaises(Exception):
+                opened = None
+                try:
+                    opened = files.relative_open(self.root, other_descriptor, self.entry()['path'])
+                finally:
+                    if opened is not None:
+                        os.close(opened)
+
 
 if __name__ == '__main__':
     unittest.main()
