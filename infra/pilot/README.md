@@ -66,6 +66,14 @@ into this repository.
   coverage was `93.80%`. CI is pending; these are not metrics for a new remote
   HEAD or a successful remote CI run.
 
+## Optional same-host audit archive
+
+The existing Ubuntu host can run the bounded, root-owned hourly archive described
+in [AuditArchive](../../docs/operations/AuditArchive.md). It needs no additional
+service or paid storage. Preserve its off-host export/checkpoint separately;
+same-host retention does not establish independent WORM custody. Installation
+and current actual checks are operator evidence, not inferred from this template.
+
 ## Trust and access boundaries
 
 Only SSH and the public HTTPS edge require public ingress: TCP 22, 80 and 443.

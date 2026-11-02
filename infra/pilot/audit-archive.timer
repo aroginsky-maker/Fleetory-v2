@@ -1,0 +1,11 @@
+[Unit]
+Description=Hourly Fleetory pilot audit snapshot
+
+[Timer]
+OnCalendar=*-*-* *:00:00 UTC
+RandomizedDelaySec=30
+Persistent=true
+Unit=fleetory-audit-archive.service
+
+[Install]
+WantedBy=timers.target

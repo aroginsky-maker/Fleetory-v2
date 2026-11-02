@@ -70,6 +70,10 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/QualityOrchestration.Tests.ps1
 
+      - name: Verify portable audit archive checkpoints on Windows
+        shell: pwsh
+        run: python ./tests/Fleetory.Tools.Tests/audit_archive_tests.py --portable
+
       - name: Verify Sonar issue gate on Windows
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/SonarIssueGate.Tests.ps1
@@ -227,6 +231,10 @@ jobs:
       - name: Verify quality command orchestration
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/QualityOrchestration.Tests.ps1
+
+      - name: Verify protected pilot audit archive
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/AuditArchive.Tests.ps1
 
       - name: Verify Sonar issue gate
         shell: pwsh
