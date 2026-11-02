@@ -86,6 +86,10 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/release_inputs_tests.py
 
+      - name: Verify code-only recovery build contexts on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/recovery_build_tests.py
+
       - name: Verify Sonar issue gate on Windows
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/SonarIssueGate.Tests.ps1
@@ -259,6 +263,10 @@ jobs:
       - name: Verify pinned release input inventory
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/release_inputs_tests.py
+
+      - name: Verify code-only recovery build contexts
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/recovery_build_tests.py
 
       - name: Verify Sonar issue gate
         shell: pwsh

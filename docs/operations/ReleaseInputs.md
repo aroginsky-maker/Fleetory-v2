@@ -75,6 +75,10 @@ reproducible build. The verifier reports these limits explicitly. Next, stage
 reviewed code inputs and verify pinned bases/builds on the isolated local host,
 without loading restored data or real configuration/secret/PKI material.
 
+The subsequent [code-only build preparation](RecoveryBuild.md) verified public
+pinned-base availability, built all three local recovery images and checked an
+offline archive reload. Historical deployed-image provenance remains separate.
+
 The protected real-service plan separates existing authorized data artifacts,
 Git templates, target-only ephemeral database credentials and still-unapproved
 secret/PKI transfer or issuer activation. Any target must use the reviewed

@@ -101,7 +101,7 @@ def expand(stream):
             archive.require(len(packet) <= MAX_EXPANDED)
 
 
-def inspect(root, name, expected):
+def read_verified(root, name, expected):
     archive.require(type(name) is str and ARCHIVE_NAME.fullmatch(name))
     archive.require(type(expected) is str and archive.HEX.fullmatch(expected))
     with files.rooted(root) as (directory, root_fd):
@@ -121,10 +121,15 @@ def inspect(root, name, expected):
             expanded = expand(stream)
             members = inventory_tar(expanded)
             archive.require(files.file_state(before) == files.file_state(os.fstat(stream.fileno())))
-    return {'schema': 'fleetory.release-input-inventory.v1', 'archiveSha256': expected,
+    inventory = {'schema': 'fleetory.release-input-inventory.v1', 'archiveSha256': expected,
             'compressedBytes': count, 'expandedBytes': len(expanded), 'files': members,
             'releaseSignatureVerified': False, 'sourceRevisionAuthenticated': False,
             'fullSystemRecoveryVerified': False, 'phase7Complete': False}
+    return inventory, expanded
+
+
+def inspect(root, name, expected):
+    return read_verified(root, name, expected)[0]
 
 
 def payloads(inventory):
