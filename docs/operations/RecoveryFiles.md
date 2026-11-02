@@ -40,7 +40,7 @@ sets fail before artifact reads.
 
 All inputs must be regular, single-link files. Linux traverses child directories
 using directory descriptors with no-follow opens and opens leaves nonblocking
-to reject special files. Windows refuses reparse parents/leaves, checks the final
+to reject special files. Windows expands short root-directory names with [GetLongPathNameW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getlongpathnamew), validates both root spellings, refuses reparse parents/leaves and checks the final
 handle path before reading and denies write/delete sharing. Hashing streams fixed
 64-KiB chunks and checks file size/state again after reading. Preserve the trusted
 directory and its protected ancestor paths throughout verification. The result
@@ -64,10 +64,10 @@ The original artifacts remained unchanged; the temporary negative manifest was
 removed. No backup, restore, source-root recovery or sensitive-data transfer was
 repeated.
 
-The synthetic regression suite passes **22 tests on Windows and 22 on Linux**,
+The synthetic regression suite passes **23 tests on Windows and 23 on Linux**,
 without skips. It covers real path/link/special-file rejection, streamed memory
 bounds, changed and missing files, strict metadata, manifest substitution and
-live growth. Windows refuses the concurrent writer; Linux detects the changed
+live growth and an actual Windows 8.3 root alias. Windows refuses the concurrent writer; Linux detects the changed
 stream. The CLI success/failure cases also verify read-only behavior and absence
 of backup contents in output. Both existing CI jobs execute the suite.
 

@@ -1,5 +1,6 @@
 """Synthetic file/CLI contracts; no credentials, remote services or restore operations."""
 import copy
+import ctypes
 import hashlib
 import json
 import os
@@ -274,6 +275,19 @@ class RecoveryFilesTests(unittest.TestCase):
         with self.assertRaises(Exception):
             files.verify(self.root, '../set.json', self.expected)
         self.assertEqual(files.verify(self.root, 'set.json', self.expected.upper())['verifiedArtifacts'], 6)
+
+    def test_short_directory_alias_resolves_to_the_same_protected_root(self):
+        root = str(self.root)
+        if os.name == 'nt':
+            kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+            short = kernel.GetShortPathNameW
+            short.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
+            short.restype = ctypes.c_uint32
+            buffer = ctypes.create_unicode_buffer(32768)
+            length = short(root, buffer, len(buffer))
+            self.assertTrue(0 < length < len(buffer))
+            root = buffer.value
+        self.assertEqual(files.verify(root, 'set.json', self.expected)['verifiedArtifacts'], 6)
 
 
 if __name__ == '__main__':

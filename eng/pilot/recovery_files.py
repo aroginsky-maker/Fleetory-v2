@@ -82,6 +82,11 @@ def rooted(root):
     root = Path(root).absolute()
     for ancestor in reversed([root, *root.parents]):
         ordinary_directory(ancestor)
+    if os.name == 'nt':
+        # CI TEMP may use RUNNER~1. Expand names without resolving reparse targets.
+        root = windows_long_root(root)
+        for ancestor in reversed([root, *root.parents]):
+            ordinary_directory(ancestor)
     if os.name == 'posix':
         fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         try:
@@ -90,6 +95,17 @@ def rooted(root):
             os.close(fd)
     else:
         yield root, None
+
+
+def windows_long_root(root):
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    convert = kernel.GetLongPathNameW
+    convert.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
+    convert.restype = ctypes.c_uint32
+    buffer = ctypes.create_unicode_buffer(32768)
+    length = convert(str(root), buffer, len(buffer))
+    archive.require(0 < length < len(buffer))
+    return Path(buffer.value)
 
 
 def relative_open(root, root_fd, parts):
