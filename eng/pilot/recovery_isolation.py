@@ -49,9 +49,9 @@ def command(role):
     return ['python', '-I', '-B', '-u', '-c', PROBE, role]
 
 
-def network(identity):
+def network(identity, session_label=SESSION):
     return {'driver': 'bridge', 'internal': True, 'enable_ipv6': False,
-            'driver_opts': {GATEWAY_OPTION: 'isolated'}, 'labels': {SESSION: identity}}
+            'driver_opts': {GATEWAY_OPTION: 'isolated'}, 'labels': {session_label: identity}}
 
 
 def render(project):
@@ -67,15 +67,15 @@ def render(project):
     return {'name': project, 'services': services, 'networks': {name: network(identity) for name in sorted(NETWORKS)}}
 
 
-def validate_networks(networks, identity):
+def validate_networks(networks, identity, session_label=SESSION):
     archive.fields(networks, NETWORKS)
     for value in networks.values():
         archive.fields(value, ('driver', 'internal', 'enable_ipv6', 'driver_opts', 'labels'))
         archive.require(value['driver'] == 'bridge' and value['internal'] is True and value['enable_ipv6'] is False)
         archive.fields(value['driver_opts'], (GATEWAY_OPTION,))
         archive.require(value['driver_opts'][GATEWAY_OPTION] == 'isolated')
-        archive.fields(value['labels'], (SESSION,))
-        archive.require(value['labels'][SESSION] == identity)
+        archive.fields(value['labels'], (session_label,))
+        archive.require(value['labels'][session_label] == identity)
 
 
 def validate_service(role, service, identity):

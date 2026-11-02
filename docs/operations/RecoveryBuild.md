@@ -88,3 +88,8 @@ data or issuer state requires the separately scoped plan and applicable consent.
 Database LOGIN credentials, human identity login, provider/PKI/revocation and
 physical-Agent recovery, independent WORM/custody/approvals and full RPO/RTO
 remain open. This step does not complete Phase 7 or full-system recovery.
+
+The subsequent [creation-only target check](RecoveryTarget.md) verified eight
+never-started containers and three owned internal isolated networks, including
+the PostgreSQL image-volume override, and removed its resources without loading
+service material. Runtime and recovery acceptance retain their separate scope.
