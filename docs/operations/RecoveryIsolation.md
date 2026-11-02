@@ -78,6 +78,11 @@ and OCI labels alone do not verify registry availability, reproducible build
 inputs, release provenance or application revision. Preserve and review accepted
 release/image evidence separately before selecting real target images.
 
+The subsequent [release input review](ReleaseInputs.md) matched all 67 live
+Server/signer payload files to the retained pilot package and four recipes to
+Git. It does not authenticate image configuration, base availability or the
+optimized Keycloak build; those remain separate recovery inputs.
+
 This closes the synthetic target-network preparation step. Loading the six
 retained files, recovered runtime credentials, real service startup, issuer/RP
 continuity and human login, configuration/PKI/revocation/physical-Agent recovery,
