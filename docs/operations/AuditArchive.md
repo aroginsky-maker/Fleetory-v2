@@ -145,3 +145,23 @@ sudo systemctl disable --now fleetory-audit-archive.timer
 Do not delete snapshots to hide a failed check. Retain the data, service result
 and reviewed recovery decision. Stopping this timer does not disable the
 application's durable audit/outbox or immudb export.
+
+## Verified pilot result on 2 November 2026
+
+The reviewed helper at `c7e5ef0` was installed on the existing pilot VPS.
+The timer was enabled and active, the oneshot exited successfully, and the first
+snapshot retained four Platform audit events with an empty export queue. A
+second service invocation preserved the same receipt instead of creating a
+duplicate. The application's UID could neither read the sealed snapshot nor
+open it for writing; the negative check wrote no bytes. The application and
+signer remained running and had no archive mount.
+
+With the owner's explicit transfer approval, a 2,398-byte export was copied
+through host-key-pinned SSH into the private operator computer directory outside
+Git. Its SHA-256 matched the independently retrieved source digest. Portable
+verification, an isolated file-copy restore and retained-checkpoint validation
+passed; a changed candidate was rejected. Windows directory ACLs were checked
+for the operator, SYSTEM and Administrators, with inherited access disabled.
+These are file-preservation results, not independent WORM or full-system
+recovery. Raw audit records and private custody artifacts remain outside the
+repository and PR.
