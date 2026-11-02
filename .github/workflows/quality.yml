@@ -74,6 +74,10 @@ jobs:
         shell: pwsh
         run: python ./tests/Fleetory.Tools.Tests/audit_archive_tests.py --portable
 
+      - name: Verify pinned recovery files on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/recovery_files_tests.py
+
       - name: Verify Sonar issue gate on Windows
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/SonarIssueGate.Tests.ps1
@@ -235,6 +239,10 @@ jobs:
       - name: Verify protected pilot audit archive
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/AuditArchive.Tests.ps1
+
+      - name: Verify pinned recovery files
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/recovery_files_tests.py
 
       - name: Verify Sonar issue gate
         shell: pwsh

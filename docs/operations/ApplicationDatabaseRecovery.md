@@ -85,3 +85,7 @@ audit boundary. It does not validate recovered runtime passwords, external
 approvals, independent WORM custody, identity-provider login, secret-manager
 recovery, configuration/PKI/revocation/Agent recovery or full-system RPO/RTO.
 No OpenBao source-root recovery was repeated. PHASE 7 remains open.
+
+The subsequent [recovery file preflight](RecoveryFiles.md) binds these dumps and
+the previously accepted audit/identity/provider files to a retained manifest pin.
+It verifies bytes before an exercise while keeping their separate recovery scopes.
