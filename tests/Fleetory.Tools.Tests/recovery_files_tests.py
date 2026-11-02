@@ -325,6 +325,25 @@ class RecoveryFilesTests(unittest.TestCase):
                     if opened is not None:
                         os.close(opened)
 
+    def test_reparse_leaf_is_refused_before_resolving_its_target(self):
+        path = self.artifact()
+        destination = self.root / 'unfollowed-target'
+        path.rename(destination)
+        if os.name == 'posix':
+            path.symlink_to(destination)
+        else:
+            destination.unlink(); destination.mkdir()
+            self.junction(path, destination)
+        original = Path.resolve
+        followed = []
+        def observed(candidate, *args, **kwargs):
+            if candidate == path:
+                followed.append(True)
+            return original(candidate, *args, **kwargs)
+        with patch.object(Path, 'resolve', observed):
+            self.refused()
+        self.assertEqual(followed, [], 'Untrusted reparse target resolved before link refusal.')
+
 
 if __name__ == '__main__':
     unittest.main()

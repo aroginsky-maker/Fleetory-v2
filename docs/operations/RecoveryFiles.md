@@ -39,7 +39,7 @@ rejected. Component paths must be unique even ignoring case and cannot name the
 manifest itself. The CLI has no root-override option. The low-level opening function revalidates paths for direct library callers as well as the CLI. Unknown fields, duplicate JSON fields and incomplete component
 sets fail before artifact reads.
 
-All inputs must be regular, single-link files. Canonical target paths must remain within the canonical root without link resolution changing the selected path; POSIX root descriptors must match that directory. Linux traverses child directories
+All inputs must be regular, single-link files. Reparse parents/leaves and nonregular files are refused before resolving any target. Canonical target paths must remain within the canonical root without link resolution changing the selected path; POSIX root descriptors must match that directory. Linux traverses child directories
 using directory descriptors with no-follow opens and opens leaves nonblocking
 to reject special files. Windows expands short root-directory names with [GetLongPathNameW](https://learn.microsoft.com/en-us/windows/win32/api/fileapi/nf-fileapi-getlongpathnamew), validates both root spellings, refuses reparse parents/leaves and checks the final
 handle path before reading and denies write/delete sharing. Hashing streams fixed
@@ -65,7 +65,7 @@ The original artifacts remained unchanged; the temporary negative manifest was
 removed. No backup, restore, source-root recovery or sensitive-data transfer was
 repeated.
 
-The synthetic regression suite passes **26 tests on Windows and 26 on Linux**,
+The synthetic regression suite passes **27 tests on Windows and 27 on Linux**,
 without skips. It covers real path/link/special-file rejection, streamed memory
 bounds, changed and missing files, strict metadata, manifest substitution and
 live growth, an actual Windows 8.3 root alias, reproduced direct-call directory traversal and foreign-root descriptor substitution and refusal of CLI root replacement. Windows refuses the concurrent writer; Linux detects the changed

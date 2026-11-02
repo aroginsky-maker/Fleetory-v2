@@ -41,6 +41,10 @@ def ordinary_directory(path):
         archive.require(not writable or (info.st_uid == 0 and info.st_mode & stat.S_ISVTX))
 
 
+def regular_single_file(info):
+    return stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and not getattr(info, 'st_file_attributes', 0) & 0x400
+
+
 def windows_open(path):
     """Deny write/delete sharing, refuse a reparse leaf and check the final path before reading."""
     import msvcrt
@@ -112,18 +116,20 @@ def relative_open(root, root_fd, name):
     # Enforce lexical scope at the open boundary, including direct library callers.
     parts = relative_parts(name)
     root = Path(root).absolute()
+    parent = root
+    for part in parts[:-1]:
+        parent /= part
+        ordinary_directory(parent)
+    candidate = parent / parts[-1]
+    if not regular_single_file(candidate.lstat()):
+        raise archive.ArchiveError('Recovery input must be an ordinary single-link file.')
     canonical_root = root.resolve(strict=True)
-    candidate = root.joinpath(*parts)
     canonical_file = candidate.resolve(strict=True)
     if canonical_root != root or not canonical_file.is_relative_to(canonical_root) or canonical_file != candidate:
         raise archive.ArchiveError('Recovery path boundary validation failed.')
     parts = canonical_file.relative_to(canonical_root).parts
     if os.name == 'nt':
         archive.require(root_fd is None)
-        parent = root
-        for part in parts[:-1]:
-            parent /= part
-            ordinary_directory(parent)
         descriptor = windows_open(canonical_file)
     else:
         archive.require(os.name == 'posix')
@@ -142,8 +148,7 @@ def relative_open(root, root_fd, name):
             os.close(parent)
     try:
         info = os.fstat(descriptor)
-        archive.require(stat.S_ISREG(info.st_mode) and info.st_nlink == 1
-                        and not getattr(info, 'st_file_attributes', 0) & 0x400)
+        archive.require(regular_single_file(info))
         return descriptor
     except Exception:
         os.close(descriptor)
@@ -157,9 +162,7 @@ def file_state(info):
 def inspect_file(root, root_fd, name, limit, retain=False):
     with os.fdopen(relative_open(root, root_fd, name), 'rb') as stream:
         before = os.fstat(stream.fileno())
-        archive.require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1
-                        and not getattr(before, 'st_file_attributes', 0) & 0x400
-                        and 0 < before.st_size <= limit)
+        archive.require(regular_single_file(before) and 0 < before.st_size <= limit)
         digest, count, data = hashlib.sha256(), 0, bytearray()
         while True:
             packet = stream.read(min(64 * 1024, limit + 1 - count))
