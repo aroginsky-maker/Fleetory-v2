@@ -44,6 +44,28 @@ TLS must be at least 1.2 with a non-empty cipher. Wrong CA/name, plaintext and
 wrong-password failures must match their specific native libpq/HBA diagnostics;
 an arbitrary connection failure or missing table cannot pass as a refusal.
 
+## Accepted actual-copy result on 3 November 2026
+
+The reviewed tool at `14e6b56e4fbb5b4b56e15eac5624469c7636b35c` passed on the
+already authorized retained application/signer pair: 18 tables/24 rows and four
+tables/five rows. Both native runtime sessions used TLS 1.3 with
+`TLS_AES_256_GCM_SHA384`, verified the generated server root/name and returned
+the expected four audit events and one signing-result row. Two refusals each
+for wrong CA, wrong hostname, plaintext and wrong password passed.
+
+Complete before/after inventories matched the accepted data, schema, owners,
+table/column/default grants and role capabilities/memberships. As in the prior
+inventory algorithm, password and LOGIN fields are excluded from those hashes;
+separate explicit checks verified two runtime LOGIN/SCRAM roles, two NOLOGIN
+owners and no elevated role capabilities. The sanitized actual proof, exact
+dump/tool hashes and inventory records remain private.
+
+The target container/volume and generated test-material directory were removed,
+with explicit absence checks. Source dump files were only read. No original
+PKI, source passwords, VPS access, new source backup, provider/root/issuer
+operation or production tokens were used. The earlier privilege, rotation and
+original-leaf acceptance operations were not repeated.
+
 ## Actual-copy boundary
 
 The existing explicit permission for retained application/signer copies covers
