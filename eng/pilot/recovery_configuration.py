@@ -5,7 +5,7 @@ import sys
 
 import audit_archive as archive
 
-ROOT = '/tmp/material/'
+ROOT = '/run/fleetory-recovery/'
 SLOTS = {
     'server': ('fleetory-postgresql','agent-gateway-root-ca','agent-gateway-server-cert','agent-gateway-server-key',
                'admin-gateway-root-ca','admin-gateway-server-cert','admin-gateway-server-key','audit-immudb-password','infrastructure-ca'),

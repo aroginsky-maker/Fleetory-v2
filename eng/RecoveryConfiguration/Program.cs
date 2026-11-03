@@ -72,7 +72,7 @@ internal static class Program
             throw new InvalidOperationException("Configuration probe requires an unstarted production-environment builder.");
         }
         var provider = role == "server" ? app.Services.GetRequiredService<ISecretProvider>() :
-            new FileSecretProvider("/tmp/material/signer");
+            new FileSecretProvider("/run/fleetory-recovery/signer");
         if (provider is not FileSecretProvider) { throw new InvalidOperationException("Wrong configuration provider."); }
         string[] names = role == "server"
             ? ["fleetory-postgresql", "agent-gateway-root-ca", "agent-gateway-server-cert", "agent-gateway-server-key",
@@ -85,7 +85,7 @@ internal static class Program
         var connection = new NpgsqlConnectionStringBuilder(provider.GetRequiredSecret(
             role == "server" ? "fleetory-postgresql" : "signer-postgresql"));
         if (connection.Host != "postgres" || connection.Database != databaseName || connection.Username != userName ||
-            connection.SslMode != SslMode.VerifyFull || connection.RootCertificate != "/tmp/material/" + role + "/infrastructure-ca" ||
+            connection.SslMode != SslMode.VerifyFull || connection.RootCertificate != "/run/fleetory-recovery/" + role + "/infrastructure-ca" ||
             !string.IsNullOrEmpty(connection.Options))
         {
             throw new InvalidOperationException("Recovery database binding is invalid.");

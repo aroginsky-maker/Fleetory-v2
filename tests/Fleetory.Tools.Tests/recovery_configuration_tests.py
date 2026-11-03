@@ -19,6 +19,7 @@ from recovery_tls_tests import generate_material
 
 RUNTIME = 'mcr.microsoft.com/dotnet/aspnet:10.0@sha256:de0ee358cdd672f7017a003bed21e9ac9ed48a27c922a59b18175b6e82fa7fee'
 LABEL = 'fleetory.recovery.configuration.session'
+PRIVATE_TMPFS = 'rw,noexec,nosuid,size=32m,mode=0700,uid=1654,gid=1654'
 
 
 class ConfigurationTests(unittest.TestCase):
@@ -35,6 +36,7 @@ class ConfigurationTests(unittest.TestCase):
         config.validate(self.profile)
         self.assertEqual(sum(map(len,self.profile['slots'].values())),17)
         self.assertEqual(self.profile['provider'],'File')
+        self.assertEqual(config.ROOT,'/run/fleetory-recovery/')
 
     def test_provider_switch_or_extra_credentials_refused(self):
         self.refuse(lambda p:p.update(provider='OpenBao'))
@@ -108,6 +110,7 @@ class NativeLab:
                                not host['PortBindings'] and host['CapDrop'] == ['ALL'] and not host['CapAdd'] and
                                'no-new-privileges' in host['SecurityOpt'][0] and host['Memory'] == 268435456 and
                                host['NanoCpus'] == 1000000000 and host['PidsLimit'] == 64)
+        config.archive.require(host['Tmpfs'] == {'/tmp':PRIVATE_TMPFS,config.ROOT.rstrip('/'):PRIVATE_TMPFS})
         config.archive.require(len(value['mounts']) == 1 and value['mounts'][0]['Type'] == 'bind' and
                                value['mounts'][0]['Destination'] == '/tool' and not value['mounts'][0]['RW'])
 
@@ -117,14 +120,16 @@ class NativeLab:
         config.archive.require(self.call(['info','--format','{{.OSType}}']).stdout.strip() == b'linux')
         self.call(['create','--name',self.name,'--label',LABEL+'='+self.identity,'--network','none','--read-only',
                    '--user','1654:1654','--cap-drop','ALL','--security-opt','no-new-privileges','--memory','256m',
-                   '--cpus','1','--pids-limit','64','--tmpfs','/tmp:rw,noexec,nosuid,size=32m,mode=0700,uid=1654,gid=1654',
+                   '--cpus','1','--pids-limit','64','--tmpfs','/tmp:'+PRIVATE_TMPFS,
+                   '--tmpfs',config.ROOT.rstrip('/')+':'+PRIVATE_TMPFS,
                    '--mount','type=bind,src='+str(self.published)+',dst=/tool,readonly',
                    '-e','DOTNET_ENVIRONMENT=Production','-e','DOTNET_EnableDiagnostics=0','-e','DOTNET_PROCESSOR_COUNT=2',
                    '-e','HOME=/tmp','-e','ASPNETCORE_URLS=', '--entrypoint','sh',RUNTIME,'-ec','while :; do sleep 1; done'])
         self.created = True
         self.owned()
         self.call(['start',self.name])
-        self.call(['exec',self.name,'sh','-ec','mkdir -m 700 /tmp/material /tmp/material/server /tmp/material/signer'])
+        config.archive.require(self.call(['exec',self.name,'stat','-c','%a:%u',config.ROOT]).stdout.strip() == b'700:1654')
+        self.call(['exec',self.name,'mkdir','-m','700',config.ROOT+'server',config.ROOT+'signer'])
 
     def write(self, role, name, packet):
         config.archive.require(role in config.SLOTS and name in config.SLOTS[role] and 0 < len(packet) <= 16385)

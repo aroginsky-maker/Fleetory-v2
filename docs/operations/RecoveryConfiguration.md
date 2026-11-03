@@ -43,7 +43,9 @@ and exit codes; unexpected exceptions or process failures cannot pass.
 The worker uses the existing digest-pinned ASP.NET 10 runtime, network none,
 no published ports, UID/GID 1654, read-only root, dropped capabilities,
 no-new-privileges and fixed memory/CPU/PID limits. Only public published probe
-assemblies are mounted read-only. All synthetic secret files enter owned tmpfs
+assemblies are mounted read-only. A separate owned tmpfs at
+`/run/fleetory-recovery` holds the materials; its 0700 ownership and exact mount
+options are checked independently from the runtime's `/tmp`. All synthetic secret files enter this tmpfs
 via stdin and are checked for 0600/1654/single-link properties; directories are
 0700. Native stdout/stderr are bounded and checked for password/token/private-key
 canaries. The native program returns only categorical results. No TCP listeners
