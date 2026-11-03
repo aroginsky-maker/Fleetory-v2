@@ -90,8 +90,10 @@ load original PKI/seal material or repeat OpenBao source-root recovery. The old
 identity/provider snapshots keep their historical scopes; a globally atomic
 point and full-system RPO/RTO remain unverified.
 
-Next use the [leaf-only TLS preparation](LeafTlsRecovery.md), with original-key
-use separately gated, then review provider credential and issuer activation.
+The [leaf-only TLS proof](LeafTlsRecovery.md) and
+[native PostgreSQL TCP/TLS control](PostgresTcpTlsRecovery.md) retain separate
+scopes; original-key use remains specifically gated. Next review provider
+credential and issuer activation.
 Human post-restore login, physical Agent trust, independent
 custody/WORM/approvals and full-service acceptance remain open. Phase 7 and PR #2
 remain incomplete.

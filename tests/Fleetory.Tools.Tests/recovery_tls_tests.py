@@ -155,18 +155,23 @@ class LeafTests(unittest.TestCase):
         self.assertNotIn(b'Traceback', result.stderr)
 
 
+def generate_material(directory):
+    executable = shutil.which('pwsh')
+    if not executable and os.name == 'nt':
+        executable = str(Path(sys.executable).parents[1] / 'native/powershell/pwsh.exe')
+    generated = directory / 'generated'
+    result = subprocess.run([executable, '-NoProfile', '-File', str(REPO / 'eng/pilot/New-PilotMaterial.ps1'),
+                             '-OutputDirectory', str(generated), '-AppHost', 'app.synthetic.invalid',
+                             '-AuthHost', 'auth.synthetic.invalid', '-ApplicationCommit', 'a' * 40],
+                            capture_output=True, timeout=90)
+    tls.archive.require(result.returncode == 0)
+    return generated
+
+
 def synthetic():
     with tempfile.TemporaryDirectory(prefix='fleetory-leaf-synthetic-') as temp:
         directory = Path(temp)
-        executable = shutil.which('pwsh')
-        if not executable and os.name == 'nt':
-            executable = str(Path(sys.executable).parents[1] / 'native/powershell/pwsh.exe')
-        generated = directory / 'generated'
-        result = subprocess.run([executable, '-NoProfile', '-File', str(REPO / 'eng/pilot/New-PilotMaterial.ps1'),
-                                 '-OutputDirectory', str(generated), '-AppHost', 'app.synthetic.invalid',
-                                 '-AuthHost', 'auth.synthetic.invalid', '-ApplicationCommit', 'a' * 40],
-                                capture_output=True, timeout=90)
-        tls.archive.require(result.returncode == 0)
+        generated = generate_material(directory)
         public = json.loads((generated / 'manifest.json').read_text(encoding='utf-8-sig'))['publicRootDerFingerprints']
         record = tls.plan({name: public[name] for name in tls.ROOTS})
         staged = directory / 'minimal'

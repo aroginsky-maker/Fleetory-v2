@@ -166,11 +166,14 @@ class PostgresLab:
                    'type=volume,src=' + self.volume + ',dst=/var/lib/postgresql',
                    '--tmpfs', '/var/run/postgresql:rw,noexec,nosuid,size=8m,mode=0775,uid=999,gid=999',
                    '--tmpfs', '/tmp:rw,noexec,nosuid,size=16m,mode=0700,uid=999,gid=999',
-                   '--entrypoint', 'sh', PG, '-ec', contract.START])
+                   '--entrypoint', 'sh', PG, '-ec', self.startup_script()])
         self.created = True
         self.owned()
         self.call(['start', self.name])
         self.ready()
+
+    def startup_script(self):
+        return contract.START
 
     def ready(self):
         for _ in range(60):
@@ -280,14 +283,18 @@ class PostgresLab:
         self.passwords.clear()
 
 
+def seed_synthetic(lab):
+    lab.admin('postgres', '\n'.join('CREATE ROLE ' + name + ' NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;' for name in contract.ROLES))
+    lab.admin('postgres', 'CREATE DATABASE fleetory OWNER fleetory_migrator; CREATE DATABASE fleetory_signer OWNER fleetory_signer_owner; REVOKE ALL ON DATABASE fleetory,fleetory_signer FROM PUBLIC; GRANT CONNECT ON DATABASE fleetory TO fleetory_server; GRANT CONNECT ON DATABASE fleetory_signer TO fleetory_signer;')
+    lab.admin('fleetory', 'CREATE SCHEMA platform AUTHORIZATION fleetory_migrator; REVOKE ALL ON SCHEMA public FROM PUBLIC; SET ROLE fleetory_migrator; CREATE TABLE platform.audit_events(action text); CREATE TABLE platform."__EFMigrationsHistory"("ProductVersion" text); CREATE TABLE platform.admin_certificate_registrations(id int); INSERT INTO platform.audit_events VALUES(\'fixture\'); RESET ROLE; GRANT USAGE ON SCHEMA platform TO fleetory_server; GRANT SELECT,INSERT ON platform.audit_events TO fleetory_server; GRANT SELECT ON platform."__EFMigrationsHistory",platform.admin_certificate_registrations TO fleetory_server;')
+    lab.admin('fleetory_signer', 'CREATE SCHEMA signer AUTHORIZATION fleetory_signer_owner; REVOKE ALL ON SCHEMA public FROM PUBLIC; SET ROLE fleetory_signer_owner; CREATE TABLE signer.signing_requests(id int); CREATE TABLE signer.signing_results(id int); CREATE TABLE signer.signing_rejections(id int); CREATE TABLE signer.client_certificate_revocations(id int); INSERT INTO signer.signing_results VALUES(1); RESET ROLE; GRANT USAGE ON SCHEMA signer TO fleetory_signer; GRANT SELECT,INSERT ON signer.signing_requests,signer.signing_results,signer.signing_rejections TO fleetory_signer; GRANT SELECT ON signer.client_certificate_revocations TO fleetory_signer;')
+
+
 def synthetic():
     lab = PostgresLab()
     try:
         lab.setup()
-        lab.admin('postgres', '\n'.join('CREATE ROLE ' + name + ' NOLOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;' for name in contract.ROLES))
-        lab.admin('postgres', 'CREATE DATABASE fleetory OWNER fleetory_migrator; CREATE DATABASE fleetory_signer OWNER fleetory_signer_owner; REVOKE ALL ON DATABASE fleetory,fleetory_signer FROM PUBLIC; GRANT CONNECT ON DATABASE fleetory TO fleetory_server; GRANT CONNECT ON DATABASE fleetory_signer TO fleetory_signer;')
-        lab.admin('fleetory', 'CREATE SCHEMA platform AUTHORIZATION fleetory_migrator; REVOKE ALL ON SCHEMA public FROM PUBLIC; SET ROLE fleetory_migrator; CREATE TABLE platform.audit_events(action text); CREATE TABLE platform."__EFMigrationsHistory"("ProductVersion" text); CREATE TABLE platform.admin_certificate_registrations(id int); INSERT INTO platform.audit_events VALUES(\'fixture\'); RESET ROLE; GRANT USAGE ON SCHEMA platform TO fleetory_server; GRANT SELECT,INSERT ON platform.audit_events TO fleetory_server; GRANT SELECT ON platform."__EFMigrationsHistory",platform.admin_certificate_registrations TO fleetory_server;')
-        lab.admin('fleetory_signer', 'CREATE SCHEMA signer AUTHORIZATION fleetory_signer_owner; REVOKE ALL ON SCHEMA public FROM PUBLIC; SET ROLE fleetory_signer_owner; CREATE TABLE signer.signing_requests(id int); CREATE TABLE signer.signing_results(id int); CREATE TABLE signer.signing_rejections(id int); CREATE TABLE signer.client_certificate_revocations(id int); INSERT INTO signer.signing_results VALUES(1); RESET ROLE; GRANT USAGE ON SCHEMA signer TO fleetory_signer; GRANT SELECT,INSERT ON signer.signing_requests,signer.signing_results,signer.signing_rejections TO fleetory_signer; GRANT SELECT ON signer.client_certificate_revocations TO fleetory_signer;')
+        seed_synthetic(lab)
         record = lab.exercise()
     finally:
         lab.cleanup()
