@@ -67,14 +67,25 @@ privileges, maximum duration, refusal rules and cleanup. Obtain explicit consent
 for that scope. DB-copy consent is not permission for private keys or provider
 credentials, and a prepared plan is not a grant.
 
-A minimal later preflight can use 13 existing local public/PKI/policy files,
-including three server leaf private keys, while regenerating both target DB
-connection strings and using disposable audit/Transit credential placeholders.
-That requires a new specific original-material grant. It must not read source
-passwords/tokens, CA/client/state-signing private keys or seal shares, renew
-source grants, activate original issuers, repeat source-root recovery or contact
-the VPS. Original policy/public-key loading alone does not prove caller validity,
-Transit-key continuity, credential lease validity or backend access.
+A separately approved one-time preflight at tool revision
+`e59170732ad08c4366f9d683887274fd912e0ee1` accepted both native builders using
+13 retained local public/PKI/policy files, including three server leaf private
+keys. Both target DB connection strings and the audit/Transit credential
+placeholders were regenerated: four slots, with no source passwords or tokens
+read. All ten public files were validated before private-key reads; public CA
+and leaf pins matched the retained metadata. The original files were unchanged.
+The operation took **15.718 seconds**; no listeners were observed and the owned
+worker/tmpfs were removed. An independent PID1 expiry with Docker AutoRemove
+also bounded the worker to 3300 seconds. No original host disk copy was created.
+The one-operation grant is consumed; this record is not permission to repeat it.
+
+The operation did not start service hosts, open a database, contact a backend or
+the VPS, read CA/client/state-signing private keys or seal shares, renew source
+grants, activate an original issuer or repeat source-root recovery. Original
+policy/public-key loading does not prove current caller admission, revocation,
+Transit-key continuity, credential lease validity or backend authentication.
+The original-material run used exactly two positive Build/Dispose probes; the
+25 refusal cases remain generated-only checks and were not repeated on originals.
 
 Full service startup, common recovery point, human login, physical Agent trust,
 revocation, independent WORM/key custody/approvals and full RPO/RTO remain open.
