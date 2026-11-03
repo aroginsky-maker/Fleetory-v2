@@ -54,6 +54,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Fleetory.Security.Infrastru
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Fleetory.CommandSigner.Host", "src\Fleetory.CommandSigner.Host\Fleetory.CommandSigner.Host.csproj", "{ECFD07A6-E23A-4C0D-8AB5-DB001D23AAB5}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RecoveryConfiguration", "eng\RecoveryConfiguration\RecoveryConfiguration.csproj", "{7B521198-FA25-4253-B74A-3B7635334D5B}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -164,6 +166,10 @@ Global
 		{ECFD07A6-E23A-4C0D-8AB5-DB001D23AAB5}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{ECFD07A6-E23A-4C0D-8AB5-DB001D23AAB5}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{ECFD07A6-E23A-4C0D-8AB5-DB001D23AAB5}.Release|Any CPU.Build.0 = Release|Any CPU
+		{7B521198-FA25-4253-B74A-3B7635334D5B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{7B521198-FA25-4253-B74A-3B7635334D5B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{7B521198-FA25-4253-B74A-3B7635334D5B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{7B521198-FA25-4253-B74A-3B7635334D5B}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

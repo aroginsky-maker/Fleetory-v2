@@ -88,4 +88,6 @@ not establish external routing/firewall policy, deployed certificate equality,
 production trust distribution, mTLS client authorization or application startup.
 It does not join historical identity/provider snapshots into a common recovery
 point or verify human login, physical Agent trust, independent WORM/custody or
-full-system RPO/RTO. Phase 7 remains open and PR #2 remains draft.
+full-system RPO/RTO. Next use the separately scoped
+[configuration/File-provider preflight](RecoveryConfiguration.md). Phase 7
+remains open and PR #2 remains draft.
