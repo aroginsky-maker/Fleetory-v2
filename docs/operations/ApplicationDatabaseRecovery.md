@@ -32,6 +32,10 @@ hashes are produced inside PostgreSQL; rows and SQL diagnostics are not printed.
 Role passwords and LOGIN recovery are excluded. Disposable roles are created
 NOLOGIN, without superuser, role/database creation, replication or BYPASSRLS.
 
+The later [target-only LOGIN/SCRAM exercise](RuntimeLoginRecovery.md) verifies
+fresh sandbox credentials and runtime permissions separately. It does not
+reinterpret these historical inventory hashes as original-password recovery.
+
 Preserve dump ownership and ACL entries when restoring into the isolated
 cluster. Create the approved role names before `pg_restore --create`; do not
 substitute a counts-only check or grant broad runtime permissions to make a
