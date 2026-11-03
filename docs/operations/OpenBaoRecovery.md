@@ -99,6 +99,52 @@ hashes, status and stated limitations. A passing fixture is not an actual pilot
 snapshot or recovery-quorum, independent-custody, audit-retention or full-system
 acceptance record. It does not establish post-expiry behavior across arbitrary
 production downtime.
+
+### Expired credentials and target-only replacement
+
+The synthetic fixture also captures a live, nonrenewable 20-second signer
+credential and tests its read/renewal denials after expiry on the restored node.
+It then rehearses a fresh restricted credential without renewing that captured
+identity. Both node IDs, the retained signing public key/version/settings and
+the original one-hour token expiry references remain checked.
+
+The Docker-free `OpenBaoTargetCredential.Tests.ps1` contract runs on Windows and
+Linux: two valid leases and nine refusals, including a lifetime one tick above
+300 seconds, excess/default policy, renewable/non-orphan credentials and a
+source/unrestored target. Duration uses the precise `issue_time`/`expire_time`
+pair: provider processing can shorten the effective lifetime, while any amount
+above 300 seconds is rejected. Integer-second `creation_time` is not an exact
+duration reference.
+
+Legacy root generation is disabled on both nodes initially. The fixture rejects
+the source role/ID as a recovery-window target. Only its already-restored owned
+target can temporarily enable `disable_unauthed_generate_root_endpoints=false`
+on its loopback TLS listener. The generated fixture share completes one root
+attempt; OTP, share and token values stay in bounded process I/O/memory rather
+than arguments or result JSON. The decoder follows the
+[version-pinned OpenBao encoding](https://github.com/openbao/openbao/blob/v2.7.1/sdk/helper/roottoken/decode.go).
+
+The target root creates a five-minute, nonrenewable orphan with no default
+policy: the fixed Transit key read/sign paths, self lookup and self revocation.
+Root revocation must return an explicit 403 before restricted use. A restart
+closes the recovery window, restores the default 405 and preserves the new
+token's identity, creation/absolute expiry and decreasing TTL. Key/policy/token
+management and renewal remain denied. The token verifies the unchanged key and
+one non-command signature, is denied on the synthetic source, then is revoked
+and must return 403. The recovered root is also denied on that source. Public
+results are checked against generated credential canaries; owned targets are
+removed even on failure.
+
+OpenBao 2.7.1 exposes separate
+[legacy and authenticated root-generation APIs](https://github.com/openbao/openbao/blob/v2.7.1/website/content/docs/api/system/generate-root.mdx);
+the [listener guard](https://openbao.org/docs/configuration/listener/tcp/)
+defaults to closed. This test is not a production recovery controller or
+permission to change a real listener. An actual provider plan still needs exact
+artifact/share scope, approved provider/DR placement, revocation reconciliation,
+bounded target administration/token issuance and explicit current consent.
+Never unseal real provider state on the operator workstation or repeat the
+completed source-root recovery under this fixture's synthetic scope.
+
 ## Actual pilot operations
 
 Prepare and review the executable fixture and recovery evidence before

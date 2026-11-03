@@ -2,6 +2,7 @@
 # Disposable, synthetic OpenBao Raft recovery acceptance. Never targets operator state.
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+& (Join-Path $PSScriptRoot 'OpenBaoTargetCredential.Tests.ps1')
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $tlsFactory = Join-Path $PSScriptRoot 'PilotDisposableTls.ps1'
 $image = 'ghcr.io/openbao/openbao:2.7.1@sha256:6d2b93856e3fcf7b18ad855a0b51eaba474dc8b79cf554379ea32034797d2acf'
@@ -20,12 +21,18 @@ $snapshotToken = $null
 $snapshot = $null
 $sourceKey = $null
 $restoredKey = $null
+$expiredToken = $null
+$script:credentialCanaries = [Collections.Generic.List[string]]::new()
+$script:credentialRecoveryStage = 'not-started'
+$script:lastForbiddenCode = 0
+$script:credentialLeaseDiagnostic = $null
 $stage = 'preflight'
 $safeDetail = ''
 $successJson = $null
 $script:forceRestoreClaimed = $false
 $captureStreamScript = Join-Path $PSScriptRoot 'PilotCaptureStream.ps1'
 . $captureStreamScript
+. (Join-Path $PSScriptRoot 'OpenBaoTargetCredential.ps1')
 function Assert-True([bool] $Condition, [string] $Message) {
     if (-not $Condition) { throw $Message }
 }
@@ -184,7 +191,9 @@ function Write-ContainerFile([string] $Id, [string] $Path, [byte[]] $Bytes) {
     if ($result.ExitCode -ne 0) { throw 'Could not write synthetic container material.' }
 }
 
-function Start-Bao([string] $Id, [string] $Role) {
+function Start-Bao([string] $Id, [string] $Role, [switch] $RecoveryWindow) {
+    if ($RecoveryWindow) { Assert-RecoveryCredentialTarget $Id $Role }
+    $rootEndpointDisabled = if ($RecoveryWindow) { 'false' } else { 'true' }
     $node = $Role + '-' + $session
     $config = @"
 ui = false
@@ -198,6 +207,7 @@ storage "raft" {
 listener "tcp" {
   address = "127.0.0.1:8200"
   cluster_address = "127.0.0.1:8201"
+  disable_unauthed_generate_root_endpoints = $rootEndpointDisabled
   tls_cert_file = "/tmp/server.crt"
   tls_key_file = "/tmp/server.key"
 }
@@ -273,6 +283,7 @@ function Get-Data([string] $Id, [string] $Token, [string[]] $Arguments) {
 function Assert-Forbidden([string] $Id, [string] $Token, [string[]] $Arguments, [string] $Label) {
     $result = Invoke-Bao $Id $Arguments $Token -AllowFailure
     $text = $result.Stdout + "`n" + $result.Stderr
+    $script:lastForbiddenCode = if ($text -match '(?i)Code:\s*([0-9]{3})') { [int]$Matches[1] } else { 0 }
     Assert-True ($result.ExitCode -ne 0 -and $text -match '(?i)Code:\s*403') "$Label did not return explicit HTTP 403."
 }
 
@@ -443,6 +454,11 @@ try {
     Assert-Signature $sourceId $signToken $sourceKey $challenge
     $signerBefore = Get-Data $sourceId $signToken @('read','-format=json','auth/token/lookup-self')
     $snapshotBefore = Get-Data $sourceId $snapshotToken @('read','-format=json','auth/token/lookup-self')
+    $expiredResponse = Invoke-AuthenticatedJson $sourceId $sourceRoot @('write','-format=json','auth/token/create-orphan',
+        'policies=fixture-signer','no_default_policy=true','ttl=20s','explicit_max_ttl=20s','renewable=false')
+    $expiredToken = [string]$expiredResponse.auth.client_token
+    $expiredBefore = Get-Data $sourceId $expiredToken @('read','-format=json','auth/token/lookup-self')
+    Assert-True ($expiredBefore.ttl -gt 0 -and $expiredBefore.creation_ttl -eq 20 -and $expiredBefore.renewable -eq $false) 'Short source credential was not live before capture.'
     $stage = 'revoke-source-root'
     $null = Invoke-Bao $sourceId @('token','revoke','-self') $sourceRoot
     Assert-Forbidden $sourceId $sourceRoot @('read','transit/keys/fleetory-recovery-fixture') 'Revoked source root'
@@ -452,6 +468,7 @@ try {
     Assert-True ($snapshotResult.ExitCode -eq 0) 'Raft snapshot save failed.'
     $snapshot = Get-SnapshotBytes $sourceId
     Assert-True ($snapshot.Length -ge 4096 -and $snapshot.Length -le 67108864) 'Raft snapshot size was outside the fixture bound.'
+    Assert-True ([DateTimeOffset]::UtcNow -lt [DateTimeOffset]::Parse([string]$expiredBefore.expire_time)) 'Short credential expired before the snapshot was captured.'
     $trustedHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($snapshot)).ToLowerInvariant()
     Assert-SnapshotReference $snapshot $trustedHash
     $stage = 'tamper-and-target-ownership-guards'
@@ -545,6 +562,15 @@ try {
             $pair[0].creation_time -ceq $pair[1].creation_time -and $pair[0].expire_time -ceq $pair[1].expire_time -and
             [int64]$pair[1].ttl -le [int64]$pair[0].ttl) 'Restored orphan token identity or lifetime changed.'
     }
+    $stage = 'target-credential-ownership-refusals'
+    $wrongRoleDenied = $wrongIdDenied = $false
+    try { Assert-RecoveryCredentialTarget $sourceId 'source' }
+    catch { $wrongRoleDenied = $_.Exception.Message -ceq 'Credential recovery requires the already-restored fixture target.' }
+    try { Assert-RecoveryCredentialTarget $sourceId 'restore' }
+    catch { $wrongIdDenied = $_.Exception.Message -match '^Container isolation checks failed: .*roleAndSession' }
+    Assert-True ($wrongRoleDenied -and $wrongIdDenied) 'Synthetic source was accepted as a credential-recovery target.'
+    $stage = 'expired-and-fresh-target-credential-proof'
+    $credentialRecovery = Test-RestoredTargetCredential $targetId $sourceId $sourceCluster $sourceShare $expiredToken $expiredBefore $restoredKey $challenge
     $stage = 'audit-proof'
     $sourceAudit = Invoke-Docker @('exec',$sourceId,'/bin/busybox','stat','-c','%a:%u:%g','/openbao/data/audit.log')
     $targetAudit = Invoke-Docker @('exec',$targetId,'/bin/busybox','stat','-c','%a:%u:%g','/openbao/data/audit.log')
@@ -584,11 +610,22 @@ try {
         hostMounts = 0
         humanApprovalVerified = $false
         productionCustodyVerified = $false
+        shortCredentialCapturedWhileLive = $true
+        recoveryWindowSourceRoleAndIdRefused = $true
+        targetCredentialRecovery = $credentialRecovery
+        credentialCanariesAbsent = $true
     } | ConvertTo-Json -Compress
+    foreach ($secret in (@($sourceShare,$sourceRoot,$targetShare,$targetRoot,$signToken,$snapshotToken,$expiredToken) + $script:credentialCanaries.ToArray())) {
+        if ($secret.Length -gt 12 -and $successJson.Contains($secret,[StringComparison]::Ordinal)) { throw 'Synthetic credential appeared in the public result.' }
+    }
 }
 catch {
     $message = [string]$_.Exception.Message
     $safeDetail = 'type=' + $_.Exception.GetType().Name + ';line=' + [string]$_.InvocationInfo.ScriptLineNumber
+    if ($stage -ceq 'expired-and-fresh-target-credential-proof' -and $script:credentialRecoveryStage -cmatch '^[a-z-]{1,64}$') {
+        $safeDetail += ';credential=' + $script:credentialRecoveryStage + ';lastDenialCode=' + $script:lastForbiddenCode
+        if ($null -ne $script:credentialLeaseDiagnostic) { $safeDetail += ';leaseMetadata=' + ($script:credentialLeaseDiagnostic | ConvertTo-Json -Compress) }
+    }
     if ($message -match '^Container isolation checks failed: ([A-Za-z,]+)$') { $safeDetail = 'isolation=' + $Matches[1] }
     if ($message -match '^OpenBao active state mismatch: ([A-Za-z0-9=;]+)$') { $safeDetail = 'status=' + $Matches[1] }
     if ($message -match '^Native process result shape was invalid: (count=[0-9]+;types=[A-Za-z0-9.,]+)$') { $safeDetail = $Matches[1] }
@@ -606,7 +643,8 @@ catch {
     $sourceShare=$null; $sourceRoot=$null; $targetShare=$null; $targetRoot=$null
     if ($null -ne $sourceKey) { $sourceKey.Key.Dispose() }
     if ($null -ne $restoredKey) { $restoredKey.Key.Dispose() }
-    $signToken=$null; $snapshotToken=$null; $snapshot=$null
+    $signToken=$null; $snapshotToken=$null; $snapshot=$null; $expiredToken=$null
+    $script:credentialCanaries.Clear()
     if ($null -ne $material) {
         $material.RootCertificatePem=$null; $material.ServerCertificatePem=$null; $material.ServerPrivateKeyPem=$null
     }

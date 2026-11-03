@@ -114,6 +114,10 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/SonarIssueGate.Tests.ps1
 
+      - name: Verify provider target credential lease contract on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/OpenBaoTargetCredential.Tests.ps1
+
       - name: Verify root-only Windows TLS chain
         shell: pwsh
         run: ./eng/verify-windows-tls-chain.ps1
