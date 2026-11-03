@@ -11,6 +11,7 @@ import sys
 import time
 import unittest
 import uuid
+from unittest.mock import patch
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO / 'eng/pilot'))
@@ -75,6 +76,32 @@ class ContractTests(unittest.TestCase):
             with self.assertRaises(Exception):
                 contract.evidence(*args)
 
+    def test_fixture_refuses_existing_resources_before_volume_mutation(self):
+        lab = PostgresLab()
+        calls = []
+        def lookup(args, **_):
+            calls.append(args)
+            output = b''
+            code = 0
+            if args[:2] == ['context', 'show']:
+                output = b'default'
+            elif args[:2] == ['context', 'inspect']:
+                output = b'unix:///var/run/docker.sock'
+            elif args[0] == 'info':
+                output = b'linux'
+            elif args[:2] == ['container', 'inspect']:
+                code = 1
+            return subprocess.CompletedProcess([], code, output, b'')
+        with patch.dict(os.environ, {}, clear=True), patch.object(lab, 'call', side_effect=lookup):
+            with self.assertRaises(Exception):
+                lab.preflight()
+        self.assertFalse(any(args[:2] == ['volume', 'create'] or args[0] in ('run', 'create') for args in calls))
+        lab.name = 'source-container'
+        with patch.object(lab, 'call') as invoked:
+            with self.assertRaises(Exception):
+                lab.preflight()
+            invoked.assert_not_called()
+
 
 class PostgresLab:
     def __init__(self):
@@ -94,6 +121,8 @@ class PostgresLab:
         return result
 
     def preflight(self):
+        contract.archive.require(re.fullmatch(r'[a-f0-9]{32}', self.identity) and
+                                 self.name == 'fleetory-login-' + self.identity and self.volume == self.name + '-data')
         if os.environ.get('DOCKER_HOST') or os.environ.get('DOCKER_CONTEXT'):
             raise RuntimeError('Unreviewed Docker overrides refused.')
         self.context = self.call(['context', 'show']).stdout.decode().strip()
@@ -101,6 +130,8 @@ class PostgresLab:
         endpoint = self.call(['context', 'inspect', self.context, '--format', '{{.Endpoints.docker.Host}}']).stdout.decode().strip()
         contract.archive.require(endpoint in ('unix:///var/run/docker.sock', 'npipe:////./pipe/dockerDesktopLinuxEngine', 'npipe:////./pipe/docker_engine'))
         contract.archive.require(self.call(['info', '--format', '{{.OSType}}']).stdout.strip() == b'linux')
+        contract.archive.require(self.call(['container', 'inspect', self.name], check=False).returncode != 0)
+        contract.archive.require(self.call(['volume', 'inspect', self.volume], check=False).returncode != 0)
         self.call(['image', 'inspect', PG, '--format', '{{.Id}}'])
         self.call(['image', 'inspect', PYTHON, '--format', '{{.Id}}'])
 
@@ -123,6 +154,8 @@ class PostgresLab:
         self.preflight()
         self.call(['volume', 'create', '--label', LABEL + '=' + self.identity, self.volume])
         self.volume_created = True
+        meta = json.loads(self.call(['volume', 'inspect', self.volume]).stdout)[0]
+        contract.archive.require(meta['Name'] == self.volume and meta['Labels'].get(LABEL) == self.identity)
         self.call(['run', '--rm', '--network', 'none', '--read-only', '--cap-drop', 'ALL', '--cap-add', 'CHOWN',
                    '--security-opt', 'no-new-privileges', '--memory', '128m', '--mount',
                    'type=volume,src=' + self.volume + ',dst=/data', PYTHON, 'python', '-c',

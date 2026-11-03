@@ -16,7 +16,7 @@ python -B tests/Fleetory.Tools.Tests/recovery_login_tests.py
 python -B tests/Fleetory.Tools.Tests/recovery_login_tests.py --docker
 ```
 
-The first command runs six portable contracts without Docker. The second adds
+The first command runs seven portable contracts without Docker. The second adds
 real PostgreSQL 18.6 authentication on synthetic data. The Linux CI job runs
 both; Windows runs the portable contracts. Real dumps and their evidence remain
 outside Git and CI. Explicit local Docker context/endpoint checks refuse remote
@@ -27,7 +27,9 @@ overrides; cached PostgreSQL/Python digest pins are required.
 The sandbox uses `network=none`, no published ports or source binds, a read-only
 root, UID/GID 999, no capabilities, no-new-privileges and fixed CPU/memory/PID
 limits. A uniquely labelled data volume is initialized by a separate, bounded,
-network-none ownership helper with only CHOWN capability. PostgreSQL and client
+network-none ownership helper with only CHOWN capability. Resource names must
+be fresh; existing containers/volumes are refused before mutation, and the new
+volume's ownership label is checked before CHOWN. PostgreSQL and client
 temporary paths use tmpfs. Cleanup checks exact ownership before deleting only
 the sandbox container and volume. There is no global prune or source operation.
 
