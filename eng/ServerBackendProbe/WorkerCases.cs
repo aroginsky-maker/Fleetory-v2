@@ -53,9 +53,9 @@ internal static class WorkerCases
             stop.Start();
             await worker.StopAsync(stopDeadline.Token).WaitAsync(stopDeadline.Token);
             stop.Stop();
-            if (worker.ExecuteTask is not { IsCompleted: true, IsFaulted: false })
-            { throw new InvalidOperationException("Native worker shutdown incomplete."); }
         }
+        if (worker.ExecuteTask is not { IsCompleted: true, IsFaulted: false })
+        { throw new InvalidOperationException("Native worker shutdown incomplete."); }
         var drained = mode is "worker-drain" or "worker-restart";
         RequireQueue(await ReadQueueAsync(platform, cancellation), drained ? 0 : 1, mode == "worker-retain" ? 1 : 0);
         var after = drained ? HealthStatus.Healthy : HealthStatus.Degraded;
