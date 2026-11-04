@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><UseAppHost>false</UseAppHost></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Fleetory.CommandSigning/Fleetory.CommandSigning.csproj" />
+  </ItemGroup>
+</Project>

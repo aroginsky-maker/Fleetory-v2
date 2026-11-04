@@ -94,6 +94,11 @@ cleanup. It used the provider CLI in one isolated target; neither native
 service builder nor host authenticated to that backend. Its consumed one-shot
 grant cannot be reused to start services or copy further PKI/credentials.
 
+The [generated native Signer backend fixture](NativeSignerBackend.md) now
+exercises the real signing component over HTTPS against a disposable OpenBao
+key and restricted credentials. It adds native authentication/refusal evidence;
+it does not authenticate an original token or start the complete Signer host.
+
 Full service startup, common recovery point, human login, physical Agent trust,
 revocation, independent WORM/key custody/approvals and full RPO/RTO remain open.
 Phase 7 is not complete and PR #2 remains draft.

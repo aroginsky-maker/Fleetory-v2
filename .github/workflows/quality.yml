@@ -126,6 +126,10 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/ProviderRecoveryController.Tests.ps1
 
+      - name: Verify native signer worker boundary on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativeSignerBoundary.Tests.ps1
+
       - name: Verify root-only Windows TLS chain
         shell: pwsh
         run: ./eng/verify-windows-tls-chain.ps1
@@ -344,6 +348,10 @@ jobs:
       - name: Verify isolated OpenBao Raft recovery
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/OpenBaoRaftRecovery.Tests.ps1
+
+      - name: Verify generated native signer backend authentication
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativeSignerBackend.Tests.ps1
 
       - name: Enforce zero Sonar issues
         shell: pwsh
