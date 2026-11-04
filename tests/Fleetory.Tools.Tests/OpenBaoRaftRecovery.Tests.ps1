@@ -3,6 +3,7 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 & (Join-Path $PSScriptRoot 'OpenBaoTargetCredential.Tests.ps1')
+& (Join-Path $PSScriptRoot 'ProviderRecoveryTransport.Tests.ps1')
 $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $tlsFactory = Join-Path $PSScriptRoot 'PilotDisposableTls.ps1'
 $image = 'ghcr.io/openbao/openbao:2.7.1@sha256:6d2b93856e3fcf7b18ad855a0b51eaba474dc8b79cf554379ea32034797d2acf'
@@ -30,83 +31,19 @@ $stage = 'preflight'
 $safeDetail = ''
 $successJson = $null
 $script:forceRestoreClaimed = $false
-$captureStreamScript = Join-Path $PSScriptRoot 'PilotCaptureStream.ps1'
-. $captureStreamScript
 . (Join-Path $PSScriptRoot 'OpenBaoTargetCredential.ps1')
 function Assert-True([bool] $Condition, [string] $Message) {
     if (-not $Condition) { throw $Message }
 }
 
-function Invoke-NativeBytes([string] $Executable, [string[]] $Arguments, [byte[]] $InputBytes = $null, [int] $TimeoutSeconds = 90) {
-    $start = [Diagnostics.ProcessStartInfo]::new()
-    $start.FileName = $Executable
-    $start.UseShellExecute = $false
-    $start.CreateNoWindow = $true
-    $start.RedirectStandardOutput = $true
-    $start.RedirectStandardError = $true
-    $start.RedirectStandardInput = $true
-    if ($TimeoutSeconds -lt 1 -or $TimeoutSeconds -gt 120) { throw 'Native process timeout is outside bounds.' }
-    foreach ($argument in $Arguments) { $null = $start.ArgumentList.Add($argument) }
-    $process = [Diagnostics.Process]::new()
-    $process.StartInfo = $start
-    $stdout = [Fleetory.Tests.PilotCaptureStream]::new(67108864)
-    $stderr = [Fleetory.Tests.PilotCaptureStream]::new(1048576)
-    $stopwatch = [Diagnostics.Stopwatch]::StartNew()
-    $processStarted = $false
-    $stdoutTask = $null
-    $stderrTask = $null
-    $writeTask = $null
-    try {
-        if (-not $process.Start()) { throw 'Native process did not start.' }
-        $processStarted = $true
-        $stdoutTask = $process.StandardOutput.BaseStream.CopyToAsync($stdout)
-        $stderrTask = $process.StandardError.BaseStream.CopyToAsync($stderr)
-        if ($null -ne $InputBytes -and $InputBytes.Length -gt 0) {
-            $writeTask = $process.StandardInput.BaseStream.WriteAsync($InputBytes,0,$InputBytes.Length)
-            $inputClosed = $false
-        } else {
-            $process.StandardInput.Close()
-            $writeTask = [Threading.Tasks.Task]::CompletedTask
-            $inputClosed = $true
-        }
-        while ($true) {
-            if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) { throw 'Native process deadline exceeded.' }
-            if ($stdoutTask.IsFaulted -or $stderrTask.IsFaulted -or $writeTask.IsFaulted) { throw 'Bounded native process I/O failed.' }
-            if ($writeTask.IsCompleted -and -not $inputClosed) {
-                $null = $writeTask.GetAwaiter().GetResult()
-                $process.StandardInput.Close()
-                $inputClosed = $true
-            }
-            if ($process.HasExited -and $stdoutTask.IsCompleted -and $stderrTask.IsCompleted -and $writeTask.IsCompleted) { break }
-            Start-Sleep -Milliseconds 20
-        }
-        $null = $stdoutTask.GetAwaiter().GetResult()
-        $null = $stderrTask.GetAwaiter().GetResult()
-        $null = $writeTask.GetAwaiter().GetResult()
-        return [pscustomobject]@{
-            ExitCode = $process.ExitCode
-            StdoutBytes = $stdout.ToArray()
-            StderrBytes = $stderr.ToArray()
-            Stdout = [Text.Encoding]::UTF8.GetString($stdout.ToArray())
-            Stderr = [Text.Encoding]::UTF8.GetString($stderr.ToArray())
-        }
-    }
-    finally {
-        if ($processStarted -and -not $process.HasExited) {
-            try { $process.Kill($true) } catch { }
-            try { $null = $process.WaitForExit(2000) } catch { }
-        }
-        foreach ($task in @($stdoutTask,$stderrTask,$writeTask)) {
-            if ($null -ne $task -and -not $task.IsCompleted) { try { $null = $task.Wait(2000) } catch { } }
-        }
-        $stopwatch.Stop()
-        $stdout.Dispose()
-        $stderr.Dispose()
-        $process.Dispose()
-    }
-}
+. (Join-Path $PSScriptRoot 'PilotNativeProcess.ps1')
+. (Join-Path $repoRoot 'eng/pilot/ProviderRecoveryTransport.ps1')
 function Invoke-Docker([string[]] $Arguments, [byte[]] $InputBytes = $null, [int] $TimeoutSeconds = 90, [switch] $AllowFailure) {
-    $nativeResults = @(Invoke-NativeBytes 'docker' $Arguments $InputBytes $TimeoutSeconds)
+    if ($IsLinux) {
+        $nativeResults = @(Invoke-NativeBytes '/bin/sh' @('-c',(Get-ProviderDockerShellCommand $Arguments)) $InputBytes $TimeoutSeconds)
+    } else {
+        $nativeResults = @(Invoke-NativeBytes 'docker' (@('--context','desktop-linux') + $Arguments) $InputBytes $TimeoutSeconds)
+    }
     if ($nativeResults.Count -ne 1 -or $null -eq $nativeResults[0] -or $nativeResults[0] -is [array]) {
         $types = @($nativeResults | ForEach-Object { if ($null -eq $_) { 'null' } else { $_.GetType().Name } }) -join ','
         throw ('Native process result shape was invalid: count=' + $nativeResults.Count + ';types=' + $types)
@@ -141,13 +78,7 @@ function New-Container([string] $Role) {
     $name = 'fleetory-bao-' + $Role + '-' + $session.Replace('-', '')
     $record = [pscustomobject]@{ Id=$null; Name=$name; Role=$Role; StartedUtc=[DateTimeOffset]::UtcNow }
     $records.Add($record)
-    $arguments = @('run','-d','--name',$name,'--label',"com.fleetory.openbao-recovery.role=$Role",
-        '--label',"com.fleetory.openbao-recovery.session=$session",'--network','none','--user','100:1000',
-        '--read-only','--tmpfs','/tmp:rw,noexec,nosuid,nodev,size=32m,uid=100,gid=1000,mode=0700',
-        '--tmpfs','/openbao/data:rw,noexec,nosuid,nodev,size=256m,uid=100,gid=1000,mode=0700',
-        '--memory','384m','--cpus','0.30','--pids-limit','128','--cap-drop','ALL',
-        '--security-opt','no-new-privileges:true','-e','BAO_ADDR=https://127.0.0.1:8200',
-        '-e','BAO_CACERT=/tmp/ca.pem','--entrypoint','/bin/sh',$image,'-c','exec /bin/busybox sleep 36000')
+    $arguments = Get-ProviderContainerArguments $session $Role
     $result = Invoke-Docker $arguments
     $id = $result.Stdout.Trim()
     if ($id -notmatch '^[0-9a-f]{64}$') { throw 'Docker returned an invalid owned container identifier.' }
@@ -171,6 +102,9 @@ function Assert-Owned([string] $Id, [string] $Role) {
         identity = $info['Id'] -eq $Id -and $info['Config']['Image'] -eq $image
         roleAndSession = $labels['com.fleetory.openbao-recovery.role'] -eq $Role -and $labels['com.fleetory.openbao-recovery.session'] -eq $session
         runtimeIdentity = $info['Config']['User'] -eq '100:1000'
+        independentExpiry = $info['HostConfig']['AutoRemove'] -eq $true -and
+            (@($info['Config']['Entrypoint']) -join '|') -ceq '/bin/sh' -and
+            (@($info['Config']['Cmd']) -join '|') -ceq '-c|exec /bin/busybox sleep 3300'
         readonlyNetwork = $info['HostConfig']['ReadonlyRootfs'] -eq $true -and $info['HostConfig']['NetworkMode'] -eq 'none' -and $info['HostConfig']['Privileged'] -eq $false
         droppedCapabilities = @($info['HostConfig']['CapDrop'] | Where-Object { $_ -eq 'ALL' }).Count -eq 1
         namespaces = $info['HostConfig']['PidMode'] -eq '' -and $info['HostConfig']['IpcMode'] -eq 'private'
@@ -608,6 +542,9 @@ try {
         network = 'none'
         publishedPorts = 0
         hostMounts = 0
+        independentTargetExpirySeconds = 3300
+        targetAutoRemove = $true
+        linuxRemoteShellTransport = $IsLinux
         humanApprovalVerified = $false
         productionCustodyVerified = $false
         shortCredentialCapturedWhileLive = $true

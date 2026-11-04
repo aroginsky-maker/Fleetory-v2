@@ -145,6 +145,50 @@ bounded target administration/token issuance and explicit current consent.
 Never unseal real provider state on the operator workstation or repeat the
 completed source-root recovery under this fixture's synthetic scope.
 
+## Transport preparation for a future provider target
+
+`eng/pilot/ProviderRecoveryTransport.ps1` renders public arguments; it does not
+connect to a host or execute a recovery. The SSH model checks a bounded,
+single-entry Ed25519 host ledger against both an independently retained file
+hash and host fingerprint. It accepts a canonical IPv4 destination and explicit
+identity path. It disables ambient SSH configuration, proxies, agent forwarding,
+password authentication, connection sharing and automatic host-key updates.
+An offline `ssh -G` test checks how the installed OpenSSH parses these options,
+including a ledger path containing spaces. No identity file is needed for that
+test. See the primary [OpenSSH client reference](https://man.openbsd.org/ssh)
+and [configuration reference](https://man.openbsd.org/ssh_config).
+
+The remote command quotes every public argument as a literal POSIX shell word
+and selects `/usr/bin/docker --host unix:///var/run/docker.sock` explicitly.
+Only public arguments belong in this renderer: it cannot determine whether a
+caller has mistakenly put a secret in an argument. Tokens, shares, TLS keys and
+snapshot bytes must travel through bounded binary stdin. The shared native
+process helper rejects input above 64 MiB, limits stdout to 64 MiB and stderr to
+1 MiB, enforces a 1–120 second per-process deadline, kills the local process tree
+on failure and clears Docker endpoint/context/TLS environment overrides in the
+child. It emits no raw response on a transport failure.
+
+The generated-only Raft fixture exercises the same argument model through a
+real POSIX shell on Linux, and an explicit Docker Desktop Linux context on
+Windows. Its source and restore containers now use `--rm` with a PID 1 lifetime
+of 3,300 seconds. Their independent 55-minute expiry does not rely on the
+operator remaining connected. Runtime inspection verifies this command,
+automatic removal and the existing network-none, no-port, no-host-mount,
+non-root, read-only and resource restrictions. Normal ownership-checked cleanup
+still runs immediately. Portable tests cover literal shell metacharacters on
+Linux, offline SSH options, malformed or changed host pins, binary stdin,
+timeouts and both output limits. All data is newly generated for the fixture.
+
+This completes transport and disposable-lifetime preparation only. A concrete
+remote recovery controller still needs a closed operation allowlist, fresh
+target/source-ID guards, capacity checks before original input reads, a durable
+one-attempt marker, a whole-operation deadline, protected pin continuity during
+execution and verified remote cleanup after interruption. Rendering an SSH
+request is not authority to execute it. The real snapshot/share operation
+remains unapproved, and original state must remain inside the approved
+provider/DR boundary. These checks do not prove real service authentication,
+current revocation reconciliation or full-system recovery.
+
 ## Actual pilot operations
 
 Prepare and review the executable fixture and recovery evidence before
