@@ -36,11 +36,14 @@ function ConvertTo-ProviderShellCommand([string[]] $PublicArguments) {
 }
 
 function Get-ProviderDockerShellCommand([string[]] $PublicArguments) {
-    return ConvertTo-ProviderShellCommand (@('/usr/bin/docker','--host','unix:///var/run/docker.sock') + $PublicArguments)
+    # No inherited Docker config, proxy injection, credential helper or alternate daemon.
+    $wrapper = 'set -eu; unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH DOCKER_API_VERSION DOCKER_CUSTOM_HEADERS; umask 077; d=$(/usr/bin/mktemp -d /tmp/fleetory-provider-cli.XXXXXXXXXX); trap ''/bin/rmdir -- "$d" || exit 125'' EXIT; trap ''exit 129'' HUP; trap ''exit 130'' INT; trap ''exit 143'' TERM; /usr/bin/docker --config "$d" --host unix:///var/run/docker.sock "$@"'
+    return ConvertTo-ProviderShellCommand (@('/bin/sh','-c',$wrapper,'provider-docker') + $PublicArguments)
 }
 
 function Get-ProviderSshArguments([string] $Address, [string] $KnownHostsFile, [string] $KnownHostsSha256,
-    [string] $HostFingerprint, [string] $IdentityFile, [string[]] $PublicDockerArguments) {
+    [string] $HostFingerprint, [string] $IdentityFile, [string[]] $PublicDockerArguments, [switch] $HostPreflight) {
+    if ($HostPreflight -and $null -ne $PublicDockerArguments -and $PublicDockerArguments.Count -gt 0) { throw 'Ambiguous SSH request.' }
     $ip = $null
     if (-not [Net.IPAddress]::TryParse($Address,[ref]$ip) -or
         $ip.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork -or $ip.ToString() -cne $Address) {
@@ -80,7 +83,11 @@ function Get-ProviderSshArguments([string] $Address, [string] $KnownHostsFile, [
     }
     finally { $stream.Dispose() }
     # OpenSSH config path tokens need quotes inside the -o argument, even with ProcessStartInfo.ArgumentList.
-    $ledgerOption = 'UserKnownHostsFile="' + $KnownHostsFile.Replace('\','/') + '"'
+    $ledgerPath = if ($IsWindows) { $KnownHostsFile.Replace('\','/') } else { $KnownHostsFile.Replace('\','\\') }
+    $ledgerOption = 'UserKnownHostsFile="' + $ledgerPath + '"'
+    $command = if ($HostPreflight) {
+        ConvertTo-ProviderShellCommand @('/bin/sh','-c','set -eu; /usr/bin/awk ''/^MemAvailable:/ {print $2}'' /proc/meminfo; /bin/date -u +%s')
+    } else { Get-ProviderDockerShellCommand $PublicDockerArguments }
     return @('-F','none','-T','-o','BatchMode=yes','-o','IdentitiesOnly=yes','-o','IdentityAgent=none',
         '-o','ForwardAgent=no','-o','ClearAllForwardings=yes','-o','PermitLocalCommand=no',
         '-o','ProxyCommand=none','-o','ProxyJump=none','-o','StrictHostKeyChecking=yes',
@@ -89,5 +96,5 @@ function Get-ProviderSshArguments([string] $Address, [string] $KnownHostsFile, [
         '-o','ControlPath=none','-o','ControlPersist=no','-o','ConnectTimeout=10',
         '-o','ConnectionAttempts=1','-o','ServerAliveInterval=5','-o','ServerAliveCountMax=2',
         '-o','PasswordAuthentication=no','-o','KbdInteractiveAuthentication=no',
-        '-i',$IdentityFile,'-l','ubuntu','--',$Address,(Get-ProviderDockerShellCommand $PublicDockerArguments))
+        '-i',$IdentityFile,'-l','ubuntu','--',$Address,$command)
 }

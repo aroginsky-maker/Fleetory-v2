@@ -179,15 +179,86 @@ still runs immediately. Portable tests cover literal shell metacharacters on
 Linux, offline SSH options, malformed or changed host pins, binary stdin,
 timeouts and both output limits. All data is newly generated for the fixture.
 
-This completes transport and disposable-lifetime preparation only. A concrete
-remote recovery controller still needs a closed operation allowlist, fresh
-target/source-ID guards, capacity checks before original input reads, a durable
-one-attempt marker, a whole-operation deadline, protected pin continuity during
-execution and verified remote cleanup after interruption. Rendering an SSH
-request is not authority to execute it. The real snapshot/share operation
-remains unapproved, and original state must remain inside the approved
-provider/DR boundary. These checks do not prove real service authentication,
-current revocation reconciliation or full-system recovery.
+Rendering an SSH request is not authority to execute it. The renderer does not
+enforce the recovery operation policy; use the controller below. The real
+snapshot/share operation still needs its own explicit grant, and original state
+must remain inside the approved provider/DR boundary.
+
+## Closed remote recovery controller
+
+`eng/pilot/Invoke-ProviderRecovery.ps1` is the real-operation entry point. It
+accepts only a reviewed absolute plan path, its SHA-256 and a separate current
+grant file. It provides no local-original or synthetic-mode switch. Original
+provider state is supported only from the Windows operator over pinned SSH to
+the approved provider/DR host. Linux CI invokes the same controller engine with
+newly generated inputs and a fixture transport; it never invokes this real
+entry point, reads operator state or connects to the VPS.
+
+The approved plan fixes the host ledger/fingerprint, SSH identity path, exact
+snapshot/share references, cluster/SPKI/key, audit profile, state directory,
+operation UUID and nine executable source-file hashes. The grant must bind that
+plan hash, UUID, scope and exact one-target permission, with an explicit user
+decision reference and a validity period no longer than one hour. The controller
+checks this record; it does not independently authenticate a human decision or
+create permission. The operator must record an actual scoped user approval.
+The real entry holds Windows read locks on plan, grant, executable files and
+host ledger, checks operator write ACLs and rechecks code hashes before loading
+the frozen runtime. These locks are not a defense against a compromised
+administrator or independent custody evidence.
+
+Before any original read, it durably consumes a `CreateNew` attempt journal in
+the plan's fixed state directory, checks host clock/capacity and the already
+available pinned image, rejects an existing target name, creates one fresh
+target, and verifies its ID, UUID labels, image, creation window and isolation.
+The state directory is part of the approved plan; copying the plan to another
+directory cannot silently reset the attempt. Failed attempts remain consumed.
+There is no retry/reset option, source-container adoption or image pull.
+Remote Docker calls use an empty disposable CLI configuration, an explicit
+local Unix socket and cleared endpoint/TLS/API overrides. No source provider
+API, environment, configuration or mounted data is read.
+
+The command allowlist permits only the fixed bootstrap, restore, target root,
+restricted probe and cleanup sequence. Snapshot and share are each read once;
+the snapshot is hash-checked before and after transfer. Normal foreign-seal
+restore must deny with 400 before the one force restore. The original share has
+at most four submissions to this same target: initial restored unseal, restart
+into the temporary loopback-only recovery window, one root quorum update, and
+restart back to the closed window. It is never an argument or journal value.
+Fresh target TLS is generated in memory; no original CA/client/server private
+key is copied. The original audit profile uses `pilot-file` with a private
+`/openbao/data/audit.log`, matching the retained historical DR procedure.
+Incompatibility or changed public/key references fail the attempt.
+
+Exactly one nonrenewable orphan probe token has no default policy and at most
+300 seconds of explicit lifetime. Its temporary `fixture-recovered-signer`
+policy allows only the retained Transit key read/sign and self lookup/revoke.
+Root must be revoked and denied with 403 before the restricted probe. The
+recovery endpoint must return 405 after restart; token identity and absolute
+expiry must survive that restart without extension. Management/renewal denials,
+retained public key/version/flags, one fixed domain-separated **non-command**
+signature and final token revocation must pass. No Fleetory command envelope
+or production authentication token is issued.
+
+Work stops after 3,240 seconds, with bounded cleanup allowed through 3,540
+seconds and never beyond grant expiry. Every process also has its own bounded
+deadline. Creation requires at least 3,480 seconds of remaining grant validity,
+including allowance for a delayed run response. The target's PID 1 still
+expires independently after 3,300 seconds and auto-removes its tmpfs. Cleanup
+may inspect only the unique target name and remove only the exact ID whose
+name/image/UUID/creation metadata match. Lost responses do not authorize a
+second restore or root attempt. Unconfirmed cleanup is reported as failure,
+with the attempt retained; it is never promoted to verified recovery.
+
+Portable tests exercise malformed/expired/mismatched grants and code/host pins,
+durable/repeated attempts, unsafe commands, source/unowned IDs, container
+mutations, one-use force/root/probe/signature rules, share-use bounds,
+insufficient memory/time and disconnected cleanup. The generated-only native
+fixture executes the controller against real OpenBao and injects response loss
+after actual restored-fixture unseal, then verifies deletion of its owned
+target. This simulates a lost transport response; it is not a real VPS SSH
+failure test. Actual SSH authentication, actual retained material, current
+revocations, real service backend authentication, common-point/VPS-loss recovery
+and full-system RPO/RTO remain separate acceptance work.
 
 ## Actual pilot operations
 

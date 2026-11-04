@@ -52,7 +52,9 @@ $session = [Guid]::NewGuid().ToString('D')
     }
     Assert-TransportRefusal { ConvertTo-ProviderShellCommand @(("'"*16384),("'"*16384)) } 'Public command is outside bounds.'
     $ssh = @(Get-ProviderSshArguments @pin -PublicDockerArguments @('inspect','not-a-live-target'))
-    Assert-Transport ($ssh[-1] -ceq "'/usr/bin/docker' '--host' 'unix:///var/run/docker.sock' 'inspect' 'not-a-live-target'") 'explicit daemon'
+    Assert-Transport ($ssh[-1].Contains('/usr/bin/docker --config',[StringComparison]::Ordinal) -and
+        $ssh[-1].Contains('--host unix:///var/run/docker.sock',[StringComparison]::Ordinal) -and
+        $ssh[-1].EndsWith("'inspect' 'not-a-live-target'",[StringComparison]::Ordinal)) 'isolated config and explicit daemon'
     # -G parses installed OpenSSH configuration without connecting or opening an identity key.
     $parsed = Invoke-NativeBytes 'ssh' (@('-G') + $ssh) -TimeoutSeconds 10
     Assert-Transport ($parsed.ExitCode -eq 0) 'installed OpenSSH accepts rendered options'

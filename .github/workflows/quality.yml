@@ -122,6 +122,10 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/ProviderRecoveryTransport.Tests.ps1
 
+      - name: Verify provider recovery controller refusals on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ProviderRecoveryController.Tests.ps1
+
       - name: Verify root-only Windows TLS chain
         shell: pwsh
         run: ./eng/verify-windows-tls-chain.ps1
