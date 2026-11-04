@@ -5,8 +5,10 @@ restore. It publishes `eng/ServerBackendProbe`, constructs the production
 `FleetoryApplication` with its File provider and nine fresh configuration slots,
 and resolves actual services through application DI. Agent/Admin gateways remain
 configured with separate generated root CAs; required OIDC and immudb export stay
-enabled. The full HTTP host, OIDC login, background export worker and issuer are
-not started. No retained data, PKI, passwords, provider share or VPS is read.
+enabled. The HTTP host, OIDC login and issuer remain unstarted. The later
+[worker lifecycle stage](NativeOutboxWorker.md) starts/stops only the actual
+registered background exporter. No retained data, PKI, passwords, provider share
+or VPS is read.
 
 ## PostgreSQL
 
@@ -54,6 +56,11 @@ separate from PostgreSQL checks. The additional
 [native outbox pump acceptance](NativeOutboxPump.md) now exercises actual
 PostgreSQL-to-immudb delivery, refusal, retry and deduplication. It does not claim
 signed checkpoints, WORM or retained audit continuity.
+
+The subsequent [native worker lifecycle](NativeOutboxWorker.md) checks automatic
+delivery, failed claim/sink paths, degraded-to-healthy backlog, bounded shutdown,
+post-stop enqueue and delivery after a new process starts. It adds two worker
+events; the final fixture verifies four total immudb keys, all at revision one.
 
 ## Boundary and cleanup
 

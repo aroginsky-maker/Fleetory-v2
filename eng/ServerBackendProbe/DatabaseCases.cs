@@ -47,9 +47,7 @@ internal static class DatabaseCases
                 return "db-ready";
             }
             var writer = scoped.GetRequiredService<IAuditWriter>();
-            var record = new AuditRecord(new ActorReference("fixture:operator", ActorKind.Person), "Fixture.Database.Read",
-                new AuditTarget("Fixture", "generated"), new CorrelationId("fixture-server"), DateTimeOffset.UnixEpoch,
-                new Dictionary<string, string> { ["Decision"] = "Allowed" });
+            var record = CreateRecord(mode == "db-worker-write" ? "Fixture.Worker.Read" : "Fixture.Database.Read");
             if (mode == "db-rollback")
             {
                 await using var transaction = await platform.Database.BeginTransactionAsync(cancellation);
@@ -71,7 +69,12 @@ internal static class DatabaseCases
         { return "db-privilege"; }
     }
 
-    private static async Task VerifyAsync(DbContext context, string table, CancellationToken cancellation)
+    internal static AuditRecord CreateRecord(string action) => new(
+        new ActorReference("fixture:operator", ActorKind.Person), action,
+        new AuditTarget("Fixture", "generated"), new CorrelationId("fixture-server"), DateTimeOffset.UnixEpoch,
+        new Dictionary<string, string> { ["Decision"] = "Allowed" });
+
+    internal static async Task VerifyAsync(DbContext context, string table, CancellationToken cancellation)
     {
         await using var proof = context.Database.GetDbConnection().CreateCommand();
         proof.CommandText = "SELECT current_user='fleetory_server' AND session_user=current_user AND current_database()='fleetory' " +

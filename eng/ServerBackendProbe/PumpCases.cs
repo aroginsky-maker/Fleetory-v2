@@ -11,11 +11,7 @@ internal static class PumpCases
         PlatformDbContext platform, CancellationToken cancellation)
     {
         await platform.Database.OpenConnectionAsync(cancellation);
-        await using var proof = platform.Database.GetDbConnection().CreateCommand();
-        proof.CommandText = "SELECT current_user='fleetory_server' AND session_user=current_user AND current_database()='fleetory' " +
-            "AND ssl AND version IN ('TLSv1.2','TLSv1.3') FROM pg_stat_ssl WHERE pid=pg_backend_pid();";
-        if (await proof.ExecuteScalarAsync(cancellation) is not true)
-        { throw new InvalidOperationException("Pump fixture identity failed."); }
+        await DatabaseCases.VerifyAsync(platform, "platform.person_projections", cancellation);
         var type = typeof(PlatformDbContext).Assembly.GetType("Fleetory.Platform.Audit.PostgreSqlAuditExportPump", throwOnError: true)!;
         var method = type.GetMethod("ExportNextBatchAsync", [typeof(int), typeof(CancellationToken)])
             ?? throw new InvalidOperationException("Native pump entry point unavailable.");

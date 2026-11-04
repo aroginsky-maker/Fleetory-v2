@@ -5,7 +5,7 @@ Set-StrictMode -Version Latest
 foreach($test in @('NativeJournalBoundary.Tests.ps1','NativeSignerBoundary.Tests.ps1','NativeAuditBoundary.Tests.ps1','NativeWorkerRuntime.Tests.ps1')){& (Join-Path $PSScriptRoot $test)}
 $repoRoot=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 foreach($helper in @('PilotNativeProcess.ps1','../../eng/pilot/ProviderRecoveryTransport.ps1','../../eng/pilot/ProviderRecoveryPolicy.ps1',
-    'PilotDisposableTls.ps1','NativeSignerFixture.ps1','NativeJournalFixture.ps1','NativeAuditFixture.ps1','NativeWorkerRuntime.ps1','NativeOutboxPipeline.ps1')){. (Join-Path $PSScriptRoot $helper)}
+    'PilotDisposableTls.ps1','NativeSignerFixture.ps1','NativeJournalFixture.ps1','NativeAuditFixture.ps1','NativeWorkerRuntime.ps1','NativeOutboxPipeline.ps1','NativeOutboxWorker.ps1')){. (Join-Path $PSScriptRoot $helper)}
 $session=[Guid]::NewGuid().ToString('D');$dbId=$auditId=$worker=$null;$dbStarted=$auditStarted=$null;$dbImageId=$auditImageId=$null;$dbClaimed=$auditClaimed=$false
 $publicRoot=Join-Path $repoRoot ('artifacts/native-server-'+$session);$proof=$null;$stage='publish'
 $auditBuildClaimed=$false
@@ -178,9 +178,10 @@ try{
     $null=Invoke-ServerProbe 'audit-database' 'audit-database';$null=Invoke-ServerProbe 'audit-tls' 'audit-tls' -WrongTrust
     $null=Invoke-ServerProbe 'audit-verify' 'audit-verify' $packet;Assert-DatabaseCount 1
     $stage='outbox-pipeline';$pipeline=Invoke-NativeOutboxPipeline
+    $stage='outbox-worker';$workerLifecycle=Invoke-NativeOutboxWorker
     $proof=[ordered]@{schema='fleetory.native-server-backend.v1';verified=$true;nativeDbContexts=2;nativeHealthChecksAccepted=2;
         auditOutboxCommitVerified=$true;explicitRollbackVerified=$true;partialWriteRollbackVerified=$true;databaseRefusals=9;
-        auditPublicationsAccepted=2;singleRevisionVerified=$true;auditKeyCount=2;directSinkAuditKeyCount=1;auditFieldsVerified=10;auditRefusals=5;pipeline=$pipeline;originalMaterialUsed=$false;
+        auditPublicationsAccepted=2;singleRevisionVerified=$true;auditKeyCount=4;directSinkAuditKeyCount=1;auditFieldsVerified=10;auditRefusals=5;pipeline=$pipeline;workerLifecycle=$workerLifecycle;originalMaterialUsed=$false;
         sourceVpsAccessed=$false;httpHostStarted=$false;issuerActivated=$false;publishedPorts=0;workerOnlyLoopback=$true;
         postgresBoundaryRefusals=16;workerBoundaryRefusals=23;auditBoundaryRefusals=17;sharedWorkerRefusals=9;fullSystemRecoveryVerified=$false;phase7Complete=$false}
 }

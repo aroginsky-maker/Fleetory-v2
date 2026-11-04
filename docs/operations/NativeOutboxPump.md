@@ -11,7 +11,9 @@ The probe resolves the exact internal pump type from the Platform assembly and
 its actual application-DI registration. It invokes the fixed public
 `ExportNextBatchAsync(int, CancellationToken)` entry point with batch size one.
 No production visibility or implementation is changed for the probe. The HTTP
-host and background `AuditExportWorker` remain unstarted. Every pump call first
+host and background `AuditExportWorker` remain unstarted during this pump-only
+stage. A separate [worker lifecycle stage](NativeOutboxWorker.md) then starts the
+registered exporter. Every direct pump call first
 proves native PostgreSQL role/session/database identity and verified TCP TLS.
 
 ## Refusal, retry and acknowledgement
@@ -58,7 +60,8 @@ Five native pump calls cover the refused claim, two failed deliveries, one
 successful acknowledgement and one empty batch. The output separately records
 the two queue privilege refusals, two- and four-second schedules, cleared leases,
 durable write before acknowledgement failure, ten cross-store fields, one
-pipeline revision, two total keys and empty final outbox. Unclassified exceptions
+pipeline revision, two total keys at this stage and empty outbox. The subsequent
+worker stage adds two separately verified events. Unclassified exceptions
 or unexpected delivery counts fail the fixture. Credentials enter only through
 private File-provider slots or bounded stdin; native output remains categorical
 and checked for generated secret canaries. Existing runtime ownership, resource

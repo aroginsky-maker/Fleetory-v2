@@ -21,7 +21,8 @@ internal static class Program
         "db-update", "db-delete", "db-schema", "db-temp", "db-owner", "db-queue-delete",
         "audit-prepare", "audit-publish", "audit-repeat", "audit-conflict", "audit-password", "audit-readonly",
         "audit-database", "audit-tls", "audit-verify", "audit-health",
-        "pump-auth", "pump-lostack", "pump-deliver", "pump-empty", "pump-update", "pipeline-pending", "pipeline-verify"
+        "pump-auth", "pump-lostack", "pump-deliver", "pump-empty", "pump-update", "pipeline-pending", "pipeline-verify",
+        "db-worker-write", "worker-denied", "worker-retain", "worker-drain", "worker-restart", "worker-verify"
     };
 
     public static async Task<int> Main(string[] args)
@@ -49,7 +50,7 @@ internal static class Program
     private static async Task<object> RunAsync(string mode)
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(18));
-        if (mode is "pipeline-pending" or "pipeline-verify")
+        if (mode is "pipeline-pending" or "pipeline-verify" or "worker-verify")
         {
             await PipelineFixtureControl.ExecuteAsync(mode, deadline.Token);
             return new { category = mode, httpHostStarted = false, issuerActivated = false };
@@ -68,6 +69,7 @@ internal static class Program
         { throw new InvalidOperationException("Invalid generated fixture binding."); }
         await using var app = FleetoryApplication.Build([
             "--environment=Production", "--Logging:LogLevel:Default=None",
+            "--Logging:WorkerObservation:LogLevel:Default=Error",
             "--Fleetory:Secrets:Provider=File", "--Fleetory:Secrets:Directory=" + PrivateDirectory,
             "--Fleetory:Web:Port=19580", "--Fleetory:AgentGateway:Enabled=true", "--Fleetory:AgentGateway:Port=19581",
             "--Fleetory:AdminGateway:Enabled=true", "--Fleetory:AdminGateway:Port=19582", "--Fleetory:AdminGateway:BindAddress=127.0.0.1",
@@ -85,6 +87,13 @@ internal static class Program
             var sql = platform.GetService<IMigrator>().GenerateScript() + core.GetService<IMigrator>().GenerateScript();
             if (sql.Length is < 1 or > 131072) { throw new InvalidOperationException("Unbounded fixture schema."); }
             return new { category = "schema", sql };
+        }
+        if (mode.StartsWith("worker-", StringComparison.Ordinal))
+        {
+            var lifecycle = await WorkerCases.ExecuteAsync(mode, app.Services, scope.ServiceProvider, platform, deadline.Token);
+            if (!app.Environment.IsProduction() || app.Lifetime.ApplicationStarted.IsCancellationRequested)
+            { throw new InvalidOperationException("Fixture HTTP host started."); }
+            return new { category = mode, lifecycle, httpHostStarted = false, issuerActivated = false };
         }
         var category = mode switch
         {

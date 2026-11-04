@@ -114,6 +114,11 @@ The [generated native outbox pump](NativeOutboxPump.md) additionally checks
 delivery failure, a durable write with failed queue acknowledgement, native
 retry scheduling and deduplication across PostgreSQL and immudb.
 
+The [registered worker lifecycle](NativeOutboxWorker.md) adds automatic delivery,
+claim/sink failure, actual backlog health, bounded stop, post-stop enqueue and
+delivery after a new native worker process starts. It starts only this background
+component; the HTTP host and issuer remain unstarted.
+
 Full service startup, common recovery point, human login, physical Agent trust,
 revocation, independent WORM/key custody/approvals and full RPO/RTO remain open.
 Phase 7 is not complete and PR #2 remains draft.
