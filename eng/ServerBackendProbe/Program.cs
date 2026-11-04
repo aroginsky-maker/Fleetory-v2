@@ -18,9 +18,10 @@ internal static class Program
     private static readonly HashSet<string> Modes = new(StringComparer.Ordinal)
     {
         "schema", "db-ready", "db-write", "db-rollback", "db-atomic", "db-password", "db-tls", "db-plaintext",
-        "db-update", "db-delete", "db-schema", "db-temp", "db-owner",
+        "db-update", "db-delete", "db-schema", "db-temp", "db-owner", "db-queue-delete",
         "audit-prepare", "audit-publish", "audit-repeat", "audit-conflict", "audit-password", "audit-readonly",
-        "audit-database", "audit-tls", "audit-verify", "audit-health"
+        "audit-database", "audit-tls", "audit-verify", "audit-health",
+        "pump-auth", "pump-lostack", "pump-deliver", "pump-empty", "pump-update", "pipeline-pending", "pipeline-verify"
     };
 
     public static async Task<int> Main(string[] args)
@@ -48,6 +49,11 @@ internal static class Program
     private static async Task<object> RunAsync(string mode)
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(18));
+        if (mode is "pipeline-pending" or "pipeline-verify")
+        {
+            await PipelineFixtureControl.ExecuteAsync(mode, deadline.Token);
+            return new { category = mode, httpHostStarted = false, issuerActivated = false };
+        }
         if (mode is "audit-prepare" or "audit-verify" or "audit-health")
         {
             await AuditFixtureControl.ExecuteAsync(mode, deadline.Token);
@@ -80,9 +86,14 @@ internal static class Program
             if (sql.Length is < 1 or > 131072) { throw new InvalidOperationException("Unbounded fixture schema."); }
             return new { category = "schema", sql };
         }
-        var category = mode.StartsWith("db-", StringComparison.Ordinal)
-            ? await DatabaseCases.ExecuteAsync(mode, app.Services, scope.ServiceProvider, platform, core, deadline.Token)
-            : await AuditCases.ExecuteAsync(mode, app.Services, deadline.Token);
+        var category = mode switch
+        {
+            _ when mode.StartsWith("db-", StringComparison.Ordinal) =>
+                await DatabaseCases.ExecuteAsync(mode, app.Services, scope.ServiceProvider, platform, core, deadline.Token),
+            _ when mode.StartsWith("pump-", StringComparison.Ordinal) =>
+                await PumpCases.ExecuteAsync(mode, app.Services, platform, deadline.Token),
+            _ => await AuditCases.ExecuteAsync(mode, app.Services, deadline.Token)
+        };
         if (!app.Environment.IsProduction() || app.Lifetime.ApplicationStarted.IsCancellationRequested)
         { throw new InvalidOperationException("Fixture host started."); }
         return new { category, httpHostStarted = false, issuerActivated = false };

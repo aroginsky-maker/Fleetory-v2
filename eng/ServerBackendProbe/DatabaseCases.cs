@@ -17,6 +17,7 @@ internal static class DatabaseCases
     {
         ["db-update"] = "UPDATE platform.audit_events SET action=action WHERE FALSE;",
         ["db-delete"] = "DELETE FROM platform.audit_events WHERE FALSE;",
+        ["db-queue-delete"] = "DELETE FROM platform.audit_export_queue WHERE FALSE;",
         ["db-schema"] = "CREATE SCHEMA forbidden_fixture;",
         ["db-temp"] = "CREATE TEMP TABLE forbidden_fixture(id integer);",
         ["db-owner"] = "SET ROLE fleetory_owner;"

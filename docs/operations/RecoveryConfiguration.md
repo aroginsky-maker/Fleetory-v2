@@ -110,6 +110,10 @@ registered EF database contexts, the native audit/outbox writer and the immudb
 sink with disposable data and credentials. Its transactional/refusal evidence
 does not authenticate original service credentials or start the HTTP host.
 
+The [generated native outbox pump](NativeOutboxPump.md) additionally checks
+delivery failure, a durable write with failed queue acknowledgement, native
+retry scheduling and deduplication across PostgreSQL and immudb.
+
 Full service startup, common recovery point, human login, physical Agent trust,
 revocation, independent WORM/key custody/approvals and full RPO/RTO remain open.
 Phase 7 is not complete and PR #2 remains draft.

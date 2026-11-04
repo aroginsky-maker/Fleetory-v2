@@ -50,8 +50,10 @@ all ten event fields. Wrong password, read-only writer, unavailable configured
 database and wrong CA are refused through their exact native categories.
 Authentication/privilege negatives use a distinct event ID, so an already stored
 event cannot conceal an unauthorized write. Five audit refusal cases are
-separate from PostgreSQL checks. This fixture does not claim signed checkpoints,
-WORM, retained audit continuity or a full outbox-pump-to-immudb delivery.
+separate from PostgreSQL checks. The additional
+[native outbox pump acceptance](NativeOutboxPump.md) now exercises actual
+PostgreSQL-to-immudb delivery, refusal, retry and deduplication. It does not claim
+signed checkpoints, WORM or retained audit continuity.
 
 ## Boundary and cleanup
 
