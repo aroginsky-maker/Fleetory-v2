@@ -1,7 +1,7 @@
 #requires -Version 7.3
 # Shared generated-only worker lifecycle; caller's Invoke-Docker is local and bounded.
 function Publish-NativeProbe([string]$Repository,[string]$Project,[string]$Directory){
-    Assert-NativeSigner ($Project -cin @('SignerBackendProbe','SignerJournalProbe')) 'probe-project'
+    Assert-NativeSigner ($Project -cin @('SignerBackendProbe','SignerJournalProbe','ServerBackendProbe')) 'probe-project'
     $null=Get-ProviderOrdinaryItem $Directory
     $published=Join-Path $Directory 'publish'
     $result=Invoke-NativeBytes 'dotnet' @('publish',(Join-Path $Repository ('eng/'+$Project+'/'+$Project+'.csproj')),
@@ -36,6 +36,9 @@ function Start-NativeWorkerContext($Context){
 function Write-NativeWorkerFile($Context,[string]$Path,[byte[]]$Bytes){
     $names=@('infrastructure-ca','signer-policy','signer-postgresql','signer-server-ca','signer-server-cert','signer-server-key','signer-transit-public-key','signer-transit-token')
     $allowed=@('/tmp/ca.pem','/tmp/wrong-ca.pem')+@($names|ForEach-Object {'/run/fleetory-native/signer/'+$_})
+    $serverNames=@('fleetory-postgresql','agent-gateway-root-ca','agent-gateway-server-cert','agent-gateway-server-key',
+        'admin-gateway-root-ca','admin-gateway-server-cert','admin-gateway-server-key','audit-immudb-password','infrastructure-ca')
+    $allowed+=@($serverNames|ForEach-Object {'/run/fleetory-native/server/'+$_})
     Assert-NativeSigner ($Path -cin $allowed -and $Bytes.Length -gt 0 -and $Bytes.Length -le 16384) 'worker-file-slot'
     Read-NativeWorkerContext $Context
     $null=Invoke-Docker @('exec','-i',$Context.Id,'/bin/sh','-c','umask 077; cat > "$1"','private-fixture',$Path) $Bytes
@@ -43,7 +46,7 @@ function Write-NativeWorkerFile($Context,[string]$Path,[byte[]]$Bytes){
     Assert-NativeSigner ($stat.Stdout.Trim() -ceq '600:1654:1') 'worker-file-permissions'
 }
 function Invoke-NativeWorker($Context,[string]$Assembly,[string]$Mode,[byte[]]$Packet,[string[]]$Canaries,[switch]$WrongTrust){
-    Assert-NativeSigner ($Assembly -cin @('SignerBackendProbe','SignerJournalProbe') -and $Mode -cmatch '^[a-z-]{1,32}$' -and
+    Assert-NativeSigner ($Assembly -cin @('SignerBackendProbe','SignerJournalProbe','ServerBackendProbe') -and $Mode -cmatch '^[a-z-]{1,32}$' -and
         ($null -eq $Packet -or $Packet.Length -le 16385)) 'worker-probe-input'
     Read-NativeWorkerContext $Context
     $ca=if($WrongTrust){'/tmp/wrong-ca.pem'}else{'/tmp/ca.pem'}

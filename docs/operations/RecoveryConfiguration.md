@@ -105,6 +105,11 @@ against PostgreSQL. It verifies fresh TLS/SCRAM credentials and unsafe-role
 refusals while leaving the HTTP host unstarted. Server database/audit bindings
 and original-role authentication remain separate acceptance work.
 
+The [generated native Server fixture](NativeServerBackend.md) exercises both
+registered EF database contexts, the native audit/outbox writer and the immudb
+sink with disposable data and credentials. Its transactional/refusal evidence
+does not authenticate original service credentials or start the HTTP host.
+
 Full service startup, common recovery point, human login, physical Agent trust,
 revocation, independent WORM/key custody/approvals and full RPO/RTO remain open.
 Phase 7 is not complete and PR #2 remains draft.

@@ -136,6 +136,10 @@ jobs:
           ./tests/Fleetory.Tools.Tests/NativeJournalBoundary.Tests.ps1
           ./tests/Fleetory.Tools.Tests/NativeWorkerRuntime.Tests.ps1
 
+      - name: Verify native Server audit boundary on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativeAuditBoundary.Tests.ps1
+
       - name: Verify root-only Windows TLS chain
         shell: pwsh
         run: ./eng/verify-windows-tls-chain.ps1
@@ -362,6 +366,10 @@ jobs:
       - name: Verify generated native signer journal readiness
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/NativeJournalBackend.Tests.ps1
+
+      - name: Verify generated native Server database and audit components
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativeServerBackend.Tests.ps1
 
       - name: Enforce zero Sonar issues
         shell: pwsh
