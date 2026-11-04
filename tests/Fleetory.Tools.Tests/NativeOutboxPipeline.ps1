@@ -47,8 +47,8 @@ function Wait-PipelineDue{
     }finally{$deadline.Stop()}
 }
 function Invoke-NativeOutboxPipeline{
-    $event=Get-PipelineEventJson
-    $packet=[Text.Encoding]::UTF8.GetBytes(('{"admin":"'+$secrets.admin+'","expected":'+$event+'}'))
+    $pipelineEvent=Get-PipelineEventJson
+    $packet=[Text.Encoding]::UTF8.GetBytes(('{"admin":"'+$secrets.admin+'","expected":'+$pipelineEvent+'}'))
     Assert-True ($packet.Length -le 4096) 'Pipeline verification packet too large.'
     Assert-PipelineState 1 0
     $null=Invoke-ServerProbe 'pipeline-pending' 'pipeline-pending' $packet
@@ -75,7 +75,7 @@ function Invoke-NativeOutboxPipeline{
     $null=Invoke-ServerProbe 'pipeline-verify' 'pipeline-verify' $packet
     $null=Invoke-ServerProbe 'pump-empty' 'pump-empty';Assert-PipelineState 0
     $null=Invoke-ServerProbe 'pipeline-verify' 'pipeline-verify' $packet
-    Assert-True ((Get-PipelineEventJson) -ceq $event) 'Pipeline changed the immutable PostgreSQL event.'
+    Assert-True ((Get-PipelineEventJson) -ceq $pipelineEvent) 'Pipeline changed the immutable PostgreSQL event.'
     return [ordered]@{nativePumpCalls=5;queueUpdateRefusals=1;queueDeleteRefusals=1;failedDeliveriesRetained=2;nativeRetryDelaysSeconds=@(2,4);
         clearedLeasesVerified=$true;durableWriteBeforeAckFailureVerified=$true;retryDelivered=1;emptyBatchDelivered=0;
         pipelineEvents=1;pipelineEventRevision=1;crossStoreFieldsVerified=10;totalAuditKeys=2;queueRowsAfterAck=0;immutableAuditEventUnchanged=$true}
