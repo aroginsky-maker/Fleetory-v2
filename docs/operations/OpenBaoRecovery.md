@@ -235,7 +235,7 @@ restricted probe and cleanup sequence. Snapshot and share are each read once;
 while `snapshotInputLoads`/`shareInputLoads` count completed callback loads.
 An ACL denial can consume a read slot without opening the file or loading its
 content. Do not report that slot as a verified byte read.
-the snapshot is hash-checked before and after transfer. Normal foreign-seal
+The snapshot is hash-checked before and after transfer. Normal foreign-seal
 restore must deny with 400 before the one force restore. The original share has
 at most four submissions to this same target: initial restored unseal, restart
 into the temporary loopback-only recovery window, one root quorum update, and
@@ -277,9 +277,10 @@ insufficient memory/time and disconnected cleanup. The generated-only native
 fixture executes the controller against real OpenBao and injects response loss
 after actual restored-fixture unseal, then verifies deletion of its owned
 target. This simulates a lost transport response; it is not a real VPS SSH
-failure test. Actual SSH authentication, actual retained material, current
-revocations, real service backend authentication, common-point/VPS-loss recovery
-and full-system RPO/RTO remain separate acceptance work.
+failure test. The separately approved retained-material operation is recorded
+below. Current revocations, real service backend authentication,
+common-point/VPS-loss recovery and full-system RPO/RTO remain separate
+acceptance work.
 
 Before requesting a real one-shot grant, verify the existing SSH identity's
 Windows permissions and the pinned public host/Docker metadata commands.
@@ -290,6 +291,13 @@ file's ACL, with rollback SDDL retained outside Git, restored SSH access.
 Read-only diagnostics also confirmed that this VPS requires its existing
 noninteractive sudo path for Docker. The consumed attempt remains retained;
 these prerequisite repairs do not authorize replaying it or reusing its grant.
+The next attempt reached a fresh bootstrap target but rejected a legitimate
+Windows OWNER RIGHTS ACE before opening the snapshot. Its claimed snapshot
+read slot was not a completed content load; the share was not read. The empty
+target was removed and that grant remained consumed. Correcting owner-aware
+ACL validation and preflighting all local input metadata did not change the
+original snapshot/share ACLs. A third, separately approved operation used a new
+plan hash and UUID; its result is recorded below.
 
 ## Actual pilot operations
 
@@ -370,6 +378,57 @@ This establishes same-VPS logical provider-key recovery. Independent production
 custody/quorum, separate-host/VPS-loss recovery, full configuration/PKI and
 revocation reconciliation, critical audit retention and physical-Agent trust
 remain open. Phase 7 and PR #2 remain incomplete.
+
+## Verified actual target-credential recovery - 4 November 2026 UTC
+
+One newly approved operation used controller revision
+`7b72988c161616b7da2a42352ce2984f0a88ab5c`, immutable plan SHA-256
+`b9ea08cce2aca2fac05aad96743010ca63ede5420d9c99671f2c7228debcbffa`
+and operation `4619ed85-fbde-4406-9bc6-a121219f309e`. It completed in
+153.197 seconds on the existing VPS, within its one-hour grant. The prior
+failed attempts and their journals were preserved; none was reset or replayed.
+
+The same retained barrier-encrypted snapshot was loaded once and hash-checked
+locally and after transfer. The original share was loaded once and submitted
+exactly four times to the new owned target. Both completed input-load counters
+were one. Normal restore was rejected before the approved force restore; the
+fresh bootstrap share was rejected before original-share unseal. The historical
+cluster, public signing key and nonexportable Transit version 1 were retained.
+
+The target-only recovery window produced one recovered administrative root and
+one restricted orphan probe token with a maximum 300-second, nonrenewable
+lease and no default policy. The root was revoked and denied with 403 before
+the signature probe. After restarting out of the recovery window, the root
+endpoint returned 405; probe self-lookup preserved token ID, accessor, creation
+time and absolute expiry, with no TTL increase. Four management/renewal attempts
+were denied with 403. One domain-separated non-command signature verified
+against the retained public-key pin. The probe was then revoked and denied
+with 403. These checks do not claim to have waited for its natural expiry or
+validated an old source credential.
+
+The inherited audit profile wrote only to target tmpfs with mode/owner
+`600:100:1000`. The network-none target had no published ports or host mounts;
+its 3,300-second independent lifetime and auto-removal remained in force.
+Immediate deletion and subsequent target absence were verified before success.
+The journal contains, in order, attempt-consumed, target-created,
+acceptance-passed and cleanup-verified. Source provider API calls were zero;
+source-root recovery, original PKI use and production-token issuance were
+excluded. This operation's one-shot permission is now consumed.
+
+Protected execution proof SHA-256:
+`3cd76430d9e257ab1b551251f992c3147028be7806f623249f35c639e45fbe1f`.
+Protected journal SHA-256:
+`ac2ea5b2607680bed9ed1e52410b40dd6f7dc420f79ae8b6f74525d8cea70039`.
+The original files, grant and proof remain outside Git; no private material or
+raw provider response is published here.
+
+This closes the bounded retained-provider target-credential recovery check.
+Actual Signer/Server backend authentication, current admission/revocation
+reconciliation, a common recovery point, VPS-loss recovery, independent
+WORM/custody/approvals, physical Agent trust and full RPO/RTO remain open.
+The 1 November observation about its old credential remains historical; this
+new target token does not retroactively introspect that credential. Phase 7
+and PR #2 remain incomplete.
 
 References: [OpenBao storage/backups](https://openbao.org/docs/concepts/storage/),
 [Integrated Storage](https://openbao.org/docs/internals/integrated-storage/),

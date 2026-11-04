@@ -87,6 +87,13 @@ Transit-key continuity, credential lease validity or backend authentication.
 The original-material run used exactly two positive Build/Dispose probes; the
 25 refusal cases remain generated-only checks and were not repeated on originals.
 
+A separate [retained-provider target-credential recovery](OpenBaoRecovery.md#verified-actual-target-credential-recovery---4-november-2026-utc)
+subsequently verified the historical Transit key, a fresh restricted target
+lease across restart, a non-command signature, token revocation and target
+cleanup. It used the provider CLI in one isolated target; neither native
+service builder nor host authenticated to that backend. Its consumed one-shot
+grant cannot be reused to start services or copy further PKI/credentials.
+
 Full service startup, common recovery point, human login, physical Agent trust,
 revocation, independent WORM/key custody/approvals and full RPO/RTO remain open.
 Phase 7 is not complete and PR #2 remains draft.
