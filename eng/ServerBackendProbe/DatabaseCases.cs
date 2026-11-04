@@ -47,7 +47,13 @@ internal static class DatabaseCases
                 return "db-ready";
             }
             var writer = scoped.GetRequiredService<IAuditWriter>();
-            var record = CreateRecord(mode == "db-worker-write" ? "Fixture.Worker.Read" : "Fixture.Database.Read");
+            var action = mode switch
+            {
+                "db-worker-write" => "Fixture.Worker.Read",
+                "db-host-write" => "Fixture.Host.Read",
+                _ => "Fixture.Database.Read"
+            };
+            var record = CreateRecord(action);
             if (mode == "db-rollback")
             {
                 await using var transaction = await platform.Database.BeginTransactionAsync(cancellation);

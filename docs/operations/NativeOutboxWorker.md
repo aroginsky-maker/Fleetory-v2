@@ -6,7 +6,8 @@
 fixed worker type from the production application's `IHostedService` registrations.
 The fixture calls that instance's `StartAsync` and `StopAsync`; it never calls the
 pump directly in the worker cases. The HTTP host, other hosted services and issuer
-remain unstarted. This is component lifecycle acceptance, not full host startup.
+remain unstarted during these worker cases. A later separate
+[HTTP host stage](NativeServerHost.md) starts the complete application.
 
 The existing fresh PostgreSQL/immudb/worker sandbox, generated TLS, File-provider
 slots, strict role/transport checks and verified cleanup are retained. No original
@@ -51,12 +52,13 @@ pump event are revalidated along with both new worker events: four total keys.
 All three immutable PostgreSQL events must remain unchanged, including the event
 created after worker shutdown.
 
-The result reports four starts/completed stops, maximum observed stop duration,
+The worker-stage result reports four starts/completed stops, maximum observed stop duration,
 claim failure, retained sink failure, degraded-to-healthy backlog, post-stop
 quiescence, new-process delivery, two worker revisions, four final audit keys and
-zero final queue rows. Secret canaries must be absent from probe output.
+zero queue rows at this stage. The later host case adds a fifth key. Secret
+canaries must be absent from probe output.
 
-This does not prove generic-host/Kestrel startup, HTTP readiness routing, process
+This worker-only proof does not establish generic-host/Kestrel startup, HTTP readiness routing, process
 crash or multi-node lease races, original credential/PKI admission, post-restore
 human login, common capture point or whole-VPS recovery. Independent WORM/key
 custody/approvals, physical Agent/current revocations and full RPO/RTO remain

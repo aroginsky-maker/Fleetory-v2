@@ -5,10 +5,11 @@ restore. It publishes `eng/ServerBackendProbe`, constructs the production
 `FleetoryApplication` with its File provider and nine fresh configuration slots,
 and resolves actual services through application DI. Agent/Admin gateways remain
 configured with separate generated root CAs; required OIDC and immudb export stay
-enabled. The HTTP host, OIDC login and issuer remain unstarted. The later
-[worker lifecycle stage](NativeOutboxWorker.md) starts/stops only the actual
-registered background exporter. No retained data, PKI, passwords, provider share
-or VPS is read.
+enabled. The earlier component stages leave the HTTP host unstarted. The
+[worker lifecycle stage](NativeOutboxWorker.md) starts/stops only the registered
+exporter; the subsequent [HTTP host stage](NativeServerHost.md) starts and stops
+the complete application in its loopback-only sandbox. OIDC login and issuer
+remain unstarted. No retained data, PKI, passwords, provider share or VPS is read.
 
 ## PostgreSQL
 
@@ -60,7 +61,10 @@ signed checkpoints, WORM or retained audit continuity.
 The subsequent [native worker lifecycle](NativeOutboxWorker.md) checks automatic
 delivery, failed claim/sink paths, degraded-to-healthy backlog, bounded shutdown,
 post-stop enqueue and delivery after a new process starts. It adds two worker
-events; the final fixture verifies four total immudb keys, all at revision one.
+events; this stage verifies four total immudb keys, all at revision one. The later
+[native HTTP host acceptance](NativeServerHost.md) adds one more event and proves
+actual application lifecycle, health response bodies, public-path filtering and
+closure of all three listeners. The complete fixture finishes with five keys.
 
 ## Boundary and cleanup
 
@@ -103,6 +107,6 @@ attempts all removals after failures, and deletes only its resolved public
 artifact directory. Unknown cleanup never yields a verified result.
 
 This is generated component acceptance, not original credential/PKI admission,
-HTTP/mTLS service startup, post-restore human login, current revocations,
+original HTTP/mTLS service admission, post-restore human login, current revocations,
 common-point or VPS-loss recovery. Physical Agent trust, independent WORM/custody/
 approvals and full RPO/RTO remain open. Phase 7 is incomplete; PR #2 is not merged.

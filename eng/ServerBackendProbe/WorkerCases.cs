@@ -21,10 +21,7 @@ internal static class WorkerCases
         RequireQueue(initial, 1, initialAttempts);
         var before = mode == "worker-restart" ? HealthStatus.Healthy : HealthStatus.Degraded;
         await RequireHealthAsync(root, before, cancellation);
-        var type = typeof(PlatformDbContext).Assembly.GetType("Fleetory.Platform.Audit.AuditExportWorker", throwOnError: true)!;
-        var registered = root.GetServices<IHostedService>().Where(service => service.GetType() == type).ToArray();
-        if (registered.Length != 1 || registered[0] is not BackgroundService worker || worker.ExecuteTask is not null)
-        { throw new InvalidOperationException("Native worker registration drift."); }
+        var worker = GetUnstartedWorker(root);
         using var observation = new WorkerObservation();
         root.GetRequiredService<ILoggerFactory>().AddProvider(observation);
         await worker.StartAsync(cancellation);
@@ -76,7 +73,16 @@ internal static class WorkerCases
             afterStopPendingVerified = mode == "worker-drain" };
     }
 
-    private static async Task<QueueState> ReadQueueAsync(PlatformDbContext platform, CancellationToken cancellation)
+    internal static BackgroundService GetUnstartedWorker(IServiceProvider root)
+    {
+        var type = typeof(PlatformDbContext).Assembly.GetType("Fleetory.Platform.Audit.AuditExportWorker", throwOnError: true)!;
+        var registered = root.GetServices<IHostedService>().Where(service => service.GetType() == type).ToArray();
+        if (registered.Length != 1 || registered[0] is not BackgroundService worker || worker.ExecuteTask is not null)
+        { throw new InvalidOperationException("Native worker registration drift."); }
+        return worker;
+    }
+
+    internal static async Task<QueueState> ReadQueueAsync(PlatformDbContext platform, CancellationToken cancellation)
     {
         await using var command = platform.Database.GetDbConnection().CreateCommand();
         command.CommandText = "SELECT count(*),COALESCE(MAX(attempt_count),0),COALESCE(bool_and(lease_id IS NULL AND leased_until IS NULL),true) FROM platform.audit_export_queue;";
@@ -85,13 +91,13 @@ internal static class WorkerCases
         return new QueueState(reader.GetInt64(0), reader.GetInt32(1), reader.GetBoolean(2));
     }
 
-    private static void RequireQueue(QueueState queue, long rows, int attempts)
+    internal static void RequireQueue(QueueState queue, long rows, int attempts)
     {
         if (queue.Rows != rows || queue.Attempts != attempts || !queue.ClearLease)
         { throw new InvalidOperationException("Worker queue state drift."); }
     }
 
-    private static async Task RequireHealthAsync(IServiceProvider root, HealthStatus expected, CancellationToken cancellation)
+    internal static async Task RequireHealthAsync(IServiceProvider root, HealthStatus expected, CancellationToken cancellation)
     {
         var result = await root.GetRequiredService<HealthCheckService>().CheckHealthAsync(
             registration => registration.Name == "audit_export_backlog", cancellation);
@@ -99,5 +105,5 @@ internal static class WorkerCases
         { throw new InvalidOperationException("Native backlog health drift."); }
     }
 
-    private sealed record QueueState(long Rows, int Attempts, bool ClearLease);
+    internal sealed record QueueState(long Rows, int Attempts, bool ClearLease);
 }

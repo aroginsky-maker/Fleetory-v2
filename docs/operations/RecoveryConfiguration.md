@@ -108,7 +108,8 @@ and original-role authentication remain separate acceptance work.
 The [generated native Server fixture](NativeServerBackend.md) exercises both
 registered EF database contexts, the native audit/outbox writer and the immudb
 sink with disposable data and credentials. Its transactional/refusal evidence
-does not authenticate original service credentials or start the HTTP host.
+does not authenticate original service credentials. Its earlier component stages
+leave the HTTP host unstarted.
 
 The [generated native outbox pump](NativeOutboxPump.md) additionally checks
 delivery failure, a durable write with failed queue acknowledgement, native
@@ -119,6 +120,12 @@ claim/sink failure, actual backlog health, bounded stop, post-stop enqueue and
 delivery after a new native worker process starts. It starts only this background
 component; the HTTP host and issuer remain unstarted.
 
-Full service startup, common recovery point, human login, physical Agent trust,
+The [generated HTTP host stage](NativeServerHost.md) additionally verifies actual
+application startup/shutdown, hosted automatic drain, exact health response
+bodies and three loopback listeners before/during/after execution. It keeps the
+original material and issuer excluded; no OIDC login or client mTLS admission is
+claimed.
+
+Original-service admission, common recovery point, human login, physical Agent trust,
 revocation, independent WORM/key custody/approvals and full RPO/RTO remain open.
 Phase 7 is not complete and PR #2 remains draft.
