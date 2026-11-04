@@ -49,8 +49,9 @@ metadata are admitted. Windows apphost generation is disabled.
 
 Worker ownership binds UUID/name/labels, image ID and creation time. Runtime
 inspection checks UID/GID 1654:1654, private PID/IPC, read-only root, cap-drop
-ALL, no-new-privileges, 256 MiB/0.5 CPU/64 PIDs, core dumps disabled and one
-0700 tmpfs. Public generated CA files use private tmpfs permissions; the
+ALL, no-new-privileges, 256 MiB/0.5 CPU/64 PIDs, core dumps disabled and two
+0700 tmpfs mounts for runtime and private configuration. Public generated CA files
+use private tmpfs permissions; the
 process-scoped trust bundle and empty certificate directory do not alter host
 trust. Tokens are never Docker arguments, environment variables or mounted
 files. Both containers expire independently after 3,300 seconds with
@@ -59,7 +60,7 @@ only its fresh UUID name and verifying ownership before removal. It attempts
 both cleanups even after an error; success is emitted only after verified
 absence and removal of the owned public payload directory.
 
-The portable boundary contract rejects 21 unsafe metadata mutations, including
+The portable boundary contract rejects 23 unsafe metadata mutations, including
 wrong source namespace/identity, privileged execution, ports, writable/live
 mounts, weakened resources/tmpfs, added credential environment and expiry
 removal. Windows CI runs this contract; Linux CI also runs the native fixture.

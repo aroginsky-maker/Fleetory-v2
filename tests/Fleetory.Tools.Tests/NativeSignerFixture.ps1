@@ -13,6 +13,7 @@ function Get-NativeSignerWorkerArguments([string]$Session,[string]$ProviderId,[s
         '--network',('container:'+$ProviderId),'--user','1654:1654','--read-only','--cap-drop','ALL',
         '--security-opt','no-new-privileges','--memory','256m','--cpus','0.5','--pids-limit','64',
         '--ulimit','core=0','--tmpfs',('/tmp:'+$script:nativeSignerTmpfs),
+        '--tmpfs',('/run/fleetory-native:'+$script:nativeSignerTmpfs),
         '--mount',('type=bind,src='+$PublicDirectory+',dst=/tool,readonly'),
         '-e','HOME=/tmp','-e','SSL_CERT_FILE=/tmp/ca.pem','-e','SSL_CERT_DIR=/tmp/empty-ca-dir',
         '--entrypoint','/bin/sh',$script:nativeSignerImage,'-c','exec /bin/sleep 3300')
@@ -43,8 +44,9 @@ function Assert-NativeSignerWorker($Info,[string]$Id,[string]$Session,[string]$P
         ($null -eq $Info.HostConfig.VolumesFrom -or @($Info.HostConfig.VolumesFrom).Count -eq 0) -and
         (@($Info.Config.Entrypoint)-join '|') -ceq '/bin/sh' -and (@($Info.Config.Cmd)-join '|') -ceq '-c|exec /bin/sleep 3300' -and
         (@($Info.Config.Env|Sort-Object)-join '|') -ceq (@($expectedEnv|Sort-Object)-join '|')) 'runtime'
-    Assert-NativeSigner (@($Info.HostConfig.Tmpfs.Keys).Count -eq 1 -and
+    Assert-NativeSigner (@($Info.HostConfig.Tmpfs.Keys).Count -eq 2 -and
         $Info.HostConfig.Tmpfs['/tmp'] -ceq $script:nativeSignerTmpfs -and
+        $Info.HostConfig.Tmpfs['/run/fleetory-native'] -ceq $script:nativeSignerTmpfs -and
         @($Info.HostConfig.Ulimits).Count -eq 1 -and $Info.HostConfig.Ulimits[0].Name -ceq 'core' -and
         $Info.HostConfig.Ulimits[0].Soft -eq 0 -and $Info.HostConfig.Ulimits[0].Hard -eq 0) 'ephemeral'
     Assert-NativeSigner (@($Info.Mounts).Count -eq 1 -and $Info.Mounts[0].Type -ceq 'bind' -and

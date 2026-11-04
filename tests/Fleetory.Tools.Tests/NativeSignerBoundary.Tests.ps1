@@ -14,7 +14,7 @@ $base=@{Id=$worker;Name=('/fleetory-native-signer-'+$session.Replace('-',''));Im
     Mounts=@(@{Type='bind';Source=$directory;Destination='/tool';RW=$false});
     HostConfig=@{NetworkMode=('container:'+$provider);AutoRemove=$true;ReadonlyRootfs=$true;Privileged=$false;PublishAllPorts=$false;
         PortBindings=@{};PidMode='';IpcMode='private';CapAdd=@();CapDrop=@('ALL');SecurityOpt=@('no-new-privileges');Memory=268435456;
-        NanoCpus=500000000;PidsLimit=64;Binds=@();Devices=@();DeviceRequests=@();VolumesFrom=@();Tmpfs=@{'/tmp'=$script:nativeSignerTmpfs};
+        NanoCpus=500000000;PidsLimit=64;Binds=@();Devices=@();DeviceRequests=@();VolumesFrom=@();Tmpfs=@{'/tmp'=$script:nativeSignerTmpfs;'/run/fleetory-native'=$script:nativeSignerTmpfs};
         Ulimits=@(@{Name='core';Soft=0;Hard=0})}}
 Assert-NativeSignerWorker $base $worker $session $provider $directory $imageId $before @('PATH=/bin')
 $refused=0
@@ -27,6 +27,8 @@ foreach($mutation in @(
     {param($x)$x.HostConfig.CapAdd=@('SYS_ADMIN')},{param($x)$x.HostConfig.Memory=0},{param($x)$x.HostConfig.PidMode='host'},
     {param($x)$x.HostConfig.SecurityOpt=@()},{param($x)$x.Mounts[0].RW=$true},{param($x)$x.Mounts[0].Source='/live'},
     {param($x)$x.HostConfig.Tmpfs['/tmp']='rw,mode=0777'},{param($x)$x.HostConfig.Ulimits[0].Hard=-1},
+    {param($x)$x.HostConfig.Tmpfs.Remove('/run/fleetory-native')},
+    {param($x)$x.HostConfig.Tmpfs['/run/fleetory-native']='rw,mode=0777'},
     {param($x)$x.Config.Env+=@('BAO_TOKEN=not-permitted')},{param($x)$x.Config.Cmd=@('-c','sleep 99999')}
 )){
     $copy=$base|ConvertTo-Json -Depth 12|ConvertFrom-Json -AsHashtable
@@ -35,5 +37,5 @@ foreach($mutation in @(
     catch{if($_.Exception.Message -cnotmatch '^Native signer fixture refused: '){throw};$refused++;continue}
     throw 'Unsafe native signer worker accepted.'
 }
-if($refused -ne 21){throw 'Boundary tests did not all execute.'}
-Write-Host 'NATIVE SIGNER BOUNDARY PASS: 21 unsafe runtime mutations refused; no Docker or original inputs.'
+if($refused -ne 23){throw 'Boundary tests did not all execute.'}
+Write-Host 'NATIVE SIGNER BOUNDARY PASS: 23 unsafe runtime mutations refused; no Docker or original inputs.'

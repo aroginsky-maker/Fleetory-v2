@@ -99,6 +99,12 @@ exercises the real signing component over HTTPS against a disposable OpenBao
 key and restricted credentials. It adds native authentication/refusal evidence;
 it does not authenticate an original token or start the complete Signer host.
 
+The [generated native journal fixture](NativeSignerJournal.md) additionally
+opens the production Signer data source and invokes its real readiness service
+against PostgreSQL. It verifies fresh TLS/SCRAM credentials and unsafe-role
+refusals while leaving the HTTP host unstarted. Server database/audit bindings
+and original-role authentication remain separate acceptance work.
+
 Full service startup, common recovery point, human login, physical Agent trust,
 revocation, independent WORM/key custody/approvals and full RPO/RTO remain open.
 Phase 7 is not complete and PR #2 remains draft.
