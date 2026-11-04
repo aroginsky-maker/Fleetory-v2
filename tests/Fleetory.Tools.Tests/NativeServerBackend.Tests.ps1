@@ -15,9 +15,17 @@ foreach($name in @('database','wrong','admin','writer','reader')){$secrets[$name
 $material=$agent=$admin=$wrongMaterial=$null
 function Assert-True([bool]$Condition,[string]$Message){if(-not $Condition){throw $Message}}
 function Invoke-Docker([string[]]$Arguments,[byte[]]$InputBytes=$null,[int]$TimeoutSeconds=90,[switch]$AllowFailure){
-    $result=if($IsLinux){Invoke-NativeBytes '/bin/sh' @('-c',(Get-ProviderDockerShellCommand $Arguments)) $InputBytes $TimeoutSeconds}
+    $result=if($IsLinux){Invoke-NativeBytes '/bin/sh' @('-c',(Get-ProviderDockerShellCommand $Arguments -ClassicBuilder:($Arguments[0] -ceq 'build'))) $InputBytes $TimeoutSeconds}
         else{Invoke-NativeBytes 'docker' (@('--context','desktop-linux')+$Arguments) $InputBytes $TimeoutSeconds}
-    if(-not $AllowFailure -and $result.ExitCode -ne 0){throw ('Generated Server Docker operation failed: '+$Arguments[0]+';exit='+$result.ExitCode)}
+    if(-not $AllowFailure -and $result.ExitCode -ne 0){
+        if($Arguments[0] -ceq 'build'){
+            # This input is a public COPY-only Dockerfile; no credentials or private context.
+            $diagnostic=$result.Stderr
+            foreach($value in $canaries){$diagnostic=$diagnostic.Replace($value,'[redacted]')}
+            [Console]::Error.WriteLine('Public fixture build failed; exit='+$result.ExitCode+'; '+$diagnostic.Substring(0,[Math]::Min(6000,$diagnostic.Length)))
+        }
+        throw ('Generated Server Docker operation failed: '+$Arguments[0]+';exit='+$result.ExitCode)
+    }
     return $result
 }
 function Read-Store([string]$Role,[switch]$CleanupOnly){

@@ -74,15 +74,20 @@ removing only its fresh tag, then checks image absence. No source or runtime
 secrets enter image layers.
 The fixture explicitly selects the classic builder for this COPY-only build:
 the existing Linux Docker wrapper requires its temporary CLI config to remain
-empty, whereas buildx stores state there. It uses no BuildKit-only instructions;
-the previous process setting is restored on exit.
+empty, whereas buildx stores state there. Its build-only transport forces the
+public value `DOCKER_BUILDKIT=0` and preserves only that variable across sudo;
+ordinary Docker/SSH requests retain their previous wrapper. The transport rejects
+using this mode with a non-build verb or an empty request. It uses no BuildKit-only
+instructions; the previous process setting is restored on exit.
 The generated CA bundle and empty CA directory are scoped to the immudb process
 as well as the native client, including the REST proxy's internal gRPC connection.
 No host trust store or certificate-validation callback is changed.
 
 Portable contracts reject 16 PostgreSQL, 23 worker and 17 immudb runtime mutations;
 nine shared-worker refusal/fault contracts also run. Windows CI runs portable
-checks; Linux CI runs the full native fixture. Generated secret canaries must
+checks; Linux CI runs the full native fixture before the expensive quality suite.
+The store runtime constraints share one verifier while ownership, namespace and
+tmpfs policies stay specific to each store. Generated secret canaries must
 be absent from bounded probe stdout/stderr. Startup waits for actual TLS health,
 not a fixed delay. Cleanup validates ownership and absence for every container,
 attempts all removals after failures, and deletes only its resolved public

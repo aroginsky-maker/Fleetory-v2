@@ -339,6 +339,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Pinned recovery runtime unavailable.' }
           python3 -B ./tests/Fleetory.Tools.Tests/recovery_configuration_tests.py --native-publish artifacts/recovery-configuration
 
+      - name: Verify generated native Server database and audit components
+        shell: pwsh
+        run: |
+          dotnet restore ./eng/ServerBackendProbe/ServerBackendProbe.csproj --disable-parallel
+          if ($LASTEXITCODE -ne 0) { throw 'Server backend probe restore failed.' }
+          ./tests/Fleetory.Tools.Tests/NativeServerBackend.Tests.ps1
+
       - name: Verify Sonar issue gate
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/SonarIssueGate.Tests.ps1
@@ -366,10 +373,6 @@ jobs:
       - name: Verify generated native signer journal readiness
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/NativeJournalBackend.Tests.ps1
-
-      - name: Verify generated native Server database and audit components
-        shell: pwsh
-        run: ./tests/Fleetory.Tools.Tests/NativeServerBackend.Tests.ps1
 
       - name: Enforce zero Sonar issues
         shell: pwsh

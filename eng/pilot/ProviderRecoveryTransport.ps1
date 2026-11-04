@@ -35,9 +35,17 @@ function ConvertTo-ProviderShellCommand([string[]] $PublicArguments) {
     return $words -join ' '
 }
 
-function Get-ProviderDockerShellCommand([string[]] $PublicArguments) {
+function Get-ProviderDockerShellCommand([string[]] $PublicArguments,[switch]$ClassicBuilder) {
     # No inherited Docker config, proxy injection, credential helper or alternate daemon.
     $wrapper = 'set -eu; unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH DOCKER_API_VERSION DOCKER_CUSTOM_HEADERS; umask 077; d=$(/usr/bin/mktemp -d /tmp/fleetory-provider-cli.XXXXXXXXXX); trap ''/bin/rmdir -- "$d" || exit 125'' EXIT; trap ''exit 129'' HUP; trap ''exit 130'' INT; trap ''exit 143'' TERM; /usr/bin/sudo -n -- /usr/bin/docker --config "$d" --host unix:///var/run/docker.sock "$@"'
+    if($ClassicBuilder){
+        if($null -eq $PublicArguments -or $PublicArguments.Count -lt 1 -or $PublicArguments[0] -cne 'build'){
+            throw 'Classic builder mode requires the build verb.'
+        }
+        # sudo normally drops this public setting; preserve only the value forced here.
+        $wrapper='DOCKER_BUILDKIT=0; export DOCKER_BUILDKIT; '+$wrapper.Replace('/usr/bin/sudo -n -- /usr/bin/docker',
+            '/usr/bin/sudo -n --preserve-env=DOCKER_BUILDKIT -- /usr/bin/docker')
+    }
     return ConvertTo-ProviderShellCommand (@('/bin/sh','-c',$wrapper,'provider-docker') + $PublicArguments)
 }
 

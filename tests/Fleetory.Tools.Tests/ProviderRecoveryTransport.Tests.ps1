@@ -39,6 +39,11 @@ $sha = Set-PublicLedger $line
 $pin = @{Address=$address;KnownHostsFile=$ledger;KnownHostsSha256=$sha;HostFingerprint=$fingerprint;IdentityFile=$identity}
 $pwsh = Join-Path $PSHOME $(if($IsWindows){'pwsh.exe'}else{'pwsh'})
 $session = [Guid]::NewGuid().ToString('D')
+    $classic = Get-ProviderDockerShellCommand @('build','--network','none','--pull=false','-') -ClassicBuilder
+    Assert-Transport ($classic.Contains('DOCKER_BUILDKIT=0; export DOCKER_BUILDKIT;', [StringComparison]::Ordinal) -and
+        $classic.Contains('/usr/bin/sudo -n --preserve-env=DOCKER_BUILDKIT -- /usr/bin/docker', [StringComparison]::Ordinal)) 'fixed classic setting survives sudo without preserving other variables'
+    Assert-TransportRefusal {Get-ProviderDockerShellCommand @('inspect','generated') -ClassicBuilder} 'Classic builder mode requires the build verb.'
+    Assert-TransportRefusal {Get-ProviderDockerShellCommand @() -ClassicBuilder} 'Classic builder mode requires the build verb.'
     $run = @(Get-ProviderContainerArguments $session 'restore')
     Assert-Transport ($run[0] -ceq 'run' -and $run[1] -ceq '--rm' -and
         $run[-1] -ceq 'exec /bin/busybox sleep 3300' -and $run -ccontains 'none' -and
@@ -126,8 +131,8 @@ $session = [Guid]::NewGuid().ToString('D')
         Assert-Transport ($roundtrip.ExitCode -eq 0 -and [Security.Cryptography.CryptographicOperations]::FixedTimeEquals($roundtrip.StdoutBytes,$expected)) 'literal POSIX argv roundtrip'
         $shellVerified = $true
     }
-    Assert-Transport ($script:transportRefusals -eq 29) ('all refusal cases ran, observed='+$script:transportRefusals)
-    Write-Host ('PROVIDER RECOVERY TRANSPORT PASS: 29 refusals; SSH config parsed offline; binary/timeout/I-O bounds; POSIX shell='+$shellVerified+'; no connection or original inputs.')
+    Assert-Transport ($script:transportRefusals -eq 31) ('all refusal cases ran, observed='+$script:transportRefusals)
+    Write-Host ('PROVIDER RECOVERY TRANSPORT PASS: 31 refusals; SSH config parsed offline; binary/timeout/I-O bounds; POSIX shell='+$shellVerified+'; no connection or original inputs.')
 }
 finally {
     if ([IO.Directory]::Exists($testRoot)) {
