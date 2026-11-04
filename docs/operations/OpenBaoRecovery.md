@@ -248,6 +248,11 @@ may inspect only the unique target name and remove only the exact ID whose
 name/image/UUID/creation metadata match. Lost responses do not authorize a
 second restore or root attempt. Unconfirmed cleanup is reported as failure,
 with the attempt retained; it is never promoted to verified recovery.
+Grant, file, container and lease timestamps preserve typed UTC/local instants
+from PowerShell JSON parsing; wire strings require an explicit ISO-8601 zone
+and invariant parsing. Ambiguous strings or unspecified `DateTime` values fail.
+Tests cover Russian and US cultures, JSON `Z`/offset/nanosecond forms and typed
+UTC values, including a grant deserialized from JSON.
 
 Portable tests exercise malformed/expired/mismatched grants and code/host pins,
 durable/repeated attempts, unsafe commands, source/unowned IDs, container

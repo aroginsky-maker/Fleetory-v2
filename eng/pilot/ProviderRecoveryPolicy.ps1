@@ -1,5 +1,6 @@
 #requires -Version 7.3
 # Closed policy for one target-only provider restore. No network or original-input reads here.
+. (Join-Path $PSScriptRoot 'ProviderRecoveryCredential.ps1')
 function Assert-ProviderCondition([bool] $Value, [string] $Code) {
     if (-not $Value) { throw ('Provider recovery refused: '+$Code) }
 }
@@ -32,8 +33,8 @@ function Assert-ProviderPlan($Plan, $Grant, [string] $PlanHash, [string] $Expect
         $Grant.planSha256 -ceq $PlanHash -and $Grant.decision -ceq 'approved' -and
         $Grant.permission -ceq 'one-target-restore-four-share-submissions-one-root-one-300s-probe' -and
         $Grant.evidenceRef -cmatch '^[^\x00-\x1f]{1,512}$') 'grant-binding'
-    $issued=[DateTimeOffset]::Parse([string]$Grant.issuedUtc)
-    $expires=[DateTimeOffset]::Parse([string]$Grant.expiresUtc)
+    $issued=ConvertTo-ProviderTimestamp $Grant.issuedUtc
+    $expires=ConvertTo-ProviderTimestamp $Grant.expiresUtc
     Assert-ProviderCondition ($issued -le $Now -and $expires -gt $Now -and
         ($expires-$issued).Ticks -gt 0 -and ($expires-$issued).Ticks -le [TimeSpan]::FromHours(1).Ticks) 'grant-expiry'
     $pins=Get-ProviderCodePins
@@ -108,7 +109,7 @@ function Test-ProviderArguments([string[]] $Left,[string[]] $Right) {
     return (($Left|ConvertTo-Json -Compress) -ceq ($Right|ConvertTo-Json -Compress))
 }
 function Assert-ProviderOwnedMetadata($Context,$Info,[switch] $CleanupOnly) {
-    $created=[DateTimeOffset]::Parse([string]$Info.Created)
+    $created=ConvertTo-ProviderTimestamp $Info.Created
     Assert-ProviderCondition ($Info.Id -cmatch '^[0-9a-f]{64}$' -and
         $Info.Id -cnotin @($Context.Plan.sourceContainerIds) -and
         ($null -eq $Context.TargetId -or $Info.Id -ceq $Context.TargetId) -and

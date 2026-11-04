@@ -130,7 +130,7 @@ try {
     Assert-True ($snapshotResult.ExitCode -eq 0) 'Raft snapshot save failed.'
     $snapshot = Get-SnapshotBytes $sourceId
     Assert-True ($snapshot.Length -ge 4096 -and $snapshot.Length -le 67108864) 'Raft snapshot size was outside the fixture bound.'
-    Assert-True ([DateTimeOffset]::UtcNow -lt [DateTimeOffset]::Parse([string]$expiredBefore.expire_time)) 'Short credential expired before the snapshot was captured.'
+    Assert-True ([DateTimeOffset]::UtcNow -lt (ConvertTo-ProviderTimestamp $expiredBefore.expire_time)) 'Short credential expired before the snapshot was captured.'
     $trustedHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($snapshot)).ToLowerInvariant()
     Assert-SnapshotReference $snapshot $trustedHash
     $stage = 'tamper-and-target-ownership-guards'

@@ -23,6 +23,22 @@ try {
     $grant=New-ControllerFixtureGrant $plan $hash
     $now=[DateTimeOffset]::UtcNow
     Assert-ProviderPlan $plan $grant $hash 'synthetic-fixture' $now
+    $savedCulture=[Globalization.CultureInfo]::CurrentCulture
+    try {
+        foreach($culture in @('ru-RU','en-US')){
+            [Globalization.CultureInfo]::CurrentCulture=[Globalization.CultureInfo]::GetCultureInfo($culture)
+            $expectedTime=[DateTimeOffset]::new(2026,11,4,11,0,0,[TimeSpan]::Zero)
+            foreach($wire in @('2026-11-04T11:00:00Z','2026-11-04T14:00:00+03:00','2026-11-04T11:00:00.000000001Z')){
+                $typedTime=('{"Created":"'+$wire+'"}'|ConvertFrom-Json -AsHashtable).Created
+                Assert-ControllerTest ((ConvertTo-ProviderTimestamp $typedTime).UtcTicks -eq $expectedTime.UtcTicks) 'JSON date/culture changed UTC'
+            }
+            Assert-ControllerTest ((ConvertTo-ProviderTimestamp $expectedTime.UtcDateTime).UtcTicks -eq $expectedTime.UtcTicks) 'typed UTC DateTime changed instant'
+            $jsonGrant=$grant|ConvertTo-Json|ConvertFrom-Json -AsHashtable
+            Assert-ProviderPlan $plan $jsonGrant $hash 'synthetic-fixture' $now
+        }
+    }finally{[Globalization.CultureInfo]::CurrentCulture=$savedCulture}
+    Refuse-Controller {ConvertTo-ProviderTimestamp '11/04/2026 11:00:00'}
+    Refuse-Controller {ConvertTo-ProviderTimestamp ([DateTime]::new(2026,11,4,11,0,0,[DateTimeKind]::Unspecified))}
     Refuse-Controller {Invoke-ProviderRecoveryController $plan $grant $hash $controllerRoot {} {} 'retained-provider'}
     foreach($change in @(@{decision='denied'},@{planSha256=('0'*64)},@{operationId=[Guid]::NewGuid().ToString('D')},
         @{scope='retained-provider'},@{evidenceRef=''},@{permission='root'},

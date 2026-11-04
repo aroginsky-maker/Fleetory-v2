@@ -6,7 +6,7 @@ function Test-RestoredTargetCredential([string] $Id, [string] $SourceId, [string
     Assert-RecoveryCredentialTarget $Id 'restore'
     Assert-RecoveryEndpointDisabled $Id
     Assert-RecoveryEndpointDisabled $SourceId
-    $deadline = [DateTimeOffset]::Parse([string]$ExpiredLease.expire_time).AddSeconds(1)
+    $deadline = (ConvertTo-ProviderTimestamp $ExpiredLease.expire_time).AddSeconds(1)
     Assert-True ($deadline -le [DateTimeOffset]::UtcNow.AddSeconds(30)) 'Short captured credential expiry is outside the fixture wait bound.'
     while ([DateTimeOffset]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 200 }
     $script:credentialRecoveryStage = 'expired-token-denials'

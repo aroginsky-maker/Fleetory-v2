@@ -8,7 +8,7 @@ function Read-ProviderReference([string] $Kind,$Reference) {
     try {
         if($Kind -ceq 'share') {
             Assert-ProviderCondition (([IO.File]::GetLastWriteTimeUtc($Reference.path)).Ticks -eq
-                ([DateTimeOffset]::Parse([string]$Reference.mtimeUtc)).UtcTicks) 'share-reference-time'
+                (ConvertTo-ProviderTimestamp $Reference.mtimeUtc).UtcTicks) 'share-reference-time'
         }
         $bytes=[byte[]]::new([int]$Reference.bytes)
         $stream.ReadExactly($bytes)
@@ -43,7 +43,7 @@ function Invoke-ProviderRecoveryController($Plan,$Grant,[string] $PlanHash,[stri
         }
         $InputReader={param($kind,$reference) Assert-PrivateOperatorAcl $reference.path;Read-ProviderReference $kind $reference}
     }
-    $ctx=New-ProviderAttempt $Plan $PlanHash $StateDirectory ([DateTimeOffset]::Parse([string]$Grant.expiresUtc))
+    $ctx=New-ProviderAttempt $Plan $PlanHash $StateDirectory (ConvertTo-ProviderTimestamp $Grant.expiresUtc)
     $image='ghcr.io/openbao/openbao:2.7.1@sha256:6d2b93856e3fcf7b18ad855a0b51eaba474dc8b79cf554379ea32034797d2acf'
     $session=$Plan.operationId
     $records=[Collections.Generic.List[object]]::new()

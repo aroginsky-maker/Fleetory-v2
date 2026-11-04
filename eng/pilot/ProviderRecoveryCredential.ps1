@@ -1,5 +1,16 @@
 #requires -Version 7.3
 # Shared target-only credential primitives; the caller must enforce an owned restored target.
+function ConvertTo-ProviderTimestamp($Value) {
+    if($Value -is [DateTimeOffset]){return $Value.ToUniversalTime()}
+    if($Value -is [DateTime]){
+        if($Value.Kind -eq [DateTimeKind]::Unspecified){throw 'Provider recovery timestamp lacks a timezone.'}
+        return [DateTimeOffset]::new($Value).ToUniversalTime()
+    }
+    if($Value -isnot [string] -or $Value -cnotmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$'){
+        throw 'Provider recovery timestamp is not explicit ISO-8601.'
+    }
+    return [DateTimeOffset]::Parse($Value,[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::AdjustToUniversal)
+}
 function Assert-RecoveryCredentialTarget([string] $Id, [string] $Role) {
     if ($Role -cne 'restore' -or -not $script:forceRestoreClaimed) {
         throw 'Credential recovery requires the already-restored fixture target.'
@@ -56,8 +67,8 @@ function Get-RecoveredTargetRoot([string] $Id, [string] $Share) {
 }
 
 function Assert-TargetCredentialLease($Lease, [DateTimeOffset] $NotBefore) {
-    $expiry = [DateTimeOffset]::Parse([string]$Lease.expire_time)
-    $issued = [DateTimeOffset]::Parse([string]$Lease.issue_time)
+    $expiry = ConvertTo-ProviderTimestamp $Lease.expire_time
+    $issued = ConvertTo-ProviderTimestamp $Lease.issue_time
     $script:credentialLeaseDiagnostic = [ordered]@{orphan=$Lease.orphan;renewable=$Lease.renewable;
         explicitMaxTtl=$Lease.explicit_max_ttl;creationTtl=$Lease.creation_ttl;ttl=$Lease.ttl;
         expectedPolicy=(@($Lease.policies) -join '|') -ceq 'fixture-recovered-signer';
