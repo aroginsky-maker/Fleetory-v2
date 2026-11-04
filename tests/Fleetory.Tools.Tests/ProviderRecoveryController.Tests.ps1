@@ -146,6 +146,11 @@ try {
     $force=@('operator','raft','snapshot','restore','-force','/tmp/raft.snapshot')
     Assert-ProviderBaoRequest $ctx $force;Refuse-Controller {Assert-ProviderBaoRequest $ctx $force}
     $ctx.Phase='credential'
+    Assert-ProviderDockerRequest $ctx @('exec',$ctx.TargetId,'/bin/busybox','pidof','bao')
+    $ctx.Phase='force'
+    Refuse-Controller {Assert-ProviderDockerRequest $ctx @('exec',$ctx.TargetId,'/bin/busybox','pidof','bao')}
+    $ctx.Phase='credential'
+    Refuse-Controller {Assert-ProviderDockerRequest $ctx @('exec',$ctx.TargetId,'/bin/busybox','pidof','other')}
     $rootArgs=@('write','-format=json','sys/generate-root/attempt','-')
     Assert-ProviderBaoRequest $ctx $rootArgs;Refuse-Controller {Assert-ProviderBaoRequest $ctx $rootArgs}
     $ctx.ShareReads=1

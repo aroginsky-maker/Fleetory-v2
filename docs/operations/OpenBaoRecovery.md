@@ -270,6 +270,16 @@ and invariant parsing. Ambiguous strings or unspecified `DateTime` values fail.
 Tests cover Russian and US cultures, JSON `Z`/offset/nanosecond forms and typed
 UTC values, including a grant deserialized from JSON.
 
+Recovery-window restarts observe the owned target's old `bao` process exiting
+before rewriting configuration or starting its replacement. The read-only
+`pidof bao` probe is allowed only in the restored target's credential phase;
+shutdown has a monotonic 30-second limit and bounded individual requests.
+An unparseable result, transport error or deadline aborts before another start
+or share submission. This replaces a fixed 300ms sleep, which could start the
+replacement while the old server still held its listener or Raft storage lock.
+The generated shutdown contract reproduces that ordering failure and checks
+delayed exit plus seven refusal cases without Docker or original material.
+
 Portable tests exercise malformed/expired/mismatched grants and code/host pins,
 durable/repeated attempts, unsafe commands, source/unowned IDs, container
 mutations, one-use force/root/probe/signature rules, share-use bounds,

@@ -18,11 +18,29 @@ function Assert-RecoveryCredentialTarget([string] $Id, [string] $Role) {
     $null = Assert-Owned $Id 'restore'
 }
 
+function Wait-RecoveryBaoExit([string] $Id,[int] $TimeoutMilliseconds=30000) {
+    Assert-True ($TimeoutMilliseconds -ge 1 -and $TimeoutMilliseconds -le 30000) 'Invalid shutdown deadline.'
+    $watch=[Diagnostics.Stopwatch]::StartNew()
+    while($watch.ElapsedMilliseconds -lt $TimeoutMilliseconds){
+        $remaining=$TimeoutMilliseconds-$watch.ElapsedMilliseconds
+        $requestSeconds=[int][Math]::Max(1,[Math]::Ceiling($remaining/1000.0))
+        $probe=Invoke-Docker @('exec',$Id,'/bin/busybox','pidof','bao') -TimeoutSeconds $requestSeconds -AllowFailure
+        if($watch.ElapsedMilliseconds -ge $TimeoutMilliseconds){break}
+        if($probe.ExitCode -eq 1 -and [string]::IsNullOrWhiteSpace($probe.Stdout) -and
+            [string]::IsNullOrWhiteSpace($probe.Stderr)){return}
+        Assert-True ($probe.ExitCode -eq 0 -and [string]::IsNullOrWhiteSpace($probe.Stderr) -and
+            $probe.Stdout.Trim() -cmatch '^[1-9][0-9]*(?:[ \t]+[1-9][0-9]*)*$') 'OpenBao shutdown probe was invalid.'
+        $remaining=$TimeoutMilliseconds-$watch.ElapsedMilliseconds
+        if($remaining -gt 0){Start-Sleep -Milliseconds ([int][Math]::Min(100,$remaining))}
+    }
+    throw 'OpenBao did not stop within its shutdown deadline.'
+}
+
 function Restart-RecoveryCredentialTarget([string] $Id, [string] $Cluster, [string] $Share, [switch] $RecoveryWindow) {
     Assert-RecoveryCredentialTarget $Id 'restore'
     Assert-True ((Get-Status $Id).cluster_id -ceq $Cluster) 'Credential recovery target cluster changed.'
     $null = Invoke-Docker @('exec',$Id,'/bin/busybox','killall','bao')
-    Start-Sleep -Milliseconds 300
+    Wait-RecoveryBaoExit $Id
     Start-Bao $Id 'restore' -RecoveryWindow:$RecoveryWindow
     $null = Invoke-Unseal $Id $Share
     Assert-True ((Wait-Active $Id).cluster_id -ceq $Cluster) 'Credential recovery restart changed the restored cluster.'

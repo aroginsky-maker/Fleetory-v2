@@ -204,6 +204,10 @@ function Assert-ProviderDockerRequest($Context,[string[]] $Arguments) {
     if($Arguments[1] -cin @('-i','-d')){$offset++}
     Assert-ProviderCondition ($Arguments[$offset] -ceq $Context.TargetId) 'exec-target'
     $command=@($Arguments[($offset+1)..($Arguments.Length-1)])
+    if(Test-ProviderArguments $command @('/bin/busybox','pidof','bao')){
+        Assert-ProviderCondition ($Context.Phase -ceq 'credential' -and $Context.ForceClaimed) 'shutdown-probe-phase'
+        return
+    }
     $bao=$null
     if($command[0] -ceq '/usr/bin/bao'){$bao=@($command|Select-Object -Skip 1)}
     elseif($command.Count -ge 5 -and (Test-ProviderArguments $command[0..3] @('/bin/sh','-c','IFS= read -r t || exit 120; BAO_TOKEN="$t" exec /usr/bin/bao "$@"','bao'))){$bao=@($command|Select-Object -Skip 4)}

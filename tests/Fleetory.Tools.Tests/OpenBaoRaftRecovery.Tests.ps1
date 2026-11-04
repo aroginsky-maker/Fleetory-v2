@@ -197,7 +197,7 @@ try {
     }
     if (-not $sealedAfter) {
         $null = Invoke-Docker @('exec',$targetId,'/bin/busybox','killall','bao') -AllowFailure
-        Start-Sleep -Milliseconds 400
+        Wait-RecoveryBaoExit $targetId
         $null = Invoke-Docker @('exec','-d',$targetId,'/usr/bin/bao','server','-config=/tmp/openbao.hcl')
         for ($try=0; $try -lt 40; $try++) { try { $postStatus=Get-Status $targetId; if ($postStatus.sealed) { $sealedAfter=$true; break } } catch { }; Start-Sleep -Milliseconds 250 }
     }
