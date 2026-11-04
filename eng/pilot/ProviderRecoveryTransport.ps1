@@ -37,7 +37,7 @@ function ConvertTo-ProviderShellCommand([string[]] $PublicArguments) {
 
 function Get-ProviderDockerShellCommand([string[]] $PublicArguments) {
     # No inherited Docker config, proxy injection, credential helper or alternate daemon.
-    $wrapper = 'set -eu; unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH DOCKER_API_VERSION DOCKER_CUSTOM_HEADERS; umask 077; d=$(/usr/bin/mktemp -d /tmp/fleetory-provider-cli.XXXXXXXXXX); trap ''/bin/rmdir -- "$d" || exit 125'' EXIT; trap ''exit 129'' HUP; trap ''exit 130'' INT; trap ''exit 143'' TERM; /usr/bin/docker --config "$d" --host unix:///var/run/docker.sock "$@"'
+    $wrapper = 'set -eu; unset DOCKER_HOST DOCKER_CONTEXT DOCKER_TLS_VERIFY DOCKER_CERT_PATH DOCKER_API_VERSION DOCKER_CUSTOM_HEADERS; umask 077; d=$(/usr/bin/mktemp -d /tmp/fleetory-provider-cli.XXXXXXXXXX); trap ''/bin/rmdir -- "$d" || exit 125'' EXIT; trap ''exit 129'' HUP; trap ''exit 130'' INT; trap ''exit 143'' TERM; /usr/bin/sudo -n -- /usr/bin/docker --config "$d" --host unix:///var/run/docker.sock "$@"'
     return ConvertTo-ProviderShellCommand (@('/bin/sh','-c',$wrapper,'provider-docker') + $PublicArguments)
 }
 

@@ -214,7 +214,11 @@ The state directory is part of the approved plan; copying the plan to another
 directory cannot silently reset the attempt. Failed attempts remain consumed.
 There is no retry/reset option, source-container adoption or image pull.
 Remote Docker calls use an empty disposable CLI configuration, an explicit
-local Unix socket and cleared endpoint/TLS/API overrides. No source provider
+local Unix socket and cleared endpoint/TLS/API overrides. The provider host's
+existing noninteractive `sudo -n -- /usr/bin/docker` access is used for that
+binary only. No host group, sudo policy or socket permission is changed. A
+password/TTY requirement fails rather than consuming credential stdin or
+falling back to an interactive shell. No source provider
 API, environment, configuration or mounted data is read.
 
 The command allowlist permits only the fixed bootstrap, restore, target root,
@@ -264,6 +268,16 @@ target. This simulates a lost transport response; it is not a real VPS SSH
 failure test. Actual SSH authentication, actual retained material, current
 revocations, real service backend authentication, common-point/VPS-loss recovery
 and full-system RPO/RTO remain separate acceptance work.
+
+Before requesting a real one-shot grant, verify the existing SSH identity's
+Windows permissions and the pinned public host/Docker metadata commands.
+The 4 November pilot attempt stopped at host preflight because the supplied
+identity inherited a non-owner sandbox-group read rule; no original snapshot
+or share was read and no target/root/probe was created. Narrowing only that
+file's ACL, with rollback SDDL retained outside Git, restored SSH access.
+Read-only diagnostics also confirmed that this VPS requires its existing
+noninteractive sudo path for Docker. The consumed attempt remains retained;
+these prerequisite repairs do not authorize replaying it or reusing its grant.
 
 ## Actual pilot operations
 
