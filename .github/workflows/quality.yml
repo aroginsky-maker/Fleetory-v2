@@ -70,6 +70,10 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/QualityOrchestration.Tests.ps1
 
+      - name: Verify exact readiness response on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ReadinessResponse.Tests.ps1
+
       - name: Verify portable audit archive checkpoints on Windows
         shell: pwsh
         run: python ./tests/Fleetory.Tools.Tests/audit_archive_tests.py --portable
@@ -293,6 +297,10 @@ jobs:
       - name: Verify quality command orchestration
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/QualityOrchestration.Tests.ps1
+
+      - name: Verify exact readiness response
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ReadinessResponse.Tests.ps1
 
       - name: Verify protected pilot audit archive
         shell: pwsh

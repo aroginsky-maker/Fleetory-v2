@@ -40,6 +40,10 @@ The current default health HTTP mapping returns 200 for both `Healthy` and
 Responses are read with a 64-byte bound; the fixed loopback client refuses
 redirects. No privileged HTTP mutation or OIDC metadata/login request is made.
 
+The [lab readiness reader](ReadinessResponse.md) now enforces the same exact
+`200/Healthy` acceptance contract and explicitly refuses redirects. Its isolated
+CLI regressions do not execute the existing token-backed lab.
+
 After bounded stop and independent store readback, restore queue UPDATE and start
 a new native application process. Its own hosted worker must automatically drain
 the pending event. Liveness remains `Healthy`; readiness must now be exactly

@@ -2,6 +2,7 @@ param([switch] $AuditPipeline)
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+. (Join-Path $PSScriptRoot 'readiness-response.ps1')
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $labDirectory = Join-Path (Split-Path -Parent $repoRoot) 'work/security-lab'
@@ -37,8 +38,11 @@ try {
         Start-Sleep -Seconds 1
         if ($server.HasExited) { break }
         try {
-            $response = Invoke-WebRequest -Uri $healthUri -TimeoutSec 2
-            if ($response.StatusCode -eq 200) { $healthy = $true; break }
+            $response = Invoke-WebRequest -Uri $healthUri -TimeoutSec 2 -MaximumRedirection 0
+            if (Test-FleetoryReadinessResponse -StatusCode $response.StatusCode -Content $response.Content) {
+                $healthy = $true
+                break
+            }
         }
         catch { }
     }
@@ -47,7 +51,7 @@ try {
         throw "Fleetory did not become ready with OpenBao. See $stderrPath"
     }
 
-    Write-Host 'Fleetory /health/ready returned 200 with OpenBao-backed PostgreSQL configuration.'
+    Write-Host 'Fleetory /health/ready returned 200/Healthy with OpenBao-backed PostgreSQL configuration.'
     if ($AuditPipeline) {
         $eventId = [guid]::NewGuid().ToString()
         $sql = "INSERT INTO platform.audit_events (event_id, actor_subject_id, actor_kind, action, correlation_id, occurred_at, recorded_at) VALUES ('$eventId', 'system:lab', 2, 'audit.export.e2e', '$eventId', now(), now()); INSERT INTO platform.audit_export_queue (audit_event_id, enqueued_at, next_attempt_at) VALUES ('$eventId', now(), now());"
