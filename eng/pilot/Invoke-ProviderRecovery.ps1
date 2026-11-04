@@ -24,6 +24,8 @@ try {
     $planBytes=[byte[]]::new([int]$planLength);$planStream.ReadExactly($planBytes)
     Assert-ProviderCondition ([Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($planBytes)).ToLowerInvariant() -ceq $PlanSha256) 'plan-pin'
     $plan=[Text.UTF8Encoding]::new($false,$true).GetString($planBytes)|ConvertFrom-Json -AsHashtable -Depth 16
+    # Check every local input's metadata before any target or one-attempt journal is created.
+    Assert-ProviderLocalMetadata $plan $PlanPath
     $grantLength=(Get-Item -LiteralPath $GrantPath).Length
     $grantStream=Open-ProviderInput $GrantPath $grantLength 8192
     $grantBytes=[byte[]]::new([int]$grantLength);$grantStream.ReadExactly($grantBytes)

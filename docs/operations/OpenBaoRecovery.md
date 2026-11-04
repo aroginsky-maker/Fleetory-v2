@@ -201,6 +201,14 @@ plan hash, UUID, scope and exact one-target permission, with an explicit user
 decision reference and a validity period no longer than one hour. The controller
 checks this record; it does not independently authenticate a human decision or
 create permission. The operator must record an actual scoped user approval.
+Local preparation checks every original input's owner/ACL, ordinary path,
+size and retained share mtime without opening its content stream. The real
+entry repeats those metadata checks before creating any target or attempt
+journal. Windows `OWNER RIGHTS` (`S-1-3-4`) is resolved to an independently
+trusted object owner; it is never accepted for an untrusted owner or used to
+waive another account's write access. See Microsoft's
+[Owner Rights definition](https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-special-identities-groups#owner-rights).
+The original provider files' ACLs are inspected, not rewritten.
 The real entry holds Windows read locks on plan, grant, executable files and
 host ledger, checks operator write ACLs and rechecks code hashes before loading
 the frozen runtime. These locks are not a defense against a compromised
@@ -223,6 +231,10 @@ API, environment, configuration or mounted data is read.
 
 The command allowlist permits only the fixed bootstrap, restore, target root,
 restricted probe and cleanup sequence. Snapshot and share are each read once;
+`snapshotReads`/`shareReads` count slots claimed before the input callback,
+while `snapshotInputLoads`/`shareInputLoads` count completed callback loads.
+An ACL denial can consume a read slot without opening the file or loading its
+content. Do not report that slot as a verified byte read.
 the snapshot is hash-checked before and after transfer. Normal foreign-seal
 restore must deny with 400 before the one force restore. The original share has
 at most four submissions to this same target: initial restored unseal, restart

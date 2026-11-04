@@ -4,15 +4,25 @@
 function Assert-ProviderCondition([bool] $Value, [string] $Code) {
     if (-not $Value) { throw ('Provider recovery refused: '+$Code) }
 }
-function Assert-PrivateOperatorAcl([string] $Path) {
-    $allowed=@('S-1-5-18','S-1-5-32-544',[Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
+function Assert-ProviderAclMetadata([string] $OwnerSid,[string] $OperatorSid,[object[]] $Rules) {
+    $allowed=@('S-1-5-18','S-1-5-32-544',$OperatorSid)
+    Assert-ProviderCondition ($OwnerSid -in $allowed) 'operator-owner'
     $writeMask=[Security.AccessControl.FileSystemRights]'Write,Delete,ChangePermissions,TakeOwnership,DeleteSubdirectoriesAndFiles'
-    foreach($rule in (Get-Acl -LiteralPath $Path).Access){
-        if($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow){
-            $sid=$rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
-            Assert-ProviderCondition ($sid -in $allowed -or ($rule.FileSystemRights -band $writeMask) -eq 0) 'operator-write-acl'
+    foreach($rule in $Rules){
+        if($rule.Type -ceq 'Allow'){
+            # OWNER RIGHTS denotes the object's actual owner, not another account.
+            # Resolve it only after independently trusting that owner; never waive it globally.
+            $sid=if($rule.Sid -ceq 'S-1-3-4'){$OwnerSid}else{$rule.Sid}
+            Assert-ProviderCondition ($sid -in $allowed -or ($rule.Rights -band $writeMask) -eq 0) 'operator-write-acl'
         }
     }
+}
+function Assert-PrivateOperatorAcl([string] $Path) {
+    $acl=Get-Acl -LiteralPath $Path
+    $rules=@($acl.Access|ForEach-Object {@{Sid=$_.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value;
+        Type=$_.AccessControlType.ToString();Rights=$_.FileSystemRights}})
+    $ownerSid=$acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
+    Assert-ProviderAclMetadata $ownerSid ([Security.Principal.WindowsIdentity]::GetCurrent().User.Value) $rules
 }
 function Get-ProviderCodePins {
     $pins = [ordered]@{}
@@ -55,7 +65,7 @@ function Assert-ProviderPlan($Plan, $Grant, [string] $PlanHash, [string] $Expect
     $null=Get-ProviderSshArguments @sshPin -PublicDockerArguments @('version')
 }
 
-function Open-ProviderInput([string] $Path, [long] $Length, [long] $Limit) {
+function Get-ProviderOrdinaryItem([string] $Path) {
     Assert-ProviderCondition ([IO.Path]::IsPathFullyQualified($Path) -and
         $Path -notmatch '(^|[\\/])\.\.?([\\/]|$)|[\x00-\x1f]|~[0-9]|^\\\\') 'input-path'
     $item=Get-Item -LiteralPath $Path -Force
@@ -64,6 +74,25 @@ function Open-ProviderInput([string] $Path, [long] $Length, [long] $Limit) {
         Assert-ProviderCondition (($cursor.Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) 'input-link'
         $cursor=if($cursor -is [IO.DirectoryInfo]){$cursor.Parent}else{$cursor.Directory}
     }
+    return $item
+}
+function Assert-ProviderLocalMetadata($Plan,[string] $PlanPath) {
+    Assert-ProviderCondition $IsWindows 'operator-platform'
+    foreach($path in @($Plan.stateDirectory,$PlanPath,$Plan.ssh.KnownHostsFile,$Plan.ssh.IdentityFile,$Plan.snapshot.path,$Plan.share.path)) {
+        $null=Get-ProviderOrdinaryItem $path
+        Assert-PrivateOperatorAcl $path
+    }
+    foreach($kind in @('snapshot','share')){
+        $item=Get-ProviderOrdinaryItem $Plan[$kind].path
+        Assert-ProviderCondition (-not $item.PSIsContainer -and $item.Length -eq $Plan[$kind].bytes) 'input-size'
+        if($kind -ceq 'share'){
+            Assert-ProviderCondition ($item.LastWriteTimeUtc.Ticks -eq (ConvertTo-ProviderTimestamp $Plan.share.mtimeUtc).UtcTicks) 'share-reference-time'
+        }
+    }
+    # No original file stream, digest, private key parser, container or provider call.
+}
+function Open-ProviderInput([string] $Path, [long] $Length, [long] $Limit) {
+    $item=Get-ProviderOrdinaryItem $Path
     Assert-ProviderCondition (-not $item.PSIsContainer -and $item.Length -eq $Length -and $Length -le $Limit) 'input-size'
     $stream=[IO.File]::Open($Path,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
     if($stream.Length -ne $Length){$stream.Dispose();throw 'Provider recovery refused: input-open-size'}
@@ -81,7 +110,7 @@ function New-ProviderAttempt($Plan, [string] $PlanHash, [string] $StateDirectory
     $ctx=@{Plan=$Plan;PlanHash=$PlanHash;Journal=$stream;JournalPath=$path;Clock=[Diagnostics.Stopwatch]::StartNew();
         Expires=$Expires;TargetId=$null;TargetName=('fleetory-bao-restore-'+$Plan.operationId.Replace('-',''));
         RunClaimed=$false;ForceClaimed=$false;RootClaimed=$false;TokenClaimed=$false;SignatureClaimed=$false;
-        ShareSubmissions=0;SnapshotReads=0;ShareReads=0;Phase='preflight';OwnershipVerified=$false;Cleanup=$false;
+        ShareSubmissions=0;SnapshotReads=0;ShareReads=0;SnapshotLoads=0;ShareLoads=0;Phase='preflight';OwnershipVerified=$false;Cleanup=$false;
         CreatedNotBefore=[DateTimeOffset]::UtcNow;ImageId=$null;TargetAbsent=$false}
     try { Write-ProviderEvent $ctx 'attempt-consumed' } catch { $stream.Dispose();throw }
     return $ctx

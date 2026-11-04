@@ -98,6 +98,7 @@ function Invoke-ProviderRecoveryController($Plan,$Grant,[string] $PlanHash,[stri
             $ctx.ShareReads++
         }
         $bytes=[byte[]](& $InputReader $Kind $Plan[$Kind])
+        if($Kind -ceq 'snapshot'){$ctx.SnapshotLoads++}else{$ctx.ShareLoads++}
         Assert-ProviderCondition ($bytes.Length -eq $Plan[$Kind].bytes) 'material-size'
         if($Kind -ceq 'snapshot'){Assert-SnapshotReference $bytes $Plan.snapshot.sha256}
         return ,$bytes
@@ -236,6 +237,7 @@ function Invoke-ProviderRecoveryController($Plan,$Grant,[string] $PlanHash,[stri
         planSha256=$PlanHash;verified=($success -and $cleanupVerified);failureStage=$(if($success){$null}else{$failureStage});
         failureCode=$failureCode;
         cleanupVerified=$cleanupVerified;independentExpirySeconds=3300;snapshotReads=$ctx.SnapshotReads;shareReads=$ctx.ShareReads;
+        snapshotInputLoads=$ctx.SnapshotLoads;shareInputLoads=$ctx.ShareLoads;
         shareSubmissions=$ctx.ShareSubmissions;forceRestoreClaimed=$ctx.ForceClaimed;targetRootClaimed=$ctx.RootClaimed;
         probeTokenClaimed=$ctx.TokenClaimed;nonCommandSignatureClaimed=$ctx.SignatureClaimed;sourceProviderApiCalls=0;
         productionTokensIssued=$false;fullSystemRecoveryVerified=$false;phase7Complete=$false}

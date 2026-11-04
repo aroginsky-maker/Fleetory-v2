@@ -6,6 +6,17 @@ $controllerRepo=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 . (Join-Path $PSScriptRoot 'ProviderRecoveryFixture.ps1')
 $controllerRoot=Join-Path ([IO.Path]::GetTempPath()) ('fleetory-controller-'+[Guid]::NewGuid().ToString('N'))
 $null=[IO.Directory]::CreateDirectory($controllerRoot)
+if($IsWindows){
+    # Synthetic metadata tests need a controlled directory, independent of runner Temp inheritance.
+    $fixtureAcl=[Security.AccessControl.DirectorySecurity]::new()
+    $fixtureOwner=[Security.Principal.WindowsIdentity]::GetCurrent().User
+    $fixtureAcl.SetOwner($fixtureOwner);$fixtureAcl.SetAccessRuleProtection($true,$false)
+    foreach($sid in @($fixtureOwner.Value,'S-1-5-18','S-1-5-32-544')){
+        $fixtureAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new($sid),[Security.AccessControl.FileSystemRights]::FullControl,
+            [Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit',[Security.AccessControl.PropagationFlags]::None,[Security.AccessControl.AccessControlType]::Allow))
+    }
+    Set-Acl -LiteralPath $controllerRoot -AclObject $fixtureAcl
+}
 $script:controllerRefusals=0
 function Assert-ControllerTest([bool] $Value,[string] $Code){if(-not $Value){throw ('Controller test failed: '+$Code)}}
 function Refuse-Controller([scriptblock] $Action){
@@ -23,6 +34,17 @@ try {
     $grant=New-ControllerFixtureGrant $plan $hash
     $now=[DateTimeOffset]::UtcNow
     Assert-ProviderPlan $plan $grant $hash 'synthetic-fixture' $now
+    $aclOperator='S-1-5-21-100-200-300-1001'
+    $ownerRights=@{Sid='S-1-3-4';Type='Allow';Rights=[Security.AccessControl.FileSystemRights]::FullControl}
+    foreach($trustedOwner in @($aclOperator,'S-1-5-18','S-1-5-32-544')){
+        Assert-ProviderAclMetadata $trustedOwner $aclOperator @($ownerRights)
+    }
+    $foreignWriter=@{Sid='S-1-1-0';Type='Allow';Rights=[Security.AccessControl.FileSystemRights]::Write}
+    Refuse-Controller {Assert-ProviderAclMetadata 'S-1-5-21-100-200-300-9999' $aclOperator @($ownerRights)}
+    Refuse-Controller {Assert-ProviderAclMetadata 'S-1-5-21-100-200-300-9999' $aclOperator @()}
+    Refuse-Controller {Assert-ProviderAclMetadata $aclOperator $aclOperator @($foreignWriter)}
+    Refuse-Controller {Assert-ProviderAclMetadata $aclOperator $aclOperator @($ownerRights,$foreignWriter)}
+    Refuse-Controller {Assert-ProviderAclMetadata $aclOperator $aclOperator @(@{Sid='S-1-3-0';Type='Allow';Rights=[Security.AccessControl.FileSystemRights]::FullControl})}
     $savedCulture=[Globalization.CultureInfo]::CurrentCulture
     try {
         foreach($culture in @('ru-RU','en-US')){
@@ -154,6 +176,23 @@ try {
         $lock=Open-ProviderInput $sharePath 44 44
         try {Refuse-Controller {[IO.File]::WriteAllBytes($sharePath,[byte[]]::new(44))}}
         finally {$lock.Dispose()}
+        # Exercise the actual Windows OWNER RIGHTS ACE without touching operator files.
+        $fileAcl=Get-Acl -LiteralPath $sharePath
+        $fileAcl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new([Security.Principal.SecurityIdentifier]::new('S-1-3-4'),[Security.AccessControl.FileSystemRights]::FullControl,[Security.AccessControl.AccessControlType]::Allow))
+        Set-Acl -LiteralPath $sharePath -AclObject $fileAcl
+        Assert-PrivateOperatorAcl $sharePath
+        [IO.File]::WriteAllBytes($plan.snapshot.path,[byte[]]::new(4096))
+        [IO.File]::WriteAllText($plan.ssh.IdentityFile,'generated public placeholder')
+        $fixturePlanPath=Join-Path $controllerRoot 'fixture-plan.json'
+        [IO.File]::WriteAllText($fixturePlanPath,'{}')
+        $plan.share.mtimeUtc=[IO.File]::GetLastWriteTimeUtc($sharePath).ToString('O')
+        $beforeMetadataAcl=(Get-Acl -LiteralPath $sharePath).Sddl
+        Assert-ProviderLocalMetadata $plan $fixturePlanPath
+        Assert-ControllerTest ((Get-Acl -LiteralPath $sharePath).Sddl -ceq $beforeMetadataAcl) 'metadata preflight changed ACL'
+        $badMetadata=Copy-ControllerObject $plan;$badMetadata.snapshot.bytes=4097
+        Refuse-Controller {Assert-ProviderLocalMetadata $badMetadata $fixturePlanPath}
+        $badMetadata=Copy-ControllerObject $plan;$badMetadata.share.mtimeUtc=[DateTimeOffset]::UtcNow.AddDays(-1).ToString('O')
+        Refuse-Controller {Assert-ProviderLocalMetadata $badMetadata $fixturePlanPath}
     }
     Refuse-Controller {Open-ProviderInput $sharePath 43 44}
     Refuse-Controller {Open-ProviderInput (Join-Path $controllerRoot '../share') 44 44}
@@ -185,7 +224,8 @@ try {
             }
         }
         $proof=Invoke-ProviderRecoveryController $plan $grant $hash $controllerRoot $mock $noRead 'synthetic-fixture'
-        Assert-ControllerTest (-not $proof.verified -and $proof.snapshotReads -eq 0 -and $proof.shareReads -eq 0) 'preflight crossed material boundary'
+        Assert-ControllerTest (-not $proof.verified -and $proof.snapshotReads -eq 0 -and $proof.shareReads -eq 0 -and
+            $proof.snapshotInputLoads -eq 0 -and $proof.shareInputLoads -eq 0) 'preflight crossed material boundary'
         Assert-ControllerTest ($proof.cleanupVerified -eq ($fault -cne 'cleanup-lost')) 'cleanup result inaccurate'
         $expectedCode=switch($fault){'memory'{'host-capacity-clock'}'clock'{'host-preflight'}'host'{'host-preflight'}
             'existing'{'new-target-inspection'}'source-id'{'new-target-id'}'lifetime'{'grant-target-expiry'}default{$null}}
