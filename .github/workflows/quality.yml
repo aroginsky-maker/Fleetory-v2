@@ -100,6 +100,10 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/ImmuDataRoundtripPolicy.Tests.ps1
 
+      - name: Verify fresh native Server pair admission on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/fresh_server_pair_tests.py
+
       - name: Verify synthetic recovery isolation contract on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/recovery_isolation_tests.py
@@ -395,6 +399,13 @@ jobs:
       - name: Verify nonempty native immudb data roundtrip
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/NativeImmuDataRoundtrip.Tests.ps1 -Python (Get-Command python3).Source
+
+      - name: Verify coherent native Server pair restore and lifecycle
+        shell: pwsh
+        run: |
+          python3 -B ./tests/Fleetory.Tools.Tests/fresh_server_pair_tests.py
+          if ($LASTEXITCODE -ne 0) { throw 'Fresh pair admission contract failed.' }
+          ./tests/Fleetory.Tools.Tests/NativeServerPair.Tests.ps1 -Python (Get-Command python3).Source
 
       - name: Verify Sonar issue gate
         shell: pwsh

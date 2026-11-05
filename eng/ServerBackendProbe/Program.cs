@@ -17,6 +17,7 @@ internal static class Program
     internal const string PrivateDirectory = "/run/fleetory-native/server";
     private static readonly HashSet<string> Modes = new(StringComparer.Ordinal)
     {
+        "pair-seed-sql", "pair-publish", "pair-read", "pair-users", "pair-audit-drift", "pair-closed", "pair-host",
         "immu-seed", "immu-inspect", "immu-reader-create", "immu-reader", "immu-wrong-password",
         "schema", "restore-schema", "db-ready", "db-write", "db-rollback", "db-atomic", "db-password", "db-tls", "db-plaintext",
         "db-update", "db-delete", "db-schema", "db-temp", "db-owner", "db-queue-delete",
@@ -53,6 +54,8 @@ internal static class Program
     private static async Task<object> RunAsync(string mode)
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(18));
+        if (mode.StartsWith("pair-", StringComparison.Ordinal) && mode != "pair-host")
+        { return await FreshPairControl.ExecuteAsync(mode, deadline.Token); }
         if (mode.StartsWith("immu-", StringComparison.Ordinal))
         { return await AuditRoundtripControl.ExecuteAsync(mode, deadline.Token); }
         if (mode == "restore-schema")
@@ -75,17 +78,18 @@ internal static class Program
             await AuditFixtureControl.ExecuteAsync(mode, deadline.Token);
             return new { category = mode, httpHostStarted = false, issuerActivated = false };
         }
-        var files = new FileSecretProvider(PrivateDirectory);
+        var privateDirectory = mode == "pair-host" ? "/tmp/server" : PrivateDirectory;
+        var files = new FileSecretProvider(privateDirectory);
         var binding = new NpgsqlConnectionStringBuilder(files.GetRequiredSecret("fleetory-postgresql"));
         if (binding.Host != "127.0.0.1" || binding.Database != "fleetory" || binding.Username != "fleetory_server" ||
             binding.Port != 5432 || binding.GssEncryptionMode != GssEncryptionMode.Disable || !string.IsNullOrEmpty(binding.Options) ||
-            binding.RootCertificate != PrivateDirectory + "/infrastructure-ca" ||
+            binding.RootCertificate != privateDirectory + "/infrastructure-ca" ||
             binding.SslMode != (mode == "db-plaintext" ? SslMode.Disable : SslMode.VerifyFull))
         { throw new InvalidOperationException("Invalid generated fixture binding."); }
         await using var app = FleetoryApplication.Build([
             "--environment=Production", "--Logging:LogLevel:Default=None",
             "--Logging:WorkerObservation:LogLevel:Default=Error",
-            "--Fleetory:Secrets:Provider=File", "--Fleetory:Secrets:Directory=" + PrivateDirectory,
+            "--Fleetory:Secrets:Provider=File", "--Fleetory:Secrets:Directory=" + privateDirectory,
             "--Fleetory:Web:Port=19580", "--Fleetory:AgentGateway:Enabled=true", "--Fleetory:AgentGateway:Port=19581",
             "--Fleetory:AdminGateway:Enabled=true", "--Fleetory:AdminGateway:Port=19582", "--Fleetory:AdminGateway:BindAddress=127.0.0.1",
             "--Fleetory:AdminGateway:Oidc:Enabled=true", "--Fleetory:AdminGateway:Oidc:Authority=https://127.0.0.1:19999/realms/fixture",
@@ -97,6 +101,7 @@ internal static class Program
         await using var scope = app.Services.CreateAsyncScope();
         var platform = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
         var core = scope.ServiceProvider.GetRequiredService<CoreDbContext>();
+        if (mode == "pair-host") { return await FreshPairHost.ExecuteAsync(app, platform, deadline.Token); }
         if (mode == "schema")
         {
             var sql = platform.GetService<IMigrator>().GenerateScript() + core.GetService<IMigrator>().GenerateScript();

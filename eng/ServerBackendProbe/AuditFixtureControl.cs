@@ -20,20 +20,7 @@ internal static class AuditFixtureControl
         if (mode == "audit-prepare")
         {
             await client.SendAsync(HttpMethod.Post, "api/db/create/v2", new { name = "fleetoryaudit" }, cancellation);
-            foreach (var item in new[] { ("fixture_writer", "writer", 2), ("fixture_reader", "reader", 1) })
-            {
-                await client.SendAsync(HttpMethod.Post, "api/user", new
-                { user = Encode(item.Item1), password = Encode(Secret(packet.RootElement, item.Item2)), permission = item.Item3, database = "fleetoryaudit" }, cancellation);
-            }
-            var users = await client.SendAsync(HttpMethod.Get, "api/user/list", null, cancellation);
-            foreach (var item in new[] { ("fixture_writer", 2), ("fixture_reader", 1) })
-            {
-                var found = users.GetProperty("users").EnumerateArray().Where(user => user.GetProperty("user").GetString() == Encode(item.Item1)).ToArray();
-                if (found.Length != 1 || !found[0].GetProperty("active").GetBoolean()) { throw new InvalidOperationException("Fixture user unavailable."); }
-                var permissions = found[0].GetProperty("permissions").EnumerateArray().ToArray();
-                if (permissions.Length != 1 || permissions[0].GetProperty("database").GetString() != "fleetoryaudit" ||
-                    permissions[0].GetProperty("permission").GetInt32() != item.Item2) { throw new InvalidOperationException("Fixture user privilege drift."); }
-            }
+            await CreateUsersAsync(client, packet.RootElement, cancellation);
             return;
         }
         await client.SelectDatabaseAsync(cancellation);
@@ -43,6 +30,24 @@ internal static class AuditFixtureControl
         if (entries.Length != 1 || entries[0].GetProperty("key").GetString() != key)
         { throw new InvalidOperationException("Fixture audit event count drift."); }
         await VerifyFixedEventAsync(client, cancellation);
+    }
+
+    internal static async Task CreateUsersAsync(FixtureAuditClient client, JsonElement packet, CancellationToken cancellation)
+    {
+        foreach (var item in new[] { ("fixture_writer", "writer", 2), ("fixture_reader", "reader", 1) })
+        {
+            await client.SendAsync(HttpMethod.Post, "api/user", new
+            { user = Encode(item.Item1), password = Encode(Secret(packet, item.Item2)), permission = item.Item3, database = "fleetoryaudit" }, cancellation);
+        }
+        var users = await client.SendAsync(HttpMethod.Get, "api/user/list", null, cancellation);
+        foreach (var item in new[] { ("fixture_writer", 2), ("fixture_reader", 1) })
+        {
+            var found = users.GetProperty("users").EnumerateArray().Where(user => user.GetProperty("user").GetString() == Encode(item.Item1)).ToArray();
+            if (found.Length != 1 || !found[0].GetProperty("active").GetBoolean()) { throw new InvalidOperationException("Fixture user unavailable."); }
+            var permissions = found[0].GetProperty("permissions").EnumerateArray().ToArray();
+            if (permissions.Length != 1 || permissions[0].GetProperty("database").GetString() != "fleetoryaudit" ||
+                permissions[0].GetProperty("permission").GetInt32() != item.Item2) { throw new InvalidOperationException("Fixture user privilege drift."); }
+        }
     }
 
     internal static async Task VerifyFixedEventAsync(FixtureAuditClient client, CancellationToken cancellation)

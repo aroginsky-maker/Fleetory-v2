@@ -4,6 +4,15 @@
 
 ## Implemented
 
+- A distinct fresh Server pair controller now uses one generated four-event model
+  across real PostgreSQL and the production immudb sink, captures both native
+  backups under measured metadata, restores into isolated targets and verifies
+  all ten fields before native Server startup. Typed data refusals must leave
+  ports closed; host/restart checks must preserve data and signed audit state.
+  It uses no original approval profiles or placeholder artifact. Original-v2
+  compatibility, original service recovery and full-system readiness remain open.
+  See [NativeServerPair](docs/operations/NativeServerPair.md).
+
 - A separate fresh immudb data fixture now backs up and restores four synthetic
   audit keys through immutable captured native bytes. It compares exact values,
   revisions, transactions and signed tips, rejects corrupted/truncated backups

@@ -103,7 +103,7 @@ internal static class HostCases
         }
     }
 
-    private static async Task VerifyHttpAsync(string expected, CancellationToken cancellation)
+    internal static async Task VerifyHttpAsync(string expected, CancellationToken cancellation)
     {
         using var client = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false })
         { BaseAddress = new Uri("http://127.0.0.1:19580/"), Timeout = TimeSpan.FromSeconds(2) };
@@ -139,7 +139,7 @@ internal static class HostCases
         { throw new InvalidOperationException("Native HTTP body drift."); }
     }
 
-    private static async Task ProbePortAsync(int port, bool open, CancellationToken cancellation)
+    internal static async Task ProbePortAsync(int port, bool open, CancellationToken cancellation)
     {
         using var client = new TcpClient(AddressFamily.InterNetwork);
         try
