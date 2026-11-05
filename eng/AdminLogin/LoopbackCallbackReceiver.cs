@@ -46,7 +46,7 @@ public sealed class LoopbackCallbackReceiver : IAsyncDisposable
             }
             var uri = new Uri(OidcLoginProtocol.RedirectUriString + context.Request.QueryString.Value);
             if (!receiver._response.TrySetResult(uri)) { context.Response.StatusCode = 409; return; }
-            await context.Response.WriteAsync("Authorization response received. You can close this tab.");
+            await context.Response.WriteAsync("Authorization response received. You can close this tab.", context.RequestAborted);
         });
         try { await receiver._app.StartAsync(cancellationToken); return receiver; }
         catch { await receiver._app.DisposeAsync(); throw; }
