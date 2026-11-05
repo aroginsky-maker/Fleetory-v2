@@ -31,7 +31,7 @@ internal static class RegistryCases
     });
 
     internal static async Task<object> ExecuteAsync(IServiceProvider services, TlsObservation observation,
-        CancellationToken cancellation, CredentialState state = CredentialState.Unregistered)
+        CredentialState state, CancellationToken cancellation)
     {
         var (expectedAgent, expectedAdmin, events, action) = state switch
         {
@@ -78,9 +78,9 @@ internal static class RegistryCases
         }
         await RequireInventoryAsync(connection, inventory, events, 0, cancellation);
         WorkerCases.RequireQueue(await WorkerCases.ReadQueueAsync(database, cancellation), 0, 0);
-        await ClientTlsCases.RequireRegistryResponseAsync(19581, agentRoot, agent, observation, cancellation, state);
+        await ClientTlsCases.RequireRegistryResponseAsync(19581, agentRoot, agent, observation, state, cancellation);
         await RequireInventoryAsync(connection, inventory, events, 0, cancellation);
-        await ClientTlsCases.RequireRegistryResponseAsync(19582, adminRoot, admin, observation, cancellation, state);
+        await ClientTlsCases.RequireRegistryResponseAsync(19582, adminRoot, admin, observation, state, cancellation);
         await RequireInventoryAsync(connection, inventory, events + 1, 1, cancellation);
         while ((await WorkerCases.ReadQueueAsync(database, cancellation)).Rows != 0)
         { await Task.Delay(TimeSpan.FromMilliseconds(50), cancellation); }

@@ -50,8 +50,8 @@ internal static class HostCases
             if (registered)
             {
                 using var tls = new TlsObservation();
-                var boundary = await RegistryCases.ExecuteAsync(app.Services, tls, cancellation,
-                    mode == "host-revoked" ? CredentialState.Revoked : CredentialState.Registered);
+                var boundary = await RegistryCases.ExecuteAsync(app.Services, tls,
+                    mode == "host-revoked" ? CredentialState.Revoked : CredentialState.Registered, cancellation);
                 if (mode == "host-revoked") { revokedBoundary = boundary; }
                 else { registeredBoundary = boundary; }
             }

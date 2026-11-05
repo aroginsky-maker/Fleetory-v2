@@ -29,7 +29,7 @@ internal static class ClientTlsCases
         using var observation = new TlsObservation();
         await GatewayAsync(19581, agentRoot, adminRoot, agentClient, adminClient, agentServer, observation, cancellation);
         await GatewayAsync(19582, adminRoot, agentRoot, adminClient, agentClient, adminServer, observation, cancellation);
-        var registry = await RegistryCases.ExecuteAsync(services, observation, cancellation);
+        var registry = await RegistryCases.ExecuteAsync(services, observation, CredentialState.Unregistered, cancellation);
         return new { gateways = 2, trustedClientHttpResponses = 2, missingClientRefusals = 2,
             crossRootClientRefusals = 2, wrongEkuClientRefusals = 2, serverRootRefusals = 2,
             serverHostnameRefusals = 2, protocol = "TLS1.2", responseStatus = 404,
@@ -41,7 +41,7 @@ internal static class ClientTlsCases
     }
 
     internal static Task RequireRegistryResponseAsync(int port, X509Certificate2 root, X509Certificate2 client,
-        TlsObservation observation, CancellationToken cancellation, CredentialState state) =>
+        TlsObservation observation, CredentialState state, CancellationToken cancellation) =>
         ConnectAsync(port, root, client, state switch
         {
             CredentialState.Unregistered => TlsCase.Registry, CredentialState.Registered => TlsCase.Registered,
