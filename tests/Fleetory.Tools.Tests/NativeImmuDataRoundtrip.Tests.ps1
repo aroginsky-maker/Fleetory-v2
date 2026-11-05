@@ -70,11 +70,11 @@ function New-Store([string]$Role){
     $absent=Invoke-Docker @('inspect',$name) -AllowFailure
     Assert-ImmuData ($absent.ExitCode -ne 0 -and ($absent.Stderr+$absent.Stdout) -match '(?i)no such (object|container)') 'fresh-name'
     $s=@{Id=$null;Session=$session;Name=$name;Started=[DateTimeOffset]::UtcNow;Role=$Role};$script:stores+=,$s;Ledger
-    $args=@('run','-d','--rm','--name',$name,'--label',('fleetory.immu-data.session='+$session),'--network','none','--read-only','--user','3322:3322',
+    $storeArguments=@('run','-d','--rm','--name',$name,'--label',('fleetory.immu-data.session='+$session),'--network','none','--read-only','--user','3322:3322',
         '--cap-drop','ALL','--security-opt','no-new-privileges','--memory','384m','--cpus','1','--pids-limit','128','--ulimit','core=0',
         '--tmpfs',('/data:'+$script:nativeAuditTmpfs['/data']),'--tmpfs',('/tmp:'+$script:nativeAuditTmpfs['/tmp']),
         '--entrypoint','/bin/sh',$imageName,'-c','exec /bin/sleep 3300')
-    $s.Id=(Invoke-Docker $args).Stdout.Trim();Ledger;Owned $s
+    $s.Id=(Invoke-Docker $storeArguments).Stdout.Trim();Ledger;Owned $s
     $null=Invoke-Docker @('exec',$s.Id,'/bin/mkdir','-m','700','/tmp/empty-ca-dir')
     foreach($entry in @(@('/tmp/ca.pem',$tls.RootCertificatePem),@('/tmp/server.crt',$tls.ServerCertificatePem),@('/tmp/server.key',$tls.ServerPrivateKeyPem),
         @('/tmp/client.crt',$tls.ClientCertificatePem),@('/tmp/client.key',$tls.ClientPrivateKeyPem),@('/tmp/state.key',$script:signingPem))){Slot $s $entry[0] $entry[1]}

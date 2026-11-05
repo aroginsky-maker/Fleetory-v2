@@ -13,8 +13,8 @@ Refused-Immu {Assert-ImmuDataPacket $bytes $pin.ToUpperInvariant()}
 foreach($id in @('','live-source',('a'*63),('A'*64),(('a'*64)+"`n"),'../target')){Refused-Immu {Get-ImmuDataCliArguments $id 'restore'}}
 Refused-Immu {Get-ImmuDataCliArguments ('a'*64) 'force'}
 Refused-Immu {Get-ImmuDataImageName ('../'+[Guid]::NewGuid().ToString())}
-$args=Get-ImmuDataCliArguments ('a'*64) 'restore'
-Assert-ImmuData (($args[-3..-1]-join '|') -ceq 'hot-restore|fleetoryaudit|--input=-' -and $args -cnotcontains '--force' -and $args -cnotcontains '--append') 'restore-argv'
+$restoreArguments=Get-ImmuDataCliArguments ('a'*64) 'restore'
+Assert-ImmuData (($restoreArguments[-3..-1]-join '|') -ceq 'hot-restore|fleetoryaudit|--input=-' -and $restoreArguments -cnotcontains '--force' -and $restoreArguments -cnotcontains '--append') 'restore-argv'
 Assert-ImmuData (((Get-ImmuDataCliArguments ('a'*64) 'verify')[-3..-1] -join '|') -ceq 'hot-restore|--verify-only|--input=-') 'verify-argv'
 $expected=@{database='fleetoryaudit';tx=[long]5;txHash='A'*64;keyFingerprint='B'*64;keyCount=4;entriesSha256='c'*64}
 Assert-ImmuDataPoint $expected $expected
