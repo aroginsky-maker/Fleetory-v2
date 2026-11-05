@@ -17,7 +17,7 @@ internal static class Program
     internal const string PrivateDirectory = "/run/fleetory-native/server";
     private static readonly HashSet<string> Modes = new(StringComparer.Ordinal)
     {
-        "schema", "db-ready", "db-write", "db-rollback", "db-atomic", "db-password", "db-tls", "db-plaintext",
+        "schema", "restore-schema", "db-ready", "db-write", "db-rollback", "db-atomic", "db-password", "db-tls", "db-plaintext",
         "db-update", "db-delete", "db-schema", "db-temp", "db-owner", "db-queue-delete",
         "audit-prepare", "audit-publish", "audit-repeat", "audit-conflict", "audit-password", "audit-readonly",
         "audit-database", "audit-tls", "audit-verify", "audit-health",
@@ -52,6 +52,11 @@ internal static class Program
     private static async Task<object> RunAsync(string mode)
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(18));
+        if (mode == "restore-schema")
+        {
+            return new { category = mode, sql = RestoreSchema.Generate(), databaseOpened = false,
+                httpHostStarted = false, issuerActivated = false };
+        }
         if (mode == "http-contract")
         { return new { category = mode, contract = HttpFixtureResponse.VerifyContract(), httpHostStarted = false, issuerActivated = false }; }
         if (mode == "persistent-contract")
@@ -92,6 +97,7 @@ internal static class Program
         if (mode == "schema")
         {
             var sql = platform.GetService<IMigrator>().GenerateScript() + core.GetService<IMigrator>().GenerateScript();
+            if (sql != RestoreSchema.Generate()) { throw new InvalidOperationException("Offline schema differs from native DI schema."); }
             if (sql.Length is < 1 or > 131072) { throw new InvalidOperationException("Unbounded fixture schema."); }
             return new { category = "schema", sql };
         }

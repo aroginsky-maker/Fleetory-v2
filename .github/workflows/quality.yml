@@ -92,6 +92,10 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/recovery_test_gate_tests.py
 
+      - name: Verify native PostgreSQL data roundtrip policy on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/PgDataRoundtripPolicy.Tests.ps1
+
       - name: Verify synthetic recovery isolation contract on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/recovery_isolation_tests.py
@@ -379,6 +383,10 @@ jobs:
           dotnet restore ./eng/ServerBackendProbe/ServerBackendProbe.csproj --disable-parallel
           if ($LASTEXITCODE -ne 0) { throw 'Server backend probe restore failed.' }
           ./tests/Fleetory.Tools.Tests/NativeServerBackend.Tests.ps1
+
+      - name: Verify nonempty native PostgreSQL data roundtrip
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativePgDataRoundtrip.Tests.ps1 -Python (Get-Command python3).Source
 
       - name: Verify Sonar issue gate
         shell: pwsh
