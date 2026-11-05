@@ -63,7 +63,7 @@ function Invoke-ServerProbe([string]$Mode,[string]$Expected,[byte[]]$Packet=$nul
         }
         throw ('Server probe mismatch: '+$Mode+';category='+$category+';exit='+$r.ExitCode+';stderrLength='+$r.Stderr.Length)
     }
-    if($Mode -cne 'schema'){Assert-True ($record.httpHostStarted -eq ($Mode -cin @('host-degraded','host-drain')) -and $record.issuerActivated -eq $false) 'Host or issuer scope drift.'}
+    if($Mode -cne 'schema'){Assert-True ($record.httpHostStarted -eq ($Mode -cin @('host-degraded','host-drain','host-registered')) -and $record.issuerActivated -eq $false) 'Host or issuer scope drift.'}
     return $record
 }
 function Assert-DatabaseCount([int]$Expected){
@@ -112,8 +112,9 @@ try{
     $stage='postgres';$dbStarted=[DateTimeOffset]::UtcNow;$dbClaimed=$true
     $dbId=(Invoke-Docker (Get-NativeJournalArguments $session)).Stdout.Trim();Read-Store 'postgres'
     $material=New-PilotDisposableTlsMaterial
-    $agent=New-PilotDisposableTlsMaterial -IncludeClient -IdentityUri ('urn:fleetory:device:'+[Guid]::NewGuid().ToString('D'))
-    $admin=New-PilotDisposableTlsMaterial -IncludeClient -IdentityUri ('urn:fleetory:admin:'+[Guid]::NewGuid().ToString('D'))
+    $agentDevice=[Guid]::NewGuid();$adminPerson=[Guid]::NewGuid()
+    $agent=New-PilotDisposableTlsMaterial -IncludeClient -IdentityUri ('urn:fleetory:device:'+$agentDevice.ToString('D'))
+    $admin=New-PilotDisposableTlsMaterial -IncludeClient -IdentityUri ('urn:fleetory:admin:'+$adminPerson.ToString('D'))
     $wrongMaterial=New-PilotDisposableTlsMaterial
     foreach($tls in @($material,$agent,$admin)){
         foreach($line in ($tls.ServerPrivateKeyPem -split "`n")){if($line.Length -ge 40 -and -not $line.StartsWith('-----')){$canaries.Add($line.Substring(0,40))}}
@@ -151,6 +152,8 @@ try{
         Write-ServerSlot ($role+'-gateway-identity-key') $tls.IdentityClientPrivateKeyPem
     }
     Write-ServerSlot 'infrastructure-ca' $material.RootCertificatePem;Write-ServerSlot 'audit-immudb-password' $secrets.writer;Write-ServerConnection $secrets.database
+    $httpContract=Invoke-ServerProbe 'http-contract' 'http-contract'
+    Assert-True ($httpContract.contract.accepted -eq 4 -and $httpContract.contract.refused -eq 12) 'HTTP framing contract incomplete.'
     $stage='schema';$schema=Invoke-ServerProbe 'schema' 'schema'
     Assert-True ($schema.sql.Length -gt 0 -and $schema.sql.Length -le 131072) 'Native schema unbounded.'
     $null=Invoke-Database 'fleetory' ('SET ROLE fleetory_owner;'+"`n"+$schema.sql+"`nRESET ROLE; GRANT USAGE ON SCHEMA core,platform TO fleetory_server; GRANT SELECT ON ALL TABLES IN SCHEMA core,platform TO fleetory_server; GRANT INSERT ON platform.audit_events,platform.audit_export_queue TO fleetory_server;")
@@ -193,7 +196,7 @@ try{
     $stage='server-host';$hostLifecycle=Invoke-NativeServerHost
     $proof=[ordered]@{schema='fleetory.native-server-backend.v1';verified=$true;nativeDbContexts=2;nativeHealthChecksAccepted=2;
         auditOutboxCommitVerified=$true;explicitRollbackVerified=$true;partialWriteRollbackVerified=$true;databaseRefusals=9;
-        auditPublicationsAccepted=2;singleRevisionVerified=$true;auditKeyCount=6;directSinkAuditKeyCount=1;auditFieldsVerified=10;auditRefusals=5;pipeline=$pipeline;workerLifecycle=$workerLifecycle;hostLifecycle=$hostLifecycle;originalMaterialUsed=$false;
+        auditPublicationsAccepted=2;singleRevisionVerified=$true;auditKeyCount=7;directSinkAuditKeyCount=1;auditFieldsVerified=10;auditRefusals=5;pipeline=$pipeline;workerLifecycle=$workerLifecycle;hostLifecycle=$hostLifecycle;httpResponseContract=$httpContract.contract;originalMaterialUsed=$false;
         sourceVpsAccessed=$false;httpHostStarted=$true;issuerActivated=$false;publishedPorts=0;workerOnlyLoopback=$true;
         postgresBoundaryRefusals=16;workerBoundaryRefusals=23;auditBoundaryRefusals=17;sharedWorkerRefusals=9;fullSystemRecoveryVerified=$false;phase7Complete=$false}
 }

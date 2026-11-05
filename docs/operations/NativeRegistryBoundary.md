@@ -53,3 +53,9 @@ delivery of the Admin denial audit. Positive binding/registry/OIDC admission,
 original revocation/custody, physical Agent, human login, independent WORM and
 approvals, TLS1.3 and full-system RPO/RTO remain open. Phase7 is incomplete and
 PR#2 remains draft and unmerged.
+
+The subsequent [registered stage](NativeRegisteredBoundary.md) seeds only
+synthetic fixture rows and adds a third host: Agent204, registered Admin401
+without a token and one delivered OIDC-denial event. Its final state is six
+PostgreSQL events/seven immudb keys; the six-key result above remains the
+independent prerequisite snapshot.

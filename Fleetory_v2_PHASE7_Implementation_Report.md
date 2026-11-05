@@ -4,6 +4,15 @@
 
 ## Implemented
 
+- A third generated native host now verifies real durable Agent binding admission
+  (204) and mandatory OIDC refusal after Admin registration without a bearer
+  token (401). Fixture-owner rows explicitly state they are not external approval;
+  two runtime identity INSERT attempts remain denied. One OIDC-denial audit event
+  is automatically exported and independently matched across stores, preserving
+  prior records. The shared empty-response reader also rejects trailing CRLF-only
+  bodies and handles204 framing separately. See
+  [NativeRegisteredBoundary](docs/operations/NativeRegisteredBoundary.md).
+
 - The generated native gateway fixture now rejects valid-SAN credentials without
   durable Agent binding or Admin registration. Actual parser/store preflights and
   independent SQL inventories prevent a database error from satisfying403. The

@@ -23,8 +23,9 @@ internal static class HostCases
         { throw new InvalidOperationException("Unexpected native host state."); }
         await platform.Database.OpenConnectionAsync(cancellation);
         await DatabaseCases.VerifyAsync(platform, "platform.person_projections", cancellation);
-        WorkerCases.RequireQueue(await WorkerCases.ReadQueueAsync(platform, cancellation), 1, 0);
-        await WorkerCases.RequireHealthAsync(app.Services, HealthStatus.Degraded, cancellation);
+        var registered = mode == "host-registered";
+        WorkerCases.RequireQueue(await WorkerCases.ReadQueueAsync(platform, cancellation), registered ? 0 : 1, 0);
+        await WorkerCases.RequireHealthAsync(app.Services, registered ? HealthStatus.Healthy : HealthStatus.Degraded, cancellation);
         var worker = WorkerCases.GetUnstartedWorker(app.Services);
         using var observation = new WorkerObservation();
         app.Services.GetRequiredService<ILoggerFactory>().AddProvider(observation);
@@ -32,6 +33,7 @@ internal static class HostCases
         var expected = mode == "host-degraded" ? HealthStatus.Degraded : HealthStatus.Healthy;
         var stop = new Stopwatch();
         object? clientTls = null;
+        object? registeredBoundary = null;
         try
         {
             await app.StartAsync(cancellation);
@@ -44,6 +46,11 @@ internal static class HostCases
             await VerifyHttpAsync(expected.ToString(), cancellation);
             foreach (var port in Ports) { await ProbePortAsync(port, true, cancellation); }
             if (mode == "host-drain") { clientTls = await ClientTlsCases.ExecuteAsync(app.Services, cancellation); }
+            if (registered)
+            {
+                using var tls = new TlsObservation();
+                registeredBoundary = await RegistryCases.ExecuteAsync(app.Services, tls, cancellation, true);
+            }
             await WorkerCases.RequireHealthAsync(app.Services, expected, cancellation);
         }
         finally
@@ -58,13 +65,13 @@ internal static class HostCases
         { throw new InvalidOperationException("Native host shutdown incomplete."); }
         foreach (var port in Ports) { await ProbePortAsync(port, false, cancellation); }
         WorkerCases.RequireQueue(await WorkerCases.ReadQueueAsync(platform, cancellation), mode == "host-degraded" ? 1 : 0, 0);
-        if ((mode == "host-degraded" && observation.Errors < 1) || (mode == "host-drain" && observation.Errors != 0))
+        if ((mode == "host-degraded" && observation.Errors < 1) || (mode != "host-degraded" && observation.Errors != 0))
         { throw new InvalidOperationException("Native host worker failure drift."); }
         return new { processId = Environment.ProcessId, applicationStarted = true, applicationStopped = true,
             workerExecutionCompleted = true, stopElapsedMilliseconds = stop.ElapsedMilliseconds,
             claimFailures = observation.Errors, livenessBody = "Healthy", readinessBody = expected.ToString(),
             readinessStatusCode = 200, publicPrivilegedPathRefusals = 2, listeningPorts = Ports,
-            closedPortRefusals = 3, initialClosedPortRefusals = 3, clientTls };
+            closedPortRefusals = 3, initialClosedPortRefusals = 3, clientTls, registeredBoundary };
     }
 
     private static async Task WaitForWorkerAsync(string mode, BackgroundService worker, WorkerObservation observation,

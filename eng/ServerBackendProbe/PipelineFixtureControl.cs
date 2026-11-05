@@ -13,7 +13,7 @@ internal static class PipelineFixtureControl
         if (mode == "worker-verify")
         {
             expected.AddRange(packet.RootElement.GetProperty("events").EnumerateArray());
-            if (expected.Count is < 1 or > 5) { throw new InvalidOperationException("Fixture event count refused."); }
+            if (expected.Count is < 1 or > 6) { throw new InvalidOperationException("Fixture event count refused."); }
             if (packet.RootElement.TryGetProperty("absent", out var pending)) { absent = ReadId(pending); }
         }
         else
@@ -29,7 +29,7 @@ internal static class PipelineFixtureControl
         await client.SelectDatabaseAsync(cancellation);
         var fixedKey = FixtureAuditClient.EventKey(AuditCases.EventId);
         var expectedKeys = ids.Select(FixtureAuditClient.EventKey).Append(fixedKey).ToHashSet(StringComparer.Ordinal);
-        var scan = await client.SendAsync(HttpMethod.Post, "api/db/scan", new { prefix = FixtureAuditClient.Encode("fleetory/audit/v1/"), limit = 7 }, cancellation);
+        var scan = await client.SendAsync(HttpMethod.Post, "api/db/scan", new { prefix = FixtureAuditClient.Encode("fleetory/audit/v1/"), limit = 8 }, cancellation);
         var keys = scan.GetProperty("entries").EnumerateArray().Select(entry => entry.GetProperty("key").GetString()
             ?? throw new InvalidOperationException("Fixture audit key is null.")).ToArray();
         if (keys.Length != expectedKeys.Count || !expectedKeys.SetEquals(keys) ||

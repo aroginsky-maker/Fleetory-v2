@@ -13,7 +13,7 @@ internal static class ClientTlsCases
 {
     private const string ClientPurpose = "1.3.6.1.5.5.7.3.2";
     private const string ServerPurpose = "1.3.6.1.5.5.7.3.1";
-    private enum TlsCase { Trusted, Identity, Registry, MissingClient, CrossRootClient, WrongEkuClient, ServerRoot, ServerHostname }
+    private enum TlsCase { Trusted, Identity, Registry, Registered, MissingClient, CrossRootClient, WrongEkuClient, ServerRoot, ServerHostname }
 
     internal static async Task<object> ExecuteAsync(IServiceProvider services, CancellationToken cancellation)
     {
@@ -41,8 +41,8 @@ internal static class ClientTlsCases
     }
 
     internal static Task RequireRegistryRefusalAsync(int port, X509Certificate2 root, X509Certificate2 client,
-        TlsObservation observation, CancellationToken cancellation) =>
-        ConnectAsync(port, root, client, TlsCase.Registry, observation, cancellation);
+        TlsObservation observation, CancellationToken cancellation, bool registered = false) =>
+        ConnectAsync(port, root, client, registered ? TlsCase.Registered : TlsCase.Registry, observation, cancellation);
 
     private static async Task GatewayAsync(int port, X509Certificate2 root, X509Certificate2 otherRoot,
         X509Certificate2 client, X509Certificate2 otherClient, X509Certificate2 server,
@@ -90,7 +90,7 @@ internal static class ClientTlsCases
             catch (AuthenticationException) { return; }
             throw Failure("ServerTrustAccepted");
         }
-        if (mode is not (TlsCase.Trusted or TlsCase.Identity or TlsCase.Registry))
+        if (mode is not (TlsCase.Trusted or TlsCase.Identity or TlsCase.Registry or TlsCase.Registered))
         {
             await ObservePeerRefusalAsync(tls, options, deadline.Token);
             if (mode is TlsCase.CrossRootClient or TlsCase.WrongEkuClient && !selected) { throw Failure("ClientSelection"); }
@@ -102,11 +102,13 @@ internal static class ClientTlsCases
             tls.LocalCertificate is null || client is null ||
             !tls.LocalCertificate.GetRawCertData().AsSpan().SequenceEqual(client.RawData))
         { throw Failure("MutualAuthentication"); }
-        var path = mode is TlsCase.Identity or TlsCase.Registry ?
+        var path = mode is TlsCase.Identity or TlsCase.Registry or TlsCase.Registered ?
             (port == 19581 ? "/agent/identity" : "/admin/authorization/roles/00000000-0000-4000-8000-000000000001/versions") :
             "/fixture/client-tls";
-        await RequireHttpAsync(tls, path, mode == TlsCase.Trusted ? HttpStatusCode.NotFound : HttpStatusCode.Forbidden,
-            mode == TlsCase.Registry ? RegistryCases.Correlation(port) : null, deadline.Token);
+        var expected = mode == TlsCase.Registered ? (port == 19581 ? HttpStatusCode.NoContent : HttpStatusCode.Unauthorized) :
+            (mode == TlsCase.Trusted ? HttpStatusCode.NotFound : HttpStatusCode.Forbidden);
+        await RequireHttpAsync(tls, path, expected,
+            mode is TlsCase.Registry or TlsCase.Registered ? RegistryCases.Correlation(port, mode == TlsCase.Registered) : null, deadline.Token);
         await observation.RequireAsync(serverEndpoint, clientEndpoint, false, path, deadline.Token);
     }
 
@@ -137,14 +139,7 @@ internal static class ClientTlsCases
             length += read;
         }
         var response = Encoding.ASCII.GetString(buffer, 0, length);
-        if (correlation is not null && response.Split("\r\n").Count(line => line == "X-Correlation-ID: " + correlation) != 1)
-        { throw Failure("CorrelationResponse"); }
-        var statusLine = expected == HttpStatusCode.Forbidden ? "HTTP/1.1 403 Forbidden\r\n" : "HTTP/1.1 404 Not Found\r\n";
-        if (length > 1024 || !response.StartsWith(statusLine, StringComparison.Ordinal) ||
-            !response.Contains("\r\nContent-Length: 0\r\n", StringComparison.OrdinalIgnoreCase) ||
-            response.Contains("\r\nTransfer-Encoding:", StringComparison.OrdinalIgnoreCase) ||
-            !response.EndsWith("\r\n\r\n", StringComparison.Ordinal))
-        { throw Failure("HttpResponse"); }
+        HttpFixtureResponse.RequireEmpty(response, expected, correlation);
     }
 
     internal static X509Certificate2 ReadCertificate(FileSecretProvider files, string name) =>

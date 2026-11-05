@@ -1,7 +1,7 @@
 # Generated native Server HTTP host lifecycle
 
 `tests/Fleetory.Tools.Tests/NativeServerBackend.Tests.ps1` now follows the
-[registered-worker stage](NativeOutboxWorker.md) with two actual
+[registered-worker stage](NativeOutboxWorker.md) with three actual
 `FleetoryApplication` / `WebApplication` starts and stops. The production builder,
 modules, Kestrel, File provider, database services, immudb sink, health checks and
 hosted exporter are unchanged. These cases call the application's `StartAsync`
@@ -56,7 +56,7 @@ Every application stop has an independent five-second deadline. Require both
 `ApplicationStopped` and a completed, non-faulted worker execution task; normal
 cancellation is allowed. Each of the three ports must then produce native
 `ConnectionRefused`. Other socket errors, timeouts and ambiguous closure fail.
-Two distinct native process IDs bind the restart proof.
+Three distinct native process IDs bind the restart/admission proof.
 
 The healthy host also runs the [generated native client TLS matrix](NativeClientTls.md)
 against both actual gateway listeners before stopping. Matching clients receive
@@ -68,11 +68,15 @@ both trusted CN-only clients receive exact empty403 from the actual private GET
 routes, with exact native request-path correlation and unchanged cross-store data.
 The subsequent [registry refusal stage](NativeRegistryBoundary.md) uses valid-SAN
 leaves without durable binding/registration and verifies a delivered Admin denial.
+After fixture-only durable rows are seeded, the
+[registered boundary](NativeRegisteredBoundary.md) starts a third host with
+queue0/Healthy, requires Agent204 and registered Admin401 without a token, and
+checks automatic OIDC-denial delivery while runtime identity INSERT stays denied.
 
 Independent PostgreSQL counts and immudb exact-key/revision/content reads verify
 that the first host retained the event and the second delivered it. The original
-four PostgreSQL events remain unchanged; one new Admin denial gives five events.
-The direct-sink, prior pump, two worker, host and denial events give six total
+four PostgreSQL events remain unchanged; Admin registry and OIDC denials give six events.
+The direct-sink, prior pump, two worker, host and two denial events give seven total
 immudb keys, each at revision one with all ten expected fields. The final queue
 is empty. Existing generated-secret canaries, runtime
 constraints and verified resource absence remain mandatory.
