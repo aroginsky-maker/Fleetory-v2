@@ -12,14 +12,14 @@ function Read-PairStore($State,$Store,[string]$Kind,[switch]$Cleanup){
     if($Kind -ceq 'postgres'){Assert-NativeJournal $r[0] $Store.Id $Store.Session $State.PgImageId $Store.Started -CleanupOnly:$Cleanup}
     else{
         Assert-Pair ($Kind -ceq 'audit') 'store-kind'
-        Assert-NativeAudit $r[0] $Store.Id $Store.Session $State.ImageId $Store.Side.Id $Store.Started -CleanupOnly:$Cleanup
+        Assert-NativeAudit $r[0] $Store.Id $Store.Session $State.ImageId $Store.Side.Id $Store.Started -CleanupOnly:$Cleanup -PairSecrets
     }
 }
 function Write-PairFile($State,$Store,[string]$Kind,[string]$Path,[string]$Value){
     $allowed=@('/tmp/ca.pem','/tmp/server.crt','/tmp/server.key','/tmp/hba.conf')
     if($Kind -ceq 'audit'){
-        $allowed=@('/tmp/ca.pem','/tmp/server.crt','/tmp/server.key','/tmp/client.crt','/tmp/client.key','/tmp/state.key','/tmp/immudb.toml','/tmp/cli.toml')+
-            @('fleetory-postgresql','infrastructure-ca','audit-immudb-password','agent-gateway-root-ca','agent-gateway-server-cert','agent-gateway-server-key','admin-gateway-root-ca','admin-gateway-server-cert','admin-gateway-server-key'|ForEach-Object {'/tmp/server/'+$_})
+        $allowed=@('/tmp/ca.pem','/tmp/server.crt','/tmp/server.key','/tmp/client.crt','/tmp/client.key','/tmp/state.key','/tmp/immudb.toml','/tmp/cli.toml','/run/fleetory-native/infrastructure-ca')+
+            @('fleetory-postgresql','infrastructure-ca','audit-immudb-password','agent-gateway-root-ca','agent-gateway-server-cert','agent-gateway-server-key','admin-gateway-root-ca','admin-gateway-server-cert','admin-gateway-server-key'|ForEach-Object {'/run/fleetory-native/server/'+$_})
     }
     Assert-Pair ($Path -cin $allowed -and $Value.Length -gt 0 -and $Value.Length -le 16384) 'file-slot'
     Read-PairStore $State $Store $Kind
@@ -96,25 +96,26 @@ function New-PairAudit($State,$Side){
     $a=@{Id=$null;Name=$name;Image=$alias;Session=$session;Side=$Side;Started=[DateTimeOffset]::UtcNow}
     $State.Audits.Add($a);$Side.Audit=$a;Pair-Ledger $State
     $null=Invoke-Docker @('tag',$State.Image,$alias)
-    $a.Id=(Invoke-Docker (Get-NativeAuditArguments $session $Side.Id)).Stdout.Trim();Pair-Ledger $State
+    $a.Id=(Invoke-Docker (Get-NativeAuditArguments $session $Side.Id -PairSecrets)).Stdout.Trim();Pair-Ledger $State
     Read-PairStore $State $a 'audit'
-    $null=Invoke-Docker @('exec',$a.Id,'/bin/mkdir','-m','700','/tmp/empty-ca-dir','/tmp/server')
+    $null=Invoke-Docker @('exec',$a.Id,'/bin/mkdir','-m','700','/tmp/empty-ca-dir','/run/fleetory-native/server')
     Assert-Pair ((Invoke-Docker @('exec',$a.Id,'sha256sum','/tool/ServerBackendProbe.dll')).Stdout.Split(' ')[0] -ceq $State.ProbeHash) 'probe-build-identity'
     foreach($entry in @(@('/tmp/ca.pem',$State.Tls.RootCertificatePem),@('/tmp/server.crt',$State.Tls.ServerCertificatePem),@('/tmp/server.key',$State.Tls.ServerPrivateKeyPem),
         @('/tmp/client.crt',$State.Tls.ClientCertificatePem),@('/tmp/client.key',$State.Tls.ClientPrivateKeyPem),@('/tmp/state.key',$State.SigningPem),
-        @('/tmp/immudb.toml',('admin-password = "'+$Side.Secrets.admin+'"'+"`n")),@('/tmp/cli.toml',"# Fixed fresh-only CLI profile`n"))){Write-PairFile $State $a 'audit' $entry[0] $entry[1]}
+        @('/tmp/immudb.toml',('admin-password = "'+$Side.Secrets.admin+'"'+"`n")),@('/tmp/cli.toml',"# Fixed fresh-only CLI profile`n"),
+        @('/run/fleetory-native/infrastructure-ca',$State.Tls.RootCertificatePem))){Write-PairFile $State $a 'audit' $entry[0] $entry[1]}
     Start-PairAudit $State $Side
     $null=Invoke-Docker (Get-ImmuDataCliArguments $a.Id 'login') ([Text.Encoding]::UTF8.GetBytes($Side.Secrets.admin))
 }
 function Write-PairHostFiles($State,$Side){
     $a=$Side.Audit
     $slots=@{'infrastructure-ca'=$State.Tls.RootCertificatePem;'audit-immudb-password'=$Side.Secrets.writer;
-        'fleetory-postgresql'=('Host=127.0.0.1;Port=5432;Database=fleetory;Username=fleetory_server;Password='+$Side.Secrets.database+';SSL Mode=VerifyFull;Root Certificate=/tmp/server/infrastructure-ca;GSS Encryption Mode=Disable;Timeout=5;Command Timeout=5;Pooling=false')}
+        'fleetory-postgresql'=('Host=127.0.0.1;Port=5432;Database=fleetory;Username=fleetory_server;Password='+$Side.Secrets.database+';SSL Mode=VerifyFull;Root Certificate=/run/fleetory-native/server/infrastructure-ca;GSS Encryption Mode=Disable;Timeout=5;Command Timeout=5;Pooling=false')}
     foreach($role in @('agent','admin')){
         $material=$State.GatewayTls[$role]
         $slots[$role+'-gateway-root-ca']=$material.RootCertificatePem;$slots[$role+'-gateway-server-cert']=$material.ServerCertificatePem;$slots[$role+'-gateway-server-key']=$material.ServerPrivateKeyPem
     }
-    foreach($slot in $slots.Keys){Write-PairFile $State $a 'audit' ('/tmp/server/'+$slot) $slots[$slot]}
+    foreach($slot in $slots.Keys){Write-PairFile $State $a 'audit' ('/run/fleetory-native/server/'+$slot) $slots[$slot]}
 }
 function Remove-PairAudit($State,$Store){
     $lookup=if($Store.Id){$Store.Id}else{$Store.Name}

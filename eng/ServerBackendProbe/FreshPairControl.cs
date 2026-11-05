@@ -43,7 +43,7 @@ internal static class FreshPairControl
         await using var connection = new NpgsqlConnection(new NpgsqlConnectionStringBuilder
         {
             Host = "127.0.0.1", Port = 5432, Database = "fleetory", Username = "fleetory_server",
-            Password = Secret(packet, "database"), SslMode = SslMode.VerifyFull, RootCertificate = "/tmp/ca.pem",
+            Password = Secret(packet, "database"), SslMode = SslMode.VerifyFull, RootCertificate = "/run/fleetory-native/infrastructure-ca",
             GssEncryptionMode = GssEncryptionMode.Disable, Pooling = false, Timeout = 5, CommandTimeout = 5
         }.ConnectionString);
         var events = await ReadDatabaseAsync(connection, fixture, cancellation);

@@ -52,6 +52,10 @@ no host mounts or published ports, read-only root, non-root identities, cap-drop
 ALL, NNP, private tmpfs and fixed resource/core limits. A COPY-only image contains
 the pinned immudb/immuadmin binaries and checked public probe payload, before
 private material is generated. The actual in-container probe hash is checked.
+Only the pair profile adds a fixed mode-0700, UID/GID-3322 16 MiB tmpfs at
+`/run/fleetory-native` for the CA and Server secret directory. Its exact path,
+size, ownership and noexec/nosuid/nodev options are runtime-validated; the older
+audit profile still requires exactly its original two tmpfs mounts.
 
 All database passwords, infrastructure TLS, separate Agent/Admin gateway CAs,
 leaf keys and the state-signing key are freshly generated. Target users/passwords

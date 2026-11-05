@@ -78,18 +78,17 @@ internal static class Program
             await AuditFixtureControl.ExecuteAsync(mode, deadline.Token);
             return new { category = mode, httpHostStarted = false, issuerActivated = false };
         }
-        var privateDirectory = mode == "pair-host" ? "/tmp/server" : PrivateDirectory;
-        var files = new FileSecretProvider(privateDirectory);
+        var files = new FileSecretProvider(PrivateDirectory);
         var binding = new NpgsqlConnectionStringBuilder(files.GetRequiredSecret("fleetory-postgresql"));
         if (binding.Host != "127.0.0.1" || binding.Database != "fleetory" || binding.Username != "fleetory_server" ||
             binding.Port != 5432 || binding.GssEncryptionMode != GssEncryptionMode.Disable || !string.IsNullOrEmpty(binding.Options) ||
-            binding.RootCertificate != privateDirectory + "/infrastructure-ca" ||
+            binding.RootCertificate != PrivateDirectory + "/infrastructure-ca" ||
             binding.SslMode != (mode == "db-plaintext" ? SslMode.Disable : SslMode.VerifyFull))
         { throw new InvalidOperationException("Invalid generated fixture binding."); }
         await using var app = FleetoryApplication.Build([
             "--environment=Production", "--Logging:LogLevel:Default=None",
             "--Logging:WorkerObservation:LogLevel:Default=Error",
-            "--Fleetory:Secrets:Provider=File", "--Fleetory:Secrets:Directory=" + privateDirectory,
+            "--Fleetory:Secrets:Provider=File", "--Fleetory:Secrets:Directory=" + PrivateDirectory,
             "--Fleetory:Web:Port=19580", "--Fleetory:AgentGateway:Enabled=true", "--Fleetory:AgentGateway:Port=19581",
             "--Fleetory:AdminGateway:Enabled=true", "--Fleetory:AdminGateway:Port=19582", "--Fleetory:AdminGateway:BindAddress=127.0.0.1",
             "--Fleetory:AdminGateway:Oidc:Enabled=true", "--Fleetory:AdminGateway:Oidc:Authority=https://127.0.0.1:19999/realms/fixture",

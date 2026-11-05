@@ -29,3 +29,26 @@ foreach($mutation in @(
 }
 if($refused -ne 17){throw 'Audit boundary checks incomplete.'}
 Write-Host 'NATIVE AUDIT BOUNDARY PASS: 17 unsafe runtime mutations refused; no Docker or original inputs.'
+$pair=$base|ConvertTo-Json -Depth 12|ConvertFrom-Json -AsHashtable
+$pair.HostConfig.Tmpfs['/run/fleetory-native']=$script:nativeAuditPairSecretsTmpfs
+Assert-NativeAudit $pair $id $session $imageId $database $now.AddSeconds(-1) -PairSecrets
+$pairArguments=Get-NativeAuditArguments $session $database -PairSecrets
+if(@($pairArguments|Where-Object {$_ -ceq ('/run/fleetory-native:'+$script:nativeAuditPairSecretsTmpfs)}).Count -ne 1){throw 'Pair secret mount arguments drifted.'}
+$pairRefused=0
+try{Assert-NativeAudit $pair $id $session $imageId $database $now.AddSeconds(-1)}catch{$pairRefused++}
+foreach($mutation in @(
+    {param($x)$x.HostConfig.Tmpfs.Remove('/run/fleetory-native')},
+    {param($x)$x.HostConfig.Tmpfs['/run/fleetory-native']='rw,noexec,nosuid,nodev,size=16m,uid=3322,gid=3322,mode=0777'},
+    {param($x)$x.HostConfig.Tmpfs['/run/fleetory-native']='rw,noexec,nosuid,nodev,size=16m,uid=1654,gid=1654,mode=0700'},
+    {param($x)$x.HostConfig.Tmpfs['/run/fleetory-native']='rw,noexec,nosuid,nodev,size=0,uid=3322,gid=3322,mode=0700'},
+    {param($x)$x.HostConfig.Tmpfs['/run/fleetory-native']='rw,exec,nosuid,nodev,size=16m,uid=3322,gid=3322,mode=0700'},
+    {param($x)$x.HostConfig.Tmpfs['/run/other']=$x.HostConfig.Tmpfs['/run/fleetory-native'];$x.HostConfig.Tmpfs.Remove('/run/fleetory-native')},
+    {param($x)$x.HostConfig.Tmpfs['/extra']='rw,size=1m,mode=0700'}
+)){
+    $copy=$pair|ConvertTo-Json -Depth 12|ConvertFrom-Json -AsHashtable;$null=& $mutation $copy
+    try{Assert-NativeAudit $copy $id $session $imageId $database $now.AddSeconds(-1) -PairSecrets}
+    catch{if($_.Exception.Message -cnotmatch '^Native signer fixture refused: audit-'){throw};$pairRefused++;continue}
+    throw 'Unsafe pair secret mount accepted.'
+}
+if($pairRefused -ne 8){throw 'Pair secret mount checks incomplete.'}
+Write-Host 'NATIVE AUDIT PAIR MOUNT PASS: 8 unsafe profile/mount mutations refused; no Docker or original inputs.'
