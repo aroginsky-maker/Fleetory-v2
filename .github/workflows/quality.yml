@@ -82,8 +82,15 @@ jobs:
         shell: pwsh
         run: |
           python -B ./tests/Fleetory.Tools.Tests/recovery_files_tests.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -B ./tests/Fleetory.Tools.Tests/recovery_composition_tests.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -B ./tests/Fleetory.Tools.Tests/server_data_inputs_tests.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify recovery native exit gate on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/recovery_test_gate_tests.py
 
       - name: Verify synthetic recovery isolation contract on Windows
         shell: pwsh
@@ -319,8 +326,15 @@ jobs:
         shell: pwsh
         run: |
           python3 -B ./tests/Fleetory.Tools.Tests/recovery_files_tests.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python3 -B ./tests/Fleetory.Tools.Tests/recovery_composition_tests.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python3 -B ./tests/Fleetory.Tools.Tests/server_data_inputs_tests.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify recovery native exit gate
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/recovery_test_gate_tests.py
 
       - name: Verify synthetic recovery network isolation
         shell: pwsh

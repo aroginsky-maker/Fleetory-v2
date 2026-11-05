@@ -46,6 +46,12 @@ graphs. No retained raw backup, key, credential or provider input was opened for
 this implementation. Existing application/audit consent stays scoped; consumed
 leaf/configuration/provider permissions are not renewed by a manifest or capsule.
 
+Each Python suite in the Windows/Linux recovery workflow block has an explicit
+native-exit check. The workflow-control test executes those exact blocks with
+fresh native child scripts: success and failures in the first/middle/last slot
+must preserve the exit code and prevent later scripts from running. A negative
+control reproduces the prior unguarded sequence masking the first failure.
+
 Before original-data execution, finish the closed startup/restore controller on
 fresh data: native format/schema/owner/ACL compatibility, target-only credentials
 and TLS, network-none/no published ports or source mounts, least privileges,
