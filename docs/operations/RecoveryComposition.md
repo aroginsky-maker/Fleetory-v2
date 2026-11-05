@@ -47,7 +47,8 @@ matrix and report-byte count. It always keeps `newOperationsAuthorized`,
 `coordinatedCaptureWindowVerified`, `originalServiceStartupVerified`,
 `independentCustodyVerified`, `fullSystemRecoveryVerified` and `phase7Complete`
 false. Hash pins establish integrity against the chosen manifest, not independent
-truth of historical statements. No new backup, restore, provider/root/token
+truth of historical statements. Original event contents and state signatures
+are not recomputed by this metadata check. No new backup, restore, provider/root/token
 operation, issuer, source mutation, Docker process or external approval is performed.
 
 The reconciled pilot point has four original audit events/five immudb transactions,

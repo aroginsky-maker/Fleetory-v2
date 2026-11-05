@@ -23,9 +23,10 @@ def flags(true=(), false=(), **values):
 
 
 def inventory(name, audit):
+    tables = {'platform.audit_events': 4, 'platform.audit_export_queue': 0} if name == 'fleetory' else {'fixture.table': 4}
     return dict(algorithm='fleetory.application-signer-recovery.v2', database=name,
-                inventorySha256=H, securitySha256=H, tableCount=1, totalRows=4,
-                tableCounts={'fixture.table': 4}, audit=audit,
+                inventorySha256=H, securitySha256=H, tableCount=len(tables), totalRows=4,
+                tableCounts=tables, audit=audit,
                 rolePasswordsAndLoginRecoveryVerified=False, globalAtomicSnapshotClaimed=False)
 
 
@@ -84,7 +85,8 @@ def synthetic_reports():
                           'newSecretOrPkiCopied', 'sourceVpsAccessed'), schema='fleetory.recovery-code-images.v1',
                    additionalCost=0, contexts=dict(archiveSha256=H), images={})
     for role in sorted(policy.ROLES):
-        entry = dict(baseRootfsPrefixMatches=True, metadata=dict(os='linux', arch='amd64', id='sha256:' + H))
+        identity = {'server': 'a', 'signer': 'b', 'keycloak': 'c'}[role] * 64
+        entry = dict(baseRootfsPrefixMatches=True, metadata=dict(os='linux', arch='amd64', id='sha256:' + identity))
         if role != 'keycloak':
             entry['payloadFilesMatched'] = 56 if role == 'server' else 11
         images['images'][role] = entry
@@ -138,7 +140,8 @@ class RecoveryCompositionTests(unittest.TestCase):
         self.assertEqual(value['components']['images']['payloadFiles'], 67)
         for key in ('newOperationsAuthorized', 'standingAuthorizationRemaining', 'fullSystemRecoveryVerified',
                     'phase7Complete', 'coordinatedCaptureWindowVerified', 'sourcePasswordsRecovered',
-                    'sourceRevisionAuthenticated', 'postRestoreHumanLoginVerified', 'originalServiceStartupVerified'):
+                    'sourceRevisionAuthenticated', 'postRestoreHumanLoginVerified', 'originalServiceStartupVerified',
+                    'originalEventContentsReverified'):
             self.assertIs(value[key], False)
         self.assertEqual(before, {p.name: p.read_bytes() for p in self.root.iterdir()})
 
@@ -191,7 +194,7 @@ class RecoveryCompositionTests(unittest.TestCase):
             ('audit', ('transactions',), 6), ('audit', ('sourceApplicationCommit',), 'd' * 40),
             ('database', ('sourceConfigurationCommit',), 'd' * 40),
             ('database', ('roleLoginOrPasswordsRecovered',), True), ('database', ('globalAtomicSnapshotClaimed',), True),
-            ('database', ('databaseInventories', 'fleetory', 'tableCount'), 2),
+            ('database', ('databaseInventories', 'fleetory', 'tableCount'), 3),
             ('login', ('sourcePasswordRecoveryVerified',), True), ('login', ('remoteTlsVerified',), True),
             ('login', ('databaseInventoriesAfter', 'fleetory', 'totalRows'), 3),
             ('login', ('sourceDumpSha256', 'fleetory'), 'd' * 64), ('login', ('privilegeDenials',), 20),
@@ -208,6 +211,7 @@ class RecoveryCompositionTests(unittest.TestCase):
             ('release', ('continuity', 'archiveSha256'), 'd' * 64),
             ('images', ('contexts', 'archiveSha256'), 'd' * 64),
             ('images', ('images', 'server', 'payloadFilesMatched'), 55),
+            ('images', ('images', 'signer', 'metadata', 'id'), 'sha256:' + H),
             ('images', ('historicalSourceImageReproduced',), True),
             ('images', ('applicationOrIssuerStarted',), True), ('audit', ('independentCustodyVerified',), True),
         ]
@@ -221,6 +225,15 @@ class RecoveryCompositionTests(unittest.TestCase):
                 node[path[-1]] = value
                 self.pin()
                 self.refused()
+
+    def test_audit_count_cannot_disagree_with_rows_even_when_login_is_rebased(self):
+        inventories = self.reports['database']['databaseInventories']
+        inventories['fleetory']['tableCounts']['platform.audit_events'] = 3
+        inventories['fleetory']['totalRows'] = 3
+        for key in ('databaseInventoriesBefore', 'databaseInventoriesAfter'):
+            self.reports['login'][key] = copy.deepcopy(inventories)
+        self.pin()
+        self.refused()
 
     def test_login_must_link_exact_database_report_pin(self):
         self.reports['login']['sourceRestoreProofSha256'] = 'd' * 64

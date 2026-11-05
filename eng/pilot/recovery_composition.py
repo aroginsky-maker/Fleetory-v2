@@ -81,6 +81,8 @@ def database(record, manifest):
         digest(value)
     audit = record['databaseInventories']['fleetory']['audit']
     expect(audit, {'pendingExportCount': 0, 'events': integer(record['currentAuditEvents'], 1)})
+    expect(record['databaseInventories']['fleetory']['tableCounts'],
+           {'platform.audit_events': audit['events'], 'platform.audit_export_queue': 0})
     archive.require(record['databaseInventories']['fleetory_signer']['audit'] is None)
     digest(audit['snapshotSha256'])
     integer(record['immudbCheckpointTransactions'], 1)
@@ -206,6 +208,7 @@ def images(record, release_record):
         value = entry['metadata']['id']
         archive.require(type(value) is str and value.startswith('sha256:'))
         digest(value[7:])
+    archive.require(len({entry['metadata']['id'] for entry in record['images'].values()}) == len(ROLES))
     return {'scope': 'reconstructed-code-only-images', 'images': len(ROLES), 'payloadFiles': payload,
             'historicalSourceImageReproduced': False, 'servicesStarted': False}
 
@@ -256,6 +259,7 @@ def verify(root, expected):
             'reportedSourceApplicationCommit': manifest['sourceApplicationCommit'],
             'reportedSourceConfigurationCommit': manifest['sourceConfigurationCommit'],
             'operatorRevision': manifest['operatorRevision'], 'referencesOpened': False,
+            'originalEventContentsReverified': False,
             'sourcePasswordsRecovered': False, 'postRestoreHumanLoginVerified': False,
             'sourceRevisionAuthenticated': False, 'coordinatedCaptureWindowVerified': False,
             'originalServiceStartupVerified': False, 'newOperationsAuthorized': False,
