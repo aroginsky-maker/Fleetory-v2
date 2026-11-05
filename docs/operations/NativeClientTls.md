@@ -12,6 +12,9 @@ persisted. Without that switch the original three-property result is preserved.
 Agent and Admin roots are independent. Four additional allowlisted client slots
 are written over stdin to the existing private worker tmpfs, checked as mode
 0600, UID1654, one link, and included in output-canary guards.
+An optional exact fixture identity URI adds a separate identity leaf pair and
+four further slots across both gateways; the default contracts remain unchanged.
+See [native registry refusal](NativeRegistryBoundary.md).
 
 For each gateway (`19581` Agent, `19582` Admin), the native probe:
 
@@ -28,8 +31,8 @@ For each gateway (`19581` Agent, `19582` Admin), the native probe:
 - Requires refusal with the wrong server root and with a hostname absent from
   the server SAN, retaining the matching client as the control.
 
-The matrix has four real HTTP responses and ten native authentication refusals:
-two safe-path404 controls and two identity403 responses;
+The matrix has six real HTTP responses and ten native authentication refusals:
+two safe-path404 controls, two no-SAN403 and two unregistered-identity403 responses;
 six correlated server-side client refusals and four client-side server trust
 refusals. It deliberately uses TLS1.2 and does not claim a TLS1.3 matrix.
 `SslStream` performs server chain and hostname validation
@@ -57,8 +60,10 @@ request, with no redirects.
 
 The portable in-memory generator test checks the unchanged default shape,
 five leaf key pairs, five valid exact-root chains and six purpose/root refusals.
+Its URI extension checks six further key pairs/chains, four chain refusals and
+six invalid inputs, including preservation of the original result shapes.
 The native matrix uses the actual production TLS validator and gateway builder.
-It retains lifecycle, stopped worker, closed listeners, immutable events, five
+It retains lifecycle, stopped worker, closed listeners, immutable events, six
 revision-one audit keys and verified removal of all owned resources.
 
 No original keys, existing lab tokens, VPS, provider recovery, issuer, login or

@@ -1,7 +1,7 @@
 #requires -Version 7.3
 # Real registered BackgroundService in the caller's generated, owned Server sandbox.
 function Assert-WorkerQueue([int]$Events,[int]$Queue,[int]$Attempts=0){
-    Assert-True ($Events -in @(2,3,4) -and $Queue -in @(0,1) -and $Attempts -in @(0,1)) 'Unknown worker inventory state.'
+    Assert-True ($Events -in @(2,3,4,5) -and $Queue -in @(0,1) -and $Attempts -in @(0,1)) 'Unknown worker inventory state.'
     $sql='SELECT (SELECT count(*) FROM platform.audit_events)='+$Events+' AND (SELECT count(*) FROM platform.audit_export_queue)='+$Queue
     if($Queue -eq 1){$sql+=' AND (SELECT bool_and(attempt_count='+$Attempts+' AND lease_id IS NULL AND leased_until IS NULL) FROM platform.audit_export_queue)'}
     Assert-True ((Invoke-Database 'fleetory' ($sql+';')).Stdout.Trim() -ceq 't') 'Worker queue inventory drift.'

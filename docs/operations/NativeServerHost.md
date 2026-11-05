@@ -66,12 +66,15 @@ admission and does not establish identity or OIDC authorization.
 It also requires [identity refusal after successful TLS](NativeIdentityBoundary.md):
 both trusted CN-only clients receive exact empty403 from the actual private GET
 routes, with exact native request-path correlation and unchanged cross-store data.
+The subsequent [registry refusal stage](NativeRegistryBoundary.md) uses valid-SAN
+leaves without durable binding/registration and verifies a delivered Admin denial.
 
 Independent PostgreSQL counts and immudb exact-key/revision/content reads verify
-that the first host retained the event and the second delivered it. All four
-PostgreSQL events stay immutable. The direct-sink, prior pump, two worker and new
-host event give five total immudb keys, each at revision one with all ten expected
-fields. The final queue is empty. Existing generated-secret canaries, runtime
+that the first host retained the event and the second delivered it. The original
+four PostgreSQL events remain unchanged; one new Admin denial gives five events.
+The direct-sink, prior pump, two worker, host and denial events give six total
+immudb keys, each at revision one with all ten expected fields. The final queue
+is empty. Existing generated-secret canaries, runtime
 constraints and verified resource absence remain mandatory.
 
 This verifies a generated Server host inside its local sandbox. It does not prove

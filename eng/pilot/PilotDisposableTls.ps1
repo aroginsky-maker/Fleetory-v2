@@ -12,8 +12,15 @@ function New-PilotDisposableChainPolicy($Root,[string]$Purpose) {
 }
 function New-PilotDisposableTlsMaterial {
     [CmdletBinding()]
-    param([switch]$IncludeClient)
+    param([switch]$IncludeClient,[string]$IdentityUri='')
     $ErrorActionPreference = 'Stop'
+    if ($IdentityUri.Length -gt 0) {
+        $identity = [Guid]::Empty
+        if (-not $IncludeClient -or $IdentityUri -cnotmatch '^urn:fleetory:(device|admin):([0-9a-f-]{36})$' -or
+            -not [Guid]::TryParseExact(($IdentityUri -split ':')[-1],'D',[ref]$identity) -or $identity -eq [Guid]::Empty) {
+            throw 'Invalid disposable identity URI.'
+        }
+    }
     if ([Environment]::Version.Major -lt 7) { throw 'Disposable TLS requires .NET 7 or later.' }
     $owned = [Collections.Generic.List[IDisposable]]::new()
     try {
@@ -86,7 +93,10 @@ function New-PilotDisposableTlsMaterial {
             ServerCertificatePem = $server.ExportCertificatePem()
             ServerPrivateKeyPem = $serverKey.ExportPkcs8PrivateKeyPem()
         }
-        if ($IncludeClient) {
+        $clientRoles = @()
+        if ($IncludeClient) { $clientRoles += 'Client' }
+        if ($IdentityUri.Length -gt 0) { $clientRoles += 'IdentityClient' }
+        foreach ($clientRole in $clientRoles) {
             # Issue only a leaf while the root handle is alive. Never export its key.
             $clientKey = [Security.Cryptography.ECDsa]::Create([Security.Cryptography.ECCurve+NamedCurves]::nistP256)
             $owned.Add($clientKey)
@@ -103,14 +113,19 @@ function New-PilotDisposableTlsMaterial {
                 [Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]::new($clientPurposes,$true))
             $null = $clientRequest.CertificateExtensions.Add(
                 [Security.Cryptography.X509Certificates.X509SubjectKeyIdentifierExtension]::new($clientRequest.PublicKey,$false))
+            if ($clientRole -ceq 'IdentityClient') {
+                $identitySan = [Security.Cryptography.X509Certificates.SubjectAlternativeNameBuilder]::new()
+                $identitySan.AddUri([Uri]::new($IdentityUri))
+                $null = $clientRequest.CertificateExtensions.Add($identitySan.Build())
+            }
             $clientSerial = [Security.Cryptography.RandomNumberGenerator]::GetBytes(16)
             $clientSerial[0] = $clientSerial[0] -bor 1
             $clientLeaf = $clientRequest.Create($root,$notBefore,$now.AddHours(1),$clientSerial)
             $owned.Add($clientLeaf)
             $chain.ChainPolicy = New-PilotDisposableChainPolicy $publicRoot '1.3.6.1.5.5.7.3.2'
             if (-not $chain.Build($clientLeaf) -or $chain.ChainElements.Count -ne 2) { throw 'Invalid synthetic client chain.' }
-            $result.ClientCertificatePem = $clientLeaf.ExportCertificatePem()
-            $result.ClientPrivateKeyPem = $clientKey.ExportPkcs8PrivateKeyPem()
+            $result[($clientRole+'CertificatePem')] = $clientLeaf.ExportCertificatePem()
+            $result[($clientRole+'PrivateKeyPem')] = $clientKey.ExportPkcs8PrivateKeyPem()
         }
         return [pscustomobject]$result
     } catch {

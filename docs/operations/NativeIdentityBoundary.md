@@ -19,8 +19,9 @@ After verified mutual TLS, request only:
 Both must return exactly HTTP403 with an empty body. Missing routes/HTTP404,
 other statuses, peer closure, TLS refusal or an uncorrelated response fail this
 case. The two existing safe-path HTTP404 controls and all ten TLS refusals remain
-required. There are four successful native TLS/HTTP connections in total: two
-safe404 responses and two identity403 responses.
+required. This stage has four successful native TLS/HTTP connections: two
+safe404 responses and two identity403 responses. The subsequent
+[registry stage](NativeRegistryBoundary.md) adds two valid-SAN/unregistered403 cases.
 
 The read-only Kestrel observer binds each result to the exact normalized server
 and client endpoints, native connection ID, successful TLS1.2 handshake and one
@@ -34,7 +35,9 @@ Both host lifecycles, completed worker/stopped listeners, output canaries and
 verified cleanup remain mandatory. Independent readback must still find the
 same four immutable PostgreSQL events, empty outbox and five revision-one immudb
 keys with all ten event fields unchanged. Thus an extra audit/outbox write by
-these refusal requests cannot pass unnoticed.
+these refusal requests cannot pass unnoticed. The subsequent registry stage
+expects a fifth PostgreSQL event and sixth immudb key for the Admin denial;
+its extra event is verified separately.
 
 The final bounded proof retains the nested identity result as a JSON object;
 serialization truncation warnings fail the fixture instead of silently replacing

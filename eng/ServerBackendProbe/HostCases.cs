@@ -43,7 +43,8 @@ internal static class HostCases
             RequireGetRoute(app, "/admin/authorization/roles/{roleId:guid}/versions");
             await VerifyHttpAsync(expected.ToString(), cancellation);
             foreach (var port in Ports) { await ProbePortAsync(port, true, cancellation); }
-            if (mode == "host-drain") { clientTls = await ClientTlsCases.ExecuteAsync(cancellation); }
+            if (mode == "host-drain") { clientTls = await ClientTlsCases.ExecuteAsync(app.Services, cancellation); }
+            await WorkerCases.RequireHealthAsync(app.Services, expected, cancellation);
         }
         finally
         {

@@ -13,9 +13,9 @@ internal static class ClientTlsCases
 {
     private const string ClientPurpose = "1.3.6.1.5.5.7.3.2";
     private const string ServerPurpose = "1.3.6.1.5.5.7.3.1";
-    private enum TlsCase { Trusted, Identity, MissingClient, CrossRootClient, WrongEkuClient, ServerRoot, ServerHostname }
+    private enum TlsCase { Trusted, Identity, Registry, MissingClient, CrossRootClient, WrongEkuClient, ServerRoot, ServerHostname }
 
-    internal static async Task<object> ExecuteAsync(CancellationToken cancellation)
+    internal static async Task<object> ExecuteAsync(IServiceProvider services, CancellationToken cancellation)
     {
         var files = new FileSecretProvider(Program.PrivateDirectory);
         using var agentRoot = ReadCertificate(files, "agent-gateway-root-ca");
@@ -29,15 +29,20 @@ internal static class ClientTlsCases
         using var observation = new TlsObservation();
         await GatewayAsync(19581, agentRoot, adminRoot, agentClient, adminClient, agentServer, observation, cancellation);
         await GatewayAsync(19582, adminRoot, agentRoot, adminClient, agentClient, adminServer, observation, cancellation);
+        var registry = await RegistryCases.ExecuteAsync(services, observation, cancellation);
         return new { gateways = 2, trustedClientHttpResponses = 2, missingClientRefusals = 2,
             crossRootClientRefusals = 2, wrongEkuClientRefusals = 2, serverRootRefusals = 2,
             serverHostnameRefusals = 2, protocol = "TLS1.2", responseStatus = 404,
             nativeAuthenticationRefusals = 10, serverCorrelatedHandshakeRefusals = 6,
-            serverCorrelatedTrustedHandshakes = 4, httpRequestsInClientRefusals = 0, arbitraryTransportFailuresAccepted = 0,
+            serverCorrelatedTrustedHandshakes = 6, httpRequestsInClientRefusals = 0, arbitraryTransportFailuresAccepted = 0,
             identityBoundary = new { mutualTlsHttpRefusals = 2, statusCode = 403, emptyBodies = true,
                 clientsWithoutSan = 2, correlatedPrivateGets = 2, positiveIdentityAdmissionVerified = false },
-            identityAdmissionVerified = false };
+            registryBoundary = registry, identityAdmissionVerified = false };
     }
+
+    internal static Task RequireRegistryRefusalAsync(int port, X509Certificate2 root, X509Certificate2 client,
+        TlsObservation observation, CancellationToken cancellation) =>
+        ConnectAsync(port, root, client, TlsCase.Registry, observation, cancellation);
 
     private static async Task GatewayAsync(int port, X509Certificate2 root, X509Certificate2 otherRoot,
         X509Certificate2 client, X509Certificate2 otherClient, X509Certificate2 server,
@@ -85,7 +90,7 @@ internal static class ClientTlsCases
             catch (AuthenticationException) { return; }
             throw Failure("ServerTrustAccepted");
         }
-        if (mode is not (TlsCase.Trusted or TlsCase.Identity))
+        if (mode is not (TlsCase.Trusted or TlsCase.Identity or TlsCase.Registry))
         {
             await ObservePeerRefusalAsync(tls, options, deadline.Token);
             if (mode is TlsCase.CrossRootClient or TlsCase.WrongEkuClient && !selected) { throw Failure("ClientSelection"); }
@@ -97,10 +102,11 @@ internal static class ClientTlsCases
             tls.LocalCertificate is null || client is null ||
             !tls.LocalCertificate.GetRawCertData().AsSpan().SequenceEqual(client.RawData))
         { throw Failure("MutualAuthentication"); }
-        var path = mode == TlsCase.Identity ?
+        var path = mode is TlsCase.Identity or TlsCase.Registry ?
             (port == 19581 ? "/agent/identity" : "/admin/authorization/roles/00000000-0000-4000-8000-000000000001/versions") :
             "/fixture/client-tls";
-        await RequireHttpAsync(tls, path, mode == TlsCase.Identity ? HttpStatusCode.Forbidden : HttpStatusCode.NotFound, deadline.Token);
+        await RequireHttpAsync(tls, path, mode == TlsCase.Trusted ? HttpStatusCode.NotFound : HttpStatusCode.Forbidden,
+            mode == TlsCase.Registry ? RegistryCases.Correlation(port) : null, deadline.Token);
         await observation.RequireAsync(serverEndpoint, clientEndpoint, false, path, deadline.Token);
     }
 
@@ -117,9 +123,10 @@ internal static class ClientTlsCases
         { /* Peer outcome alone NEVER passes: require the matching native Kestrel failure below. */ }
     }
 
-    private static async Task RequireHttpAsync(SslStream tls, string path, HttpStatusCode expected, CancellationToken cancellation)
+    private static async Task RequireHttpAsync(SslStream tls, string path, HttpStatusCode expected, string? correlation, CancellationToken cancellation)
     {
-        var request = Encoding.ASCII.GetBytes("GET " + path + " HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+        var header = correlation is null ? "" : "X-Correlation-ID: " + correlation + "\r\n";
+        var request = Encoding.ASCII.GetBytes("GET " + path + " HTTP/1.1\r\nHost: localhost\r\n" + header + "Connection: close\r\n\r\n");
         await tls.WriteAsync(request, cancellation);
         var buffer = new byte[1025];
         var length = 0;
@@ -130,6 +137,8 @@ internal static class ClientTlsCases
             length += read;
         }
         var response = Encoding.ASCII.GetString(buffer, 0, length);
+        if (correlation is not null && response.Split("\r\n").Count(line => line == "X-Correlation-ID: " + correlation) != 1)
+        { throw Failure("CorrelationResponse"); }
         var statusLine = expected == HttpStatusCode.Forbidden ? "HTTP/1.1 403 Forbidden\r\n" : "HTTP/1.1 404 Not Found\r\n";
         if (length > 1024 || !response.StartsWith(statusLine, StringComparison.Ordinal) ||
             !response.Contains("\r\nContent-Length: 0\r\n", StringComparison.OrdinalIgnoreCase) ||
@@ -138,10 +147,10 @@ internal static class ClientTlsCases
         { throw Failure("HttpResponse"); }
     }
 
-    private static X509Certificate2 ReadCertificate(FileSecretProvider files, string name) =>
+    internal static X509Certificate2 ReadCertificate(FileSecretProvider files, string name) =>
         X509Certificate2.CreateFromPem(files.GetRequiredSecret(name));
 
-    private static X509Certificate2 ReadKeyPair(FileSecretProvider files, string prefix) =>
+    internal static X509Certificate2 ReadKeyPair(FileSecretProvider files, string prefix) =>
         X509Certificate2.CreateFromPem(files.GetRequiredSecret(prefix + "-cert"), files.GetRequiredSecret(prefix + "-key"));
 
     private static X509ChainPolicy CreatePolicy(X509Certificate2 root, string purpose)

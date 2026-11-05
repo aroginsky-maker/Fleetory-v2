@@ -1,7 +1,7 @@
 #requires -Version 7.3
 # Extends only the caller's positively owned fresh Server stores and generated credentials.
 function Get-PipelineEventJson([string]$Action='Fixture.Database.Read'){
-    Assert-True ($Action -cin @('Fixture.Database.Read','Fixture.Worker.Read','Fixture.Worker.AfterStop','Fixture.Host.Read')) 'Unknown fixture inventory action.'
+    Assert-True ($Action -cin @('Fixture.Database.Read','Fixture.Worker.Read','Fixture.Worker.AfterStop','Fixture.Host.Read','admin.certificate.unregistered_denied')) 'Unknown fixture inventory action.'
     $sql=@'
 SELECT jsonb_build_object('eventId',replace(event_id::text,'-',''),'actorSubjectId',actor_subject_id,
  'actorKind',actor_kind,'Action',action,'targetType',target_type,'targetId',target_id,

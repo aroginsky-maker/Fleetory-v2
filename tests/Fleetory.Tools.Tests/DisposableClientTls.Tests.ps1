@@ -15,7 +15,7 @@ function Read-DisposablePair($Material,[string]$Role){
     $constraints=@($cert.Extensions|Where-Object {$_.Oid.Value -ceq '2.5.29.19'})
     $usage=@($cert.Extensions|Where-Object {$_.Oid.Value -ceq '2.5.29.15'})
     $eku=@($cert.Extensions|Where-Object {$_.Oid.Value -ceq '2.5.29.37'})
-    $purpose=if($Role -ceq 'Client'){'1.3.6.1.5.5.7.3.2'}else{'1.3.6.1.5.5.7.3.1'}
+    $purpose=if($Role -ceq 'Server'){'1.3.6.1.5.5.7.3.1'}else{'1.3.6.1.5.5.7.3.2'}
     Assert-DisposableClient ($constraints.Count -eq 1 -and -not $constraints[0].CertificateAuthority -and
         $usage.Count -eq 1 -and $usage[0].KeyUsages -eq [Security.Cryptography.X509Certificates.X509KeyUsageFlags]::DigitalSignature -and
         $eku.Count -eq 1 -and $eku[0].EnhancedKeyUsages.Count -eq 1 -and $eku[0].EnhancedKeyUsages[0].Value -ceq $purpose -and
@@ -58,6 +58,35 @@ try{
         Test-DisposableChain $servers[$index] $roots[$index] '1.3.6.1.5.5.7.3.2' $false
     }
     Write-Host 'DISPOSABLE CLIENT TLS PASS: default3/client5 public-leaf slots; 5 key pairs/5 valid chains/6 chain refusals; no CA private export, files or network.'
+    foreach($kind in @('device','admin')){
+        $uri='urn:fleetory:'+$kind+':'+[Guid]::NewGuid().ToString('D')
+        $material=New-PilotDisposableTlsMaterial -IncludeClient -IdentityUri $uri
+        Assert-DisposableClient (($material.PSObject.Properties.Name|Sort-Object)-join '|' -ceq 'ClientCertificatePem|ClientPrivateKeyPem|IdentityClientCertificatePem|IdentityClientPrivateKeyPem|RootCertificatePem|ServerCertificatePem|ServerPrivateKeyPem')
+        $root=[Security.Cryptography.X509Certificates.X509Certificate2]::CreateFromPem($material.RootCertificatePem);$owned.Add($root)
+        Assert-DisposableClient (-not $root.HasPrivateKey)
+        $pairs=@(Read-DisposablePair $material 'Server'; Read-DisposablePair $material 'Client'; Read-DisposablePair $material 'IdentityClient')
+        Assert-DisposableClient (@($pairs.Thumbprint|Select-Object -Unique).Count -eq 3 -and
+            @($pairs|ForEach-Object {[Convert]::ToHexString($_.PublicKey.EncodedKeyValue.RawData)}|Select-Object -Unique).Count -eq 3)
+        Test-DisposableChain $pairs[0] $root '1.3.6.1.5.5.7.3.1' $true
+        Test-DisposableChain $pairs[1] $root '1.3.6.1.5.5.7.3.2' $true
+        Test-DisposableChain $pairs[2] $root '1.3.6.1.5.5.7.3.2' $true
+        Test-DisposableChain $pairs[2] $root '1.3.6.1.5.5.7.3.1' $false
+        Test-DisposableChain $pairs[2] $defaultRoot '1.3.6.1.5.5.7.3.2' $false
+        $sans=@($pairs[2].Extensions|Where-Object {$_.Oid.Value -ceq '2.5.29.17'})
+        $bytes=[Text.Encoding]::ASCII.GetBytes($uri)
+        $der=[byte[]]@(0x30,($bytes.Length+2),0x86,$bytes.Length)+$bytes
+        Assert-DisposableClient ($sans.Count -eq 1 -and [Convert]::ToHexString($sans[0].RawData) -ceq [Convert]::ToHexString($der) -and
+            @($pairs[1].Extensions|Where-Object {$_.Oid.Value -ceq '2.5.29.17'}).Count -eq 0)
+    }
+    $refusals=0
+    foreach($bad in @('urn:fleetory:device:00000000-0000-0000-0000-000000000000','urn:fleetory:other:11111111-1111-4111-8111-111111111111',
+        'urn:fleetory:admin:11111111111141118111111111111111','urn:fleetory:admin:11111111-1111-4111-8111-111111111111?x=1','URN:fleetory:admin:11111111-1111-4111-8111-111111111111')){
+        try{$null=New-PilotDisposableTlsMaterial -IncludeClient -IdentityUri $bad}catch{$refusals++;continue}
+        throw 'Invalid identity input accepted.'
+    }
+    try{$null=New-PilotDisposableTlsMaterial -IdentityUri 'urn:fleetory:device:11111111-1111-4111-8111-111111111111'}catch{$refusals++}
+    Assert-DisposableClient ($refusals -eq 6)
+    Write-Host 'DISPOSABLE IDENTITY TLS PASS: 2 URI leaves; 6 extended key pairs/6 valid chains/4 chain refusals/6 input refusals; no files or network.'
 }finally{
     for($index=$owned.Count-1;$index -ge 0;$index--){$owned[$index].Dispose()}
     $default=$material=$null

@@ -4,6 +4,15 @@
 
 ## Implemented
 
+- The generated native gateway fixture now rejects valid-SAN credentials without
+  durable Agent binding or Admin registration. Actual parser/store preflights and
+  independent SQL inventories prevent a database error from satisfying403. The
+  Admin refusal creates one durable denial event, automatically exported by the
+  registered worker and independently matched across PostgreSQL/immudb. Prior
+  events remain unchanged; all six keys have revision one. See
+  [NativeRegistryBoundary](docs/operations/NativeRegistryBoundary.md). Original
+  service admission, positive registry/OIDC access and full recovery remain open.
+
 - Native gateway checks now distinguish trusted TLS from Fleetory identity.
   Fresh client leaves without a SAN identity receive exact empty403 from the
   registered Agent identity and Admin role-version GET routes, correlated to

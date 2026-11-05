@@ -111,12 +111,16 @@ try{
     }
     $stage='postgres';$dbStarted=[DateTimeOffset]::UtcNow;$dbClaimed=$true
     $dbId=(Invoke-Docker (Get-NativeJournalArguments $session)).Stdout.Trim();Read-Store 'postgres'
-    $material=New-PilotDisposableTlsMaterial;$agent=New-PilotDisposableTlsMaterial -IncludeClient;$admin=New-PilotDisposableTlsMaterial -IncludeClient;$wrongMaterial=New-PilotDisposableTlsMaterial
+    $material=New-PilotDisposableTlsMaterial
+    $agent=New-PilotDisposableTlsMaterial -IncludeClient -IdentityUri ('urn:fleetory:device:'+[Guid]::NewGuid().ToString('D'))
+    $admin=New-PilotDisposableTlsMaterial -IncludeClient -IdentityUri ('urn:fleetory:admin:'+[Guid]::NewGuid().ToString('D'))
+    $wrongMaterial=New-PilotDisposableTlsMaterial
     foreach($tls in @($material,$agent,$admin)){
         foreach($line in ($tls.ServerPrivateKeyPem -split "`n")){if($line.Length -ge 40 -and -not $line.StartsWith('-----')){$canaries.Add($line.Substring(0,40))}}
     }
     foreach($tls in @($agent,$admin)){
         foreach($line in ($tls.ClientPrivateKeyPem -split "`n")){if($line.Length -ge 40 -and -not $line.StartsWith('-----')){$canaries.Add($line.Substring(0,40))}}
+        foreach($line in ($tls.IdentityClientPrivateKeyPem -split "`n")){if($line.Length -ge 40 -and -not $line.StartsWith('-----')){$canaries.Add($line.Substring(0,40))}}
     }
     Write-StoreFile 'postgres' '/tmp/ca.pem' $material.RootCertificatePem
     Write-StoreFile 'postgres' '/tmp/server.crt' $material.ServerCertificatePem
@@ -143,6 +147,8 @@ try{
         Write-ServerSlot ($role+'-gateway-server-key') $tls.ServerPrivateKeyPem
         Write-ServerSlot ($role+'-gateway-client-cert') $tls.ClientCertificatePem
         Write-ServerSlot ($role+'-gateway-client-key') $tls.ClientPrivateKeyPem
+        Write-ServerSlot ($role+'-gateway-identity-cert') $tls.IdentityClientCertificatePem
+        Write-ServerSlot ($role+'-gateway-identity-key') $tls.IdentityClientPrivateKeyPem
     }
     Write-ServerSlot 'infrastructure-ca' $material.RootCertificatePem;Write-ServerSlot 'audit-immudb-password' $secrets.writer;Write-ServerConnection $secrets.database
     $stage='schema';$schema=Invoke-ServerProbe 'schema' 'schema'
@@ -187,7 +193,7 @@ try{
     $stage='server-host';$hostLifecycle=Invoke-NativeServerHost
     $proof=[ordered]@{schema='fleetory.native-server-backend.v1';verified=$true;nativeDbContexts=2;nativeHealthChecksAccepted=2;
         auditOutboxCommitVerified=$true;explicitRollbackVerified=$true;partialWriteRollbackVerified=$true;databaseRefusals=9;
-        auditPublicationsAccepted=2;singleRevisionVerified=$true;auditKeyCount=5;directSinkAuditKeyCount=1;auditFieldsVerified=10;auditRefusals=5;pipeline=$pipeline;workerLifecycle=$workerLifecycle;hostLifecycle=$hostLifecycle;originalMaterialUsed=$false;
+        auditPublicationsAccepted=2;singleRevisionVerified=$true;auditKeyCount=6;directSinkAuditKeyCount=1;auditFieldsVerified=10;auditRefusals=5;pipeline=$pipeline;workerLifecycle=$workerLifecycle;hostLifecycle=$hostLifecycle;originalMaterialUsed=$false;
         sourceVpsAccessed=$false;httpHostStarted=$true;issuerActivated=$false;publishedPorts=0;workerOnlyLoopback=$true;
         postgresBoundaryRefusals=16;workerBoundaryRefusals=23;auditBoundaryRefusals=17;sharedWorkerRefusals=9;fullSystemRecoveryVerified=$false;phase7Complete=$false}
 }
