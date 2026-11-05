@@ -38,7 +38,13 @@ internal sealed class FixtureAuditClient : IDisposable
 
     internal async Task LoginAsync(JsonElement packet, CancellationToken cancellation)
     {
-        var login = await SendAsync(HttpMethod.Post, "api/login", new { user = Encode("immudb"), password = Encode(Secret(packet, "admin")) }, cancellation);
+        await LoginUserAsync("immudb", Secret(packet, "admin"), cancellation);
+    }
+
+    internal async Task LoginUserAsync(string user, string password, CancellationToken cancellation)
+    {
+        if (user is not ("immudb" or "fixture_reader")) { throw new InvalidOperationException("Fixture user refused."); }
+        var login = await SendAsync(HttpMethod.Post, "api/login", new { user = Encode(user), password = Encode(password) }, cancellation);
         SetToken(login);
     }
 
@@ -55,10 +61,29 @@ internal sealed class FixtureAuditClient : IDisposable
 
     internal async Task<JsonElement> SendAsync(HttpMethod method, string path, object? body, CancellationToken cancellation)
     {
+        var (status, result) = await SendResponseAsync(method, path, body, cancellation);
+        if (status is < 200 or > 299)
+        {
+            var authenticationDenied = result.TryGetProperty("code", out var code) && code.TryGetInt32(out var nativeCode) && nativeCode == 2 &&
+                result.TryGetProperty("message", out var message) && message.GetString() == "invalid user name or password";
+            throw new InvalidOperationException("Fixture control request refused.")
+            { Data = { ["fixtureHttpStatus"] = status, ["fixtureAuthenticationDenied"] = authenticationDenied } };
+        }
+        return result;
+    }
+
+    internal async Task RequirePermissionDeniedAsync(object body, CancellationToken cancellation)
+    {
+        var (status, result) = await SendResponseAsync(HttpMethod.Post, "api/db/set", body, cancellation);
+        if (status != 500 || result.GetProperty("code").GetInt32() != 13 || result.GetProperty("message").GetString() != "permission denied")
+        { throw new InvalidOperationException("Native read-only denial did not match."); }
+    }
+
+    private async Task<(int Status, JsonElement Body)> SendResponseAsync(HttpMethod method, string path, object? body, CancellationToken cancellation)
+    {
         using var request = new HttpRequestMessage(method, path);
         if (body is not null) { request.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json"); }
         using var response = await _client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellation);
-        if (!response.IsSuccessStatusCode) { throw new InvalidOperationException("Fixture control request refused.") { Data = { ["fixtureHttpStatus"] = (int)response.StatusCode } }; }
         await using var stream = await response.Content.ReadAsStreamAsync(cancellation);
         var buffer = new byte[16385];
         var count = 0;
@@ -70,7 +95,7 @@ internal sealed class FixtureAuditClient : IDisposable
         }
         if (count > 16384) { throw new InvalidOperationException("Fixture response too large."); }
         using var document = JsonDocument.Parse(buffer.AsMemory(0, count));
-        return document.RootElement.Clone();
+        return ((int)response.StatusCode, document.RootElement.Clone());
     }
 
     public void Dispose() => _client.Dispose();

@@ -11,11 +11,9 @@ import recovery_composition_tests as fixture
 import server_data_inputs as admission
 
 
-def run():
-    packet = sys.stdin.buffer.read(admission.MAX_INPUT + 1)
-    admission.archive.require(64 <= len(packet) <= admission.MAX_INPUT and packet.startswith(b'PGDMP'))
+def capture(packet, audit):
+    admission.archive.require(0 < len(packet) <= admission.MAX_INPUT and 0 < len(audit) <= admission.MAX_INPUT)
     digest = hashlib.sha256(packet).hexdigest()
-    audit = b'SYNTHETIC_PLACEHOLDER_NOT_A_NATIVE_IMMUDB_BACKUP'
     audit_digest = hashlib.sha256(audit).hexdigest()
     with tempfile.TemporaryDirectory(prefix='fleetory-generated-pg-') as directory:
         root = Path(directory)
@@ -49,8 +47,15 @@ def run():
             pass
         else:
             raise admission.archive.ArchiveError('Replacement was accepted.')
-        return dict(schema='fleetory.generated-pg-capture.v1', dumpBase64=base64.b64encode(captured).decode(),
-                    dumpSha256=digest, dumpBytes=len(captured), sourceReplacementRejected=True,
+        return captured, capsule.packet('audit-immudb')
+
+
+def run():
+    packet = sys.stdin.buffer.read(admission.MAX_INPUT + 1)
+    admission.archive.require(64 <= len(packet) <= admission.MAX_INPUT and packet.startswith(b'PGDMP'))
+    captured, _ = capture(packet, b'SYNTHETIC_PLACEHOLDER_NOT_A_NATIVE_IMMUDB_BACKUP')
+    return dict(schema='fleetory.generated-pg-capture.v1', dumpBase64=base64.b64encode(captured).decode(),
+                    dumpSha256=hashlib.sha256(captured).hexdigest(), dumpBytes=len(captured), sourceReplacementRejected=True,
                     capturedBytesSurviveReplacement=True, componentReportsAreSyntheticFixtures=True,
                     originalInventoryV2Verified=False, auditBackupRestored=False,
                     fullSystemRecoveryVerified=False, phase7Complete=False)

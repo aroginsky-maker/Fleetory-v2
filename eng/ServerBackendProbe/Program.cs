@@ -17,6 +17,7 @@ internal static class Program
     internal const string PrivateDirectory = "/run/fleetory-native/server";
     private static readonly HashSet<string> Modes = new(StringComparer.Ordinal)
     {
+        "immu-seed", "immu-inspect", "immu-reader-create", "immu-reader", "immu-wrong-password",
         "schema", "restore-schema", "db-ready", "db-write", "db-rollback", "db-atomic", "db-password", "db-tls", "db-plaintext",
         "db-update", "db-delete", "db-schema", "db-temp", "db-owner", "db-queue-delete",
         "audit-prepare", "audit-publish", "audit-repeat", "audit-conflict", "audit-password", "audit-readonly",
@@ -52,6 +53,8 @@ internal static class Program
     private static async Task<object> RunAsync(string mode)
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(18));
+        if (mode.StartsWith("immu-", StringComparison.Ordinal))
+        { return await AuditRoundtripControl.ExecuteAsync(mode, deadline.Token); }
         if (mode == "restore-schema")
         {
             return new { category = mode, sql = RestoreSchema.Generate(), databaseOpened = false,

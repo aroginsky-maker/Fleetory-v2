@@ -4,14 +4,24 @@
 
 ## Implemented
 
+- A separate fresh immudb data fixture now backs up and restores four synthetic
+  audit keys through immutable captured native bytes. It compares exact values,
+  revisions, transactions and signed tips, rejects corrupted/truncated backups
+  and a changed signature, and verifies target-only reader/password refusals,
+  restart and owned cleanup including a deliberately failed child. The paired
+  PostgreSQL slot and component reports remain explicit test fixtures; this is
+  not a coordinated original-data restore or a Server startup controller. See
+  [NativeImmuDataRoundtrip](docs/operations/NativeImmuDataRoundtrip.md).
+
 - A separate native PostgreSQL data fixture now restores the current application
   schema with18 tables/23 synthetic rows through immutable captured dump bytes.
   It compares data/catalog/security fingerprints, rejects eight mutations and
   truncated format, proves late ACL failure rolls back atomically, and checks
   runtime SCRAM/refusals/restart and owned cleanup. The offline schema generator
   must equal the existing native DI generator. Its algorithm and synthetic
-  component profiles do not stand in for retained original inventories; immudb
-  restore and Server startup remain open. See
+  component profiles do not stand in for retained original inventories. Its
+  immudb slot is a placeholder; the separate audit rehearsal above does not
+  establish a common capture point. Server startup remains open. See
   [NativePgDataRoundtrip](docs/operations/NativePgDataRoundtrip.md).
 
 - The first Server recovery slice now has a closed two-input admission stage.
