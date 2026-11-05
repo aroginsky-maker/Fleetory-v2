@@ -4,6 +4,14 @@
 
 ## Implemented
 
+- A read-only component composition preflight now reconciles eight pinned pilot
+  metadata reports before original-service recovery planning. It binds target-only
+  LOGIN to the exact accepted database report/dumps/inventories, matches audit
+  counts/source revisions and rebuilt payload lineage, and preserves consumed
+  provider/configuration permissions and historical identity limits. It reads no
+  referenced backups/keys and cannot authorize an operation or mark full recovery
+  complete. See [RecoveryComposition](docs/operations/RecoveryComposition.md).
+
 - The third native Server host now retains its original Agent/Admin TLS connections
   across fixture-owner durable revocation. Their second GETs must return403 on the
   same exact native connections, with real Revoked readers/inventories and no

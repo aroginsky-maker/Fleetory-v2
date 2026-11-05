@@ -80,7 +80,9 @@ jobs:
 
       - name: Verify pinned recovery files on Windows
         shell: pwsh
-        run: python -B ./tests/Fleetory.Tools.Tests/recovery_files_tests.py
+        run: |
+          python -B ./tests/Fleetory.Tools.Tests/recovery_files_tests.py
+          python -B ./tests/Fleetory.Tools.Tests/recovery_composition_tests.py
 
       - name: Verify synthetic recovery isolation contract on Windows
         shell: pwsh
@@ -314,7 +316,9 @@ jobs:
 
       - name: Verify pinned recovery files
         shell: pwsh
-        run: python3 -B ./tests/Fleetory.Tools.Tests/recovery_files_tests.py
+        run: |
+          python3 -B ./tests/Fleetory.Tools.Tests/recovery_files_tests.py
+          python3 -B ./tests/Fleetory.Tools.Tests/recovery_composition_tests.py
 
       - name: Verify synthetic recovery network isolation
         shell: pwsh
