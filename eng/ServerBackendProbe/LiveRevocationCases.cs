@@ -7,6 +7,8 @@ internal sealed record LiveRevocationResult(object Registered, object Revoked, o
 internal static class LiveRevocationCases
 {
     private const string ControlDirectory = "/run/fleetory-native/live";
+    private static readonly int[] FirstResponses = [204, 401];
+    private static readonly int[] SecondResponses = [403, 403];
 
     internal static async Task<LiveRevocationResult> ExecuteAsync(IServiceProvider services, CancellationToken cancellation)
     {
@@ -25,7 +27,7 @@ internal static class LiveRevocationCases
         if (agent.CompletedConnectionId == admin.CompletedConnectionId)
         { throw new InvalidOperationException("Independent gateway connection IDs collided."); }
         return new(registered, revoked, new { connections = 2, requestsPerConnection = 2, nativeHandshakes = 2,
-            replacementConnections = 0, firstResponses = new[] { 204, 401 }, secondResponses = new[] { 403, 403 },
+            replacementConnections = 0, firstResponses = FirstResponses, secondResponses = SecondResponses,
             agentConnectionId = agent.CompletedConnectionId, adminConnectionId = admin.CompletedConnectionId });
     }
 

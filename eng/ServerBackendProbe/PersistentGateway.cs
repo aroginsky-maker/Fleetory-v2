@@ -37,7 +37,12 @@ internal sealed class PersistentGateway(int port, TcpClient tcp, SslStream tls) 
             { throw new InvalidOperationException("Persistent native TLS identity drift."); }
             return new PersistentGateway(port, tcp, tls);
         }
-        catch { tls?.Dispose(); tcp.Dispose(); throw; }
+        catch
+        {
+            try { if (tls is not null) { await tls.DisposeAsync(); } }
+            finally { tcp.Dispose(); }
+            throw;
+        }
     }
 
     internal async Task RequireAsync(CredentialState state, TlsObservation observation, CancellationToken cancellation)
