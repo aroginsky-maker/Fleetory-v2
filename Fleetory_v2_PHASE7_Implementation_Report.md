@@ -4,6 +4,15 @@
 
 ## Implemented
 
+- A fourth generated native Server host verifies durable revocation of the same
+  previously accepted fixture Agent/Admin credentials after restart: both actual
+  private GETs return403, with real Revoked store preflights and exact inventories.
+  Runtime registration/revocation writes remain denied42501. The Admin refusal
+  creates one certificate-revocation denial before OIDC, automatically exported;
+  seven SQL events/eight revision-one immudb keys match all ten fields and preserve
+  prior values. No original PKI or real approval is implied. See
+  [NativeRevokedBoundary](docs/operations/NativeRevokedBoundary.md).
+
 - A third generated native host now verifies real durable Agent binding admission
   (204) and mandatory OIDC refusal after Admin registration without a bearer
   token (401). Fixture-owner rows explicitly state they are not external approval;

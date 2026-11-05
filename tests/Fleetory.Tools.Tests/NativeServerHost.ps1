@@ -20,6 +20,12 @@ function Seed-NativeRegisteredIdentity{
         return @{device=$device;subject=$subject;agentHash=$agentHash;adminHash=$adminHash}
     }finally{$agentPublic.Dispose();$adminPublic.Dispose()}
 }
+function Revoke-NativeFixtureIdentity([hashtable]$Seed){
+    Assert-True ($Seed.agentHash -cmatch '^[0-9A-F]{64}$' -and $Seed.adminHash -cmatch '^[0-9A-F]{64}$') 'Fixture revocation identity invalid.'
+    # Only fresh fixture fingerprints; one real database instant shared by both records.
+    $sql="BEGIN; SET LOCAL ROLE fleetory_owner; WITH revoked AS (UPDATE core.agent_certificates SET revoked_at=clock_timestamp() WHERE certificate_sha256='"+$Seed.agentHash+"' AND revoked_at IS NULL RETURNING revoked_at), added AS (INSERT INTO platform.admin_certificate_revocations(certificate_sha256,revoked_at,incident_reference,operator_reference) SELECT '"+$Seed.adminHash+"',revoked_at,'fixture-not-approval','fixture-not-approval' FROM revoked RETURNING certificate_sha256) SELECT count(*)=1 FROM added; COMMIT;"
+    Assert-True ((Invoke-Database 'fleetory' $sql).Stdout.Trim() -ceq 't') 'Fixture owner revocation did not affect exactly one pair.'
+}
 function Invoke-NativeServerHost{
     $priorEvents=@((Get-PipelineEventJson),(Get-PipelineEventJson 'Fixture.Worker.Read'),(Get-PipelineEventJson 'Fixture.Worker.AfterStop'))
     $null=Invoke-ServerProbe 'db-host-write' 'db-write'
@@ -61,8 +67,28 @@ function Invoke-NativeServerHost{
         $admission.newAdminDenialEvents -eq 1 -and $admission.denialAction -ceq 'admin.oidc.denied' -and
         $admission.agentBindingAdmissionVerified -eq $true -and $admission.automaticWorkerDrain -eq $true -and
         $admission.positiveIdentityAdmissionVerified -eq $false) 'Registered host admission/OIDC boundary incomplete.'
-    $runs=@($degraded.lifecycle,$healthy.lifecycle,$registered.lifecycle)
-    Assert-True (@($runs.processId|Select-Object -Unique).Count -eq 3) 'Native host process identity drift.'
+    Revoke-NativeFixtureIdentity $seed
+    $revoked=Invoke-ServerProbe 'host-revoked' 'host-revoked'
+    Assert-WorkerQueue 7 0
+    $revocationEvent=Get-PipelineEventJson 'admin.certificate.revoked_denied';$revocation=$revocationEvent|ConvertFrom-Json -AsHashtable
+    $refusal=$revoked.lifecycle.revokedBoundary
+    Assert-True ($revocation.Action -ceq 'admin.certificate.revoked_denied' -and $revocation.actorSubjectId -ceq $seed.subject -and
+        $revocation.actorSubjectId -ceq $refusal.actorSubjectId -and $revocation.actorKind -eq 1 -and
+        $revocation.targetType -ceq 'admin_certificate' -and $revocation.targetId -ceq $seed.adminHash -and
+        $revocation.correlationId -ceq 'native-revoked-admin' -and $refusal.certificateSha256 -ceq $seed.adminHash) 'Independent revocation denial event mismatch.'
+    $actions+=@('admin.oidc.denied');$captured+=@($oidcEvent)
+    Assert-WorkerAudit (@($captured)+@($revocationEvent))
+    for($index=0;$index -lt 6;$index++){Assert-True ((Get-PipelineEventJson $actions[$index]) -ceq $captured[$index]) 'Revoked host changed prior audit or OIDC denial.'}
+    Assert-True ($refusal.agentStatus -ceq 'Revoked' -and $refusal.adminStatus -ceq 'Revoked' -and
+        $refusal.agentHttpStatus -eq 403 -and $refusal.adminHttpStatus -eq 403 -and $refusal.mutualTlsHttpRefusals -eq 2 -and
+        $refusal.runtimeIdentityInsertRefusals -eq 2 -and $refusal.runtimeRevocationWriteRefusals -eq 2 -and
+        $refusal.sanParsersAccepted -eq 2 -and $refusal.runtimeStorePreflights -eq 2 -and $refusal.revokedInventories -eq 3 -and
+        $refusal.newAdminDenialEvents -eq 1 -and $refusal.denialAction -ceq 'admin.certificate.revoked_denied' -and
+        $refusal.durableRevocationVerified -eq $true -and $refusal.automaticWorkerDrain -eq $true -and
+        $refusal.agentBindingAdmissionVerified -eq $false -and $refusal.positiveIdentityAdmissionVerified -eq $false -and
+        $refusal.emptyBodies -eq $true -and $refusal.correlatedPrivateGets -eq 2) 'Revoked host boundary incomplete.'
+    $runs=@($degraded.lifecycle,$healthy.lifecycle,$registered.lifecycle,$revoked.lifecycle)
+    Assert-True (@($runs.processId|Select-Object -Unique).Count -eq 4) 'Native host process identity drift.'
     foreach($run in $runs){
         Assert-True ($run.applicationStarted -eq $true -and $run.applicationStopped -eq $true -and $run.workerExecutionCompleted -eq $true -and
             $run.stopElapsedMilliseconds -ge 0 -and $run.stopElapsedMilliseconds -lt 5000 -and
@@ -72,7 +98,8 @@ function Invoke-NativeServerHost{
     }
     Assert-True ($degraded.lifecycle.readinessBody -ceq 'Degraded' -and $degraded.lifecycle.claimFailures -ge 1 -and
         $healthy.lifecycle.readinessBody -ceq 'Healthy' -and $healthy.lifecycle.claimFailures -eq 0 -and
-        $registered.lifecycle.readinessBody -ceq 'Healthy' -and $registered.lifecycle.claimFailures -eq 0) 'Native host readiness/worker mismatch.'
+        $registered.lifecycle.readinessBody -ceq 'Healthy' -and $registered.lifecycle.claimFailures -eq 0 -and
+        $revoked.lifecycle.readinessBody -ceq 'Healthy' -and $revoked.lifecycle.claimFailures -eq 0) 'Native host readiness/worker mismatch.'
     $tls=$healthy.lifecycle.clientTls
     Assert-True ($null -eq $degraded.lifecycle.clientTls -and $tls.gateways -eq 2 -and $tls.trustedClientHttpResponses -eq 2 -and
         $tls.missingClientRefusals -eq 2 -and $tls.crossRootClientRefusals -eq 2 -and $tls.wrongEkuClientRefusals -eq 2 -and
@@ -90,9 +117,9 @@ function Invoke-NativeServerHost{
         $registry.mutualTlsHttpRefusals -eq 2 -and $registry.statusCode -eq 403 -and $registry.emptyBodies -eq $true -and
         $registry.correlatedPrivateGets -eq 2 -and $registry.newAdminDenialEvents -eq 1 -and $registry.automaticWorkerDrain -eq $true -and
         $registry.positiveIdentityAdmissionVerified -eq $false) 'Native registry boundary proof incomplete.'
-    return [ordered]@{applicationStarts=3;applicationStops=3;maximumStopMilliseconds=($runs.stopElapsedMilliseconds|Measure-Object -Maximum).Maximum;
-        workerExecutionCompleted=$true;httpHealthBodiesVerified=6;degradedAndHealthyBothStatus200=$true;publicPrivilegedPathRefusals=6;
-        listenersVerifiedPerHost=3;closedPortRefusals=9;initialClosedPortRefusals=9;nativeClaimFailureObserved=$true;
-        automaticDrainVerified=$true;totalAuditKeys=7;hostEventRevision=1;registryDenialRevision=1;oidcDenialRevision=1;crossStoreFieldsPerEvent=10;
-        queueRowsAfterHostRestart=0;immutableEventsUnchanged=$true;manualWorkerStartsInHostCases=0;clientTls=$tls;registeredBoundary=$admission;issuerActivated=$false}
+    return [ordered]@{applicationStarts=4;applicationStops=4;maximumStopMilliseconds=($runs.stopElapsedMilliseconds|Measure-Object -Maximum).Maximum;
+        workerExecutionCompleted=$true;httpHealthBodiesVerified=8;degradedAndHealthyBothStatus200=$true;publicPrivilegedPathRefusals=8;
+        listenersVerifiedPerHost=3;closedPortRefusals=12;initialClosedPortRefusals=12;nativeClaimFailureObserved=$true;
+        automaticDrainVerified=$true;totalAuditKeys=8;hostEventRevision=1;registryDenialRevision=1;oidcDenialRevision=1;revocationDenialRevision=1;crossStoreFieldsPerEvent=10;
+        queueRowsAfterHostRestart=0;immutableEventsUnchanged=$true;manualWorkerStartsInHostCases=0;clientTls=$tls;registeredBoundary=$admission;revokedBoundary=$refusal;issuerActivated=$false}
 }

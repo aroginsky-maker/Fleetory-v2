@@ -23,7 +23,7 @@ internal static class Program
         "audit-database", "audit-tls", "audit-verify", "audit-health",
         "pump-auth", "pump-lostack", "pump-deliver", "pump-empty", "pump-update", "pipeline-pending", "pipeline-verify",
         "db-worker-write", "worker-denied", "worker-retain", "worker-drain", "worker-restart", "worker-verify",
-        "db-host-write", "host-degraded", "host-drain", "host-registered", "http-contract"
+        "db-host-write", "host-degraded", "host-drain", "host-registered", "host-revoked", "http-contract"
     };
 
     public static async Task<int> Main(string[] args)
@@ -99,7 +99,7 @@ internal static class Program
             { throw new InvalidOperationException("Fixture HTTP host started."); }
             return new { category = mode, lifecycle, httpHostStarted = false, issuerActivated = false };
         }
-        if (mode is "host-degraded" or "host-drain" or "host-registered")
+        if (mode is "host-degraded" or "host-drain" or "host-registered" or "host-revoked")
         {
             var lifecycle = await HostCases.ExecuteAsync(mode, app, platform, deadline.Token);
             return new { category = mode, lifecycle, httpHostStarted = true, issuerActivated = false };

@@ -67,6 +67,9 @@ It retains lifecycle, stopped worker, closed listeners, immutable events, six
 revision-one audit keys and verified removal of all owned resources.
 The subsequent [registered boundary](NativeRegisteredBoundary.md) adds a third
 host with Agent204, registered Admin401 and a seventh revision-one audit key.
+The [revocation boundary](NativeRevokedBoundary.md) adds a fourth host using the
+same still-valid leaves after durable fixture revocation: both private GETs403,
+exact Revoked store preflights and an eighth revision-one audit key before OIDC.
 
 No original keys, existing lab tokens, VPS, provider recovery, issuer, login or
 privileged request is used. Successful TLS plus a path-boundary404 proves neither

@@ -63,7 +63,7 @@ function Invoke-ServerProbe([string]$Mode,[string]$Expected,[byte[]]$Packet=$nul
         }
         throw ('Server probe mismatch: '+$Mode+';category='+$category+';exit='+$r.ExitCode+';stderrLength='+$r.Stderr.Length)
     }
-    if($Mode -cne 'schema'){Assert-True ($record.httpHostStarted -eq ($Mode -cin @('host-degraded','host-drain','host-registered')) -and $record.issuerActivated -eq $false) 'Host or issuer scope drift.'}
+    if($Mode -cne 'schema'){Assert-True ($record.httpHostStarted -eq ($Mode -cin @('host-degraded','host-drain','host-registered','host-revoked')) -and $record.issuerActivated -eq $false) 'Host or issuer scope drift.'}
     return $record
 }
 function Assert-DatabaseCount([int]$Expected){
@@ -196,7 +196,7 @@ try{
     $stage='server-host';$hostLifecycle=Invoke-NativeServerHost
     $proof=[ordered]@{schema='fleetory.native-server-backend.v1';verified=$true;nativeDbContexts=2;nativeHealthChecksAccepted=2;
         auditOutboxCommitVerified=$true;explicitRollbackVerified=$true;partialWriteRollbackVerified=$true;databaseRefusals=9;
-        auditPublicationsAccepted=2;singleRevisionVerified=$true;auditKeyCount=7;directSinkAuditKeyCount=1;auditFieldsVerified=10;auditRefusals=5;pipeline=$pipeline;workerLifecycle=$workerLifecycle;hostLifecycle=$hostLifecycle;httpResponseContract=$httpContract.contract;originalMaterialUsed=$false;
+        auditPublicationsAccepted=2;singleRevisionVerified=$true;auditKeyCount=8;directSinkAuditKeyCount=1;auditFieldsVerified=10;auditRefusals=5;pipeline=$pipeline;workerLifecycle=$workerLifecycle;hostLifecycle=$hostLifecycle;httpResponseContract=$httpContract.contract;originalMaterialUsed=$false;
         sourceVpsAccessed=$false;httpHostStarted=$true;issuerActivated=$false;publishedPorts=0;workerOnlyLoopback=$true;
         postgresBoundaryRefusals=16;workerBoundaryRefusals=23;auditBoundaryRefusals=17;sharedWorkerRefusals=9;fullSystemRecoveryVerified=$false;phase7Complete=$false}
 }

@@ -23,7 +23,7 @@ internal static class HostCases
         { throw new InvalidOperationException("Unexpected native host state."); }
         await platform.Database.OpenConnectionAsync(cancellation);
         await DatabaseCases.VerifyAsync(platform, "platform.person_projections", cancellation);
-        var registered = mode == "host-registered";
+        var registered = mode is "host-registered" or "host-revoked";
         WorkerCases.RequireQueue(await WorkerCases.ReadQueueAsync(platform, cancellation), registered ? 0 : 1, 0);
         await WorkerCases.RequireHealthAsync(app.Services, registered ? HealthStatus.Healthy : HealthStatus.Degraded, cancellation);
         var worker = WorkerCases.GetUnstartedWorker(app.Services);
@@ -34,6 +34,7 @@ internal static class HostCases
         var stop = new Stopwatch();
         object? clientTls = null;
         object? registeredBoundary = null;
+        object? revokedBoundary = null;
         try
         {
             await app.StartAsync(cancellation);
@@ -49,7 +50,10 @@ internal static class HostCases
             if (registered)
             {
                 using var tls = new TlsObservation();
-                registeredBoundary = await RegistryCases.ExecuteAsync(app.Services, tls, cancellation, true);
+                var boundary = await RegistryCases.ExecuteAsync(app.Services, tls, cancellation,
+                    mode == "host-revoked" ? CredentialState.Revoked : CredentialState.Registered);
+                if (mode == "host-revoked") { revokedBoundary = boundary; }
+                else { registeredBoundary = boundary; }
             }
             await WorkerCases.RequireHealthAsync(app.Services, expected, cancellation);
         }
@@ -71,7 +75,7 @@ internal static class HostCases
             workerExecutionCompleted = true, stopElapsedMilliseconds = stop.ElapsedMilliseconds,
             claimFailures = observation.Errors, livenessBody = "Healthy", readinessBody = expected.ToString(),
             readinessStatusCode = 200, publicPrivilegedPathRefusals = 2, listeningPorts = Ports,
-            closedPortRefusals = 3, initialClosedPortRefusals = 3, clientTls, registeredBoundary };
+            closedPortRefusals = 3, initialClosedPortRefusals = 3, clientTls, registeredBoundary, revokedBoundary };
     }
 
     private static async Task WaitForWorkerAsync(string mode, BackgroundService worker, WorkerObservation observation,

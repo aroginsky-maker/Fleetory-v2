@@ -13,7 +13,7 @@ internal static class ClientTlsCases
 {
     private const string ClientPurpose = "1.3.6.1.5.5.7.3.2";
     private const string ServerPurpose = "1.3.6.1.5.5.7.3.1";
-    private enum TlsCase { Trusted, Identity, Registry, Registered, MissingClient, CrossRootClient, WrongEkuClient, ServerRoot, ServerHostname }
+    private enum TlsCase { Trusted, Identity, Registry, Registered, Revoked, MissingClient, CrossRootClient, WrongEkuClient, ServerRoot, ServerHostname }
 
     internal static async Task<object> ExecuteAsync(IServiceProvider services, CancellationToken cancellation)
     {
@@ -40,9 +40,13 @@ internal static class ClientTlsCases
             registryBoundary = registry, identityAdmissionVerified = false };
     }
 
-    internal static Task RequireRegistryRefusalAsync(int port, X509Certificate2 root, X509Certificate2 client,
-        TlsObservation observation, CancellationToken cancellation, bool registered = false) =>
-        ConnectAsync(port, root, client, registered ? TlsCase.Registered : TlsCase.Registry, observation, cancellation);
+    internal static Task RequireRegistryResponseAsync(int port, X509Certificate2 root, X509Certificate2 client,
+        TlsObservation observation, CancellationToken cancellation, CredentialState state) =>
+        ConnectAsync(port, root, client, state switch
+        {
+            CredentialState.Unregistered => TlsCase.Registry, CredentialState.Registered => TlsCase.Registered,
+            CredentialState.Revoked => TlsCase.Revoked, _ => throw Failure("CredentialState")
+        }, observation, cancellation);
 
     private static async Task GatewayAsync(int port, X509Certificate2 root, X509Certificate2 otherRoot,
         X509Certificate2 client, X509Certificate2 otherClient, X509Certificate2 server,
@@ -90,7 +94,7 @@ internal static class ClientTlsCases
             catch (AuthenticationException) { return; }
             throw Failure("ServerTrustAccepted");
         }
-        if (mode is not (TlsCase.Trusted or TlsCase.Identity or TlsCase.Registry or TlsCase.Registered))
+        if (mode is not (TlsCase.Trusted or TlsCase.Identity or TlsCase.Registry or TlsCase.Registered or TlsCase.Revoked))
         {
             await ObservePeerRefusalAsync(tls, options, deadline.Token);
             if (mode is TlsCase.CrossRootClient or TlsCase.WrongEkuClient && !selected) { throw Failure("ClientSelection"); }
@@ -102,13 +106,18 @@ internal static class ClientTlsCases
             tls.LocalCertificate is null || client is null ||
             !tls.LocalCertificate.GetRawCertData().AsSpan().SequenceEqual(client.RawData))
         { throw Failure("MutualAuthentication"); }
-        var path = mode is TlsCase.Identity or TlsCase.Registry or TlsCase.Registered ?
+        var path = mode is TlsCase.Identity or TlsCase.Registry or TlsCase.Registered or TlsCase.Revoked ?
             (port == 19581 ? "/agent/identity" : "/admin/authorization/roles/00000000-0000-4000-8000-000000000001/versions") :
             "/fixture/client-tls";
         var expected = mode == TlsCase.Registered ? (port == 19581 ? HttpStatusCode.NoContent : HttpStatusCode.Unauthorized) :
             (mode == TlsCase.Trusted ? HttpStatusCode.NotFound : HttpStatusCode.Forbidden);
-        await RequireHttpAsync(tls, path, expected,
-            mode is TlsCase.Registry or TlsCase.Registered ? RegistryCases.Correlation(port, mode == TlsCase.Registered) : null, deadline.Token);
+        var correlation = mode switch
+        {
+            TlsCase.Registry => RegistryCases.Correlation(port, CredentialState.Unregistered),
+            TlsCase.Registered => RegistryCases.Correlation(port, CredentialState.Registered),
+            TlsCase.Revoked => RegistryCases.Correlation(port, CredentialState.Revoked), _ => null
+        };
+        await RequireHttpAsync(tls, path, expected, correlation, deadline.Token);
         await observation.RequireAsync(serverEndpoint, clientEndpoint, false, path, deadline.Token);
     }
 
