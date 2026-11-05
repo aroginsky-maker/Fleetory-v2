@@ -2,7 +2,7 @@
 # Fresh Server DI components, PostgreSQL and immudb. No retained material or VPS.
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
-foreach($test in @('NativeJournalBoundary.Tests.ps1','NativeSignerBoundary.Tests.ps1','NativeAuditBoundary.Tests.ps1','NativeWorkerRuntime.Tests.ps1')){& (Join-Path $PSScriptRoot $test)}
+foreach($test in @('NativeJournalBoundary.Tests.ps1','NativeSignerBoundary.Tests.ps1','NativeAuditBoundary.Tests.ps1','NativeWorkerRuntime.Tests.ps1','DisposableClientTls.Tests.ps1')){& (Join-Path $PSScriptRoot $test)}
 $repoRoot=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 foreach($helper in @('PilotNativeProcess.ps1','../../eng/pilot/ProviderRecoveryTransport.ps1','../../eng/pilot/ProviderRecoveryPolicy.ps1',
     'PilotDisposableTls.ps1','NativeSignerFixture.ps1','NativeJournalFixture.ps1','NativeAuditFixture.ps1','NativeWorkerRuntime.ps1','NativeOutboxPipeline.ps1','NativeOutboxWorker.ps1','NativeServerHost.ps1')){. (Join-Path $PSScriptRoot $helper)}
@@ -58,7 +58,7 @@ function Invoke-ServerProbe([string]$Mode,[string]$Expected,[byte[]]$Packet=$nul
     if($r.ExitCode -ne 0 -or -not [string]::IsNullOrWhiteSpace($r.Stderr) -or $record.category -cne $Expected){
         $category=if($record.category -cmatch '^[a-z-]{1,32}$'){$record.category}else{'invalid'}
         if($Mode -cne 'audit-health'){
-            foreach($field in @('errorType','causeType','location')){if($record.ContainsKey($field) -and $record[$field] -cmatch '^[A-Za-z0-9_]{1,80}$'){[Console]::Error.WriteLine('Native Server '+$field+'='+$record[$field])}}
+            foreach($field in @('errorType','causeType','location','tlsFailure')){if($record.ContainsKey($field) -and $record[$field] -cmatch '^[A-Za-z0-9_]{1,80}$'){[Console]::Error.WriteLine('Native Server '+$field+'='+$record[$field])}}
             if($record.ContainsKey('controlStatus') -and $record.controlStatus -is [long]){[Console]::Error.WriteLine('Native Server controlStatus='+$record.controlStatus)}
         }
         throw ('Server probe mismatch: '+$Mode+';category='+$category+';exit='+$r.ExitCode+';stderrLength='+$r.Stderr.Length)
@@ -111,9 +111,12 @@ try{
     }
     $stage='postgres';$dbStarted=[DateTimeOffset]::UtcNow;$dbClaimed=$true
     $dbId=(Invoke-Docker (Get-NativeJournalArguments $session)).Stdout.Trim();Read-Store 'postgres'
-    $material=New-PilotDisposableTlsMaterial;$agent=New-PilotDisposableTlsMaterial;$admin=New-PilotDisposableTlsMaterial;$wrongMaterial=New-PilotDisposableTlsMaterial
+    $material=New-PilotDisposableTlsMaterial;$agent=New-PilotDisposableTlsMaterial -IncludeClient;$admin=New-PilotDisposableTlsMaterial -IncludeClient;$wrongMaterial=New-PilotDisposableTlsMaterial
     foreach($tls in @($material,$agent,$admin)){
         foreach($line in ($tls.ServerPrivateKeyPem -split "`n")){if($line.Length -ge 40 -and -not $line.StartsWith('-----')){$canaries.Add($line.Substring(0,40))}}
+    }
+    foreach($tls in @($agent,$admin)){
+        foreach($line in ($tls.ClientPrivateKeyPem -split "`n")){if($line.Length -ge 40 -and -not $line.StartsWith('-----')){$canaries.Add($line.Substring(0,40))}}
     }
     Write-StoreFile 'postgres' '/tmp/ca.pem' $material.RootCertificatePem
     Write-StoreFile 'postgres' '/tmp/server.crt' $material.ServerCertificatePem
@@ -138,6 +141,8 @@ try{
         Write-ServerSlot ($role+'-gateway-root-ca') $tls.RootCertificatePem
         Write-ServerSlot ($role+'-gateway-server-cert') $tls.ServerCertificatePem
         Write-ServerSlot ($role+'-gateway-server-key') $tls.ServerPrivateKeyPem
+        Write-ServerSlot ($role+'-gateway-client-cert') $tls.ClientCertificatePem
+        Write-ServerSlot ($role+'-gateway-client-key') $tls.ClientPrivateKeyPem
     }
     Write-ServerSlot 'infrastructure-ca' $material.RootCertificatePem;Write-ServerSlot 'audit-immudb-password' $secrets.writer;Write-ServerConnection $secrets.database
     $stage='schema';$schema=Invoke-ServerProbe 'schema' 'schema'

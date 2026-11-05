@@ -1,8 +1,17 @@
 # Fleetory v2 — PHASE 7 Security Foundation progress report
 
-**Status:** IN PROGRESS, 2 November 2026. PHASE 6 is complete; PHASE 8 has not started. Draft [PR #2](https://github.com/aroginsky-maker/Fleetory-v2/pull/2) contains the current implementation. The detailed controls and limits are maintained in [SecurityFoundation](docs/architecture/SecurityFoundation.md) and the [local lab guide](docs/architecture/SecurityLab.md).
+**Status:** IN PROGRESS, 5 November 2026. PHASE 6 is complete; PHASE 8 has not started. Draft [PR #2](https://github.com/aroginsky-maker/Fleetory-v2/pull/2) contains the current implementation. The detailed controls and limits are maintained in [SecurityFoundation](docs/architecture/SecurityFoundation.md) and the [local lab guide](docs/architecture/SecurityLab.md).
 
 ## Implemented
+
+- The generated native HTTP-host fixture now checks mutual TLS on both actual
+  Agent/Admin Kestrel listeners: trusted-client HTTP responses and missing-client,
+  cross-root, wrong-EKU, server-root and hostname refusals. Fresh client leaves
+  are issued in memory without exporting CA private keys; the default fixture
+  factory contract remains unchanged. OIDC and identity/registry/RBAC guards stay
+  enabled; the safe-path404 proves TLS, not identity authorization. See
+  [NativeClientTls](docs/operations/NativeClientTls.md) for bounds and remaining
+  original-service/full-recovery controls.
 
 - Synthetic recovery target isolation is now rendered and checked independently of the live pilot profile. Eight pinned, unprivileged Python probes use three internal isolated bridges, no ports or source mounts, read-only roots and fixed limits. Twenty portable tests reject 94 unsafe model mutations. The actual local rehearsal verified 28 permitted and 28 denied directed connections, no default route on all eight nodes, runtime isolation and removal of all owned containers/networks. Real service state, credentials and PKI were not loaded; image/release/configuration provenance and full-system recovery remain open. See [RecoveryIsolation](docs/operations/RecoveryIsolation.md).
 - A pinned, read-only preflight now binds all six retained recovery files to one explicit manifest digest before a whole-service exercise. It streams bounded hashes, validates paths again at the open boundary, confines CLI names to the operator-selected working directory, validates the complete component set and rejects links/special files and checks live file changes without database/provider operations. Twenty-seven synthetic tests passed on each of Windows and Linux; the actual six authorized files (350,081 bytes) and five negative cases passed separately. Historical identity/provider evidence retains its scope; full-system recovery, freshness, independent custody and approvals remain open. See [RecoveryFiles](docs/operations/RecoveryFiles.md).

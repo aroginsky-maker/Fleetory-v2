@@ -58,6 +58,12 @@ cancellation is allowed. Each of the three ports must then produce native
 `ConnectionRefused`. Other socket errors, timeouts and ambiguous closure fail.
 Two distinct native process IDs bind the restart proof.
 
+The healthy host also runs the [generated native client TLS matrix](NativeClientTls.md)
+against both actual gateway listeners before stopping. Matching clients receive
+the path-boundary404; missing/cross-root/wrong-purpose clients and incorrect
+server trust/hostname must fail native authentication. This is scoped TLS
+admission and does not establish identity or OIDC authorization.
+
 Independent PostgreSQL counts and immudb exact-key/revision/content reads verify
 that the first host retained the event and the second delivered it. All four
 PostgreSQL events stay immutable. The direct-sink, prior pump, two worker and new
@@ -66,7 +72,7 @@ fields. The final queue is empty. Existing generated-secret canaries, runtime
 constraints and verified resource absence remain mandatory.
 
 This verifies a generated Server host inside its local sandbox. It does not prove
-external firewall/proxy routing, client mTLS authorization, OIDC/human login,
+external firewall/proxy routing, client identity authorization, OIDC/human login,
 original credential/PKI admission, process-crash/multi-node recovery, a common
 original capture point or whole-VPS loss. Physical Agent/current revocations,
 independent WORM/key custody/approvals and full RPO/RTO remain open. Phase 7 is

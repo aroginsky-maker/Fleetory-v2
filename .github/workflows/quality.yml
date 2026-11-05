@@ -144,6 +144,10 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/NativeAuditBoundary.Tests.ps1
 
+      - name: Verify fresh client TLS fixture on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/DisposableClientTls.Tests.ps1
+
       - name: Verify root-only Windows TLS chain
         shell: pwsh
         run: ./eng/verify-windows-tls-chain.ps1

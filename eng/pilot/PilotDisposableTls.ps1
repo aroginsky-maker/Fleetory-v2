@@ -1,8 +1,18 @@
 #requires -Version 7.3
 # Synthetic fixture material only. Root private key is never exported or persisted.
+function New-PilotDisposableChainPolicy($Root,[string]$Purpose) {
+    $policy = [Security.Cryptography.X509Certificates.X509ChainPolicy]::new()
+    $policy.TrustMode = [Security.Cryptography.X509Certificates.X509ChainTrustMode]::CustomRootTrust
+    $null = $policy.CustomTrustStore.Add($Root)
+    $policy.DisableCertificateDownloads = $true
+    $policy.RevocationMode = [Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
+    $policy.VerificationFlags = [Security.Cryptography.X509Certificates.X509VerificationFlags]::NoFlag
+    $null = $policy.ApplicationPolicy.Add([Security.Cryptography.Oid]::new($Purpose))
+    return $policy
+}
 function New-PilotDisposableTlsMaterial {
     [CmdletBinding()]
-    param()
+    param([switch]$IncludeClient)
     $ErrorActionPreference = 'Stop'
     if ([Environment]::Version.Major -lt 7) { throw 'Disposable TLS requires .NET 7 or later.' }
     $owned = [Collections.Generic.List[IDisposable]]::new()
@@ -54,12 +64,7 @@ function New-PilotDisposableTlsMaterial {
         $owned.Add($publicRoot)
         $chain = [Security.Cryptography.X509Certificates.X509Chain]::new()
         $owned.Add($chain)
-        $chain.ChainPolicy.TrustMode = [Security.Cryptography.X509Certificates.X509ChainTrustMode]::CustomRootTrust
-        $null = $chain.ChainPolicy.CustomTrustStore.Add($publicRoot)
-        $chain.ChainPolicy.DisableCertificateDownloads = $true
-        $chain.ChainPolicy.RevocationMode = [Security.Cryptography.X509Certificates.X509RevocationMode]::NoCheck
-        $chain.ChainPolicy.VerificationFlags = [Security.Cryptography.X509Certificates.X509VerificationFlags]::NoFlag
-        $null = $chain.ChainPolicy.ApplicationPolicy.Add([Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.1'))
+        $chain.ChainPolicy = New-PilotDisposableChainPolicy $publicRoot '1.3.6.1.5.5.7.3.1'
         if (-not $chain.Build($server) -or $chain.ChainElements.Count -ne 2) { throw 'Invalid synthetic chain.' }
         $sanExtension = @($server.Extensions | Where-Object { $_.Oid.Value -eq '2.5.29.17' })
         if ($sanExtension.Count -ne 1) { throw 'Missing synthetic SAN.' }
@@ -76,11 +81,38 @@ function New-PilotDisposableTlsMaterial {
         if (-not $publicKey.VerifyData($challenge,$signature,[Security.Cryptography.HashAlgorithmName]::SHA256)) {
             throw 'Synthetic key mismatch.'
         }
-        return [pscustomobject]@{
+        $result = [ordered]@{
             RootCertificatePem = $rootPem
             ServerCertificatePem = $server.ExportCertificatePem()
             ServerPrivateKeyPem = $serverKey.ExportPkcs8PrivateKeyPem()
         }
+        if ($IncludeClient) {
+            # Issue only a leaf while the root handle is alive. Never export its key.
+            $clientKey = [Security.Cryptography.ECDsa]::Create([Security.Cryptography.ECCurve+NamedCurves]::nistP256)
+            $owned.Add($clientKey)
+            $clientRequest = [Security.Cryptography.X509Certificates.CertificateRequest]::new(
+                'CN=Fleetory Disposable Client', $clientKey, [Security.Cryptography.HashAlgorithmName]::SHA256)
+            foreach ($extension in $serverRequest.CertificateExtensions) {
+                if ($extension.Oid.Value -notin @('2.5.29.37','2.5.29.14','2.5.29.17')) {
+                    $null = $clientRequest.CertificateExtensions.Add($extension)
+                }
+            }
+            $clientPurposes = [Security.Cryptography.OidCollection]::new()
+            $null = $clientPurposes.Add([Security.Cryptography.Oid]::new('1.3.6.1.5.5.7.3.2'))
+            $null = $clientRequest.CertificateExtensions.Add(
+                [Security.Cryptography.X509Certificates.X509EnhancedKeyUsageExtension]::new($clientPurposes,$true))
+            $null = $clientRequest.CertificateExtensions.Add(
+                [Security.Cryptography.X509Certificates.X509SubjectKeyIdentifierExtension]::new($clientRequest.PublicKey,$false))
+            $clientSerial = [Security.Cryptography.RandomNumberGenerator]::GetBytes(16)
+            $clientSerial[0] = $clientSerial[0] -bor 1
+            $clientLeaf = $clientRequest.Create($root,$notBefore,$now.AddHours(1),$clientSerial)
+            $owned.Add($clientLeaf)
+            $chain.ChainPolicy = New-PilotDisposableChainPolicy $publicRoot '1.3.6.1.5.5.7.3.2'
+            if (-not $chain.Build($clientLeaf) -or $chain.ChainElements.Count -ne 2) { throw 'Invalid synthetic client chain.' }
+            $result.ClientCertificatePem = $clientLeaf.ExportCertificatePem()
+            $result.ClientPrivateKeyPem = $clientKey.ExportPkcs8PrivateKeyPem()
+        }
+        return [pscustomobject]$result
     } catch {
         throw 'Disposable TLS fixture generation or validation failed.'
     } finally {

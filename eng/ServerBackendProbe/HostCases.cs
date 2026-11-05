@@ -31,6 +31,7 @@ internal static class HostCases
         foreach (var port in Ports) { await ProbePortAsync(port, false, cancellation); }
         var expected = mode == "host-degraded" ? HealthStatus.Degraded : HealthStatus.Healthy;
         var stop = new Stopwatch();
+        object? clientTls = null;
         try
         {
             await app.StartAsync(cancellation);
@@ -42,6 +43,7 @@ internal static class HostCases
             RequireGetRoute(app, "/admin/authorization/roles/{roleId:guid}/versions");
             await VerifyHttpAsync(expected.ToString(), cancellation);
             foreach (var port in Ports) { await ProbePortAsync(port, true, cancellation); }
+            if (mode == "host-drain") { clientTls = await ClientTlsCases.ExecuteAsync(cancellation); }
         }
         finally
         {
@@ -61,7 +63,7 @@ internal static class HostCases
             workerExecutionCompleted = true, stopElapsedMilliseconds = stop.ElapsedMilliseconds,
             claimFailures = observation.Errors, livenessBody = "Healthy", readinessBody = expected.ToString(),
             readinessStatusCode = 200, publicPrivilegedPathRefusals = 2, listeningPorts = Ports,
-            closedPortRefusals = 3, initialClosedPortRefusals = 3 };
+            closedPortRefusals = 3, initialClosedPortRefusals = 3, clientTls };
     }
 
     private static async Task WaitForWorkerAsync(string mode, BackgroundService worker, WorkerObservation observation,

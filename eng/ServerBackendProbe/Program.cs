@@ -40,7 +40,8 @@ internal static class Program
         {
             result = new { category = "unexpected", errorType = exception.GetType().Name,
                 causeType = exception.InnerException?.GetType().Name, location = exception.TargetSite?.Name,
-                controlStatus = exception.Data["fixtureHttpStatus"] as int? };
+                controlStatus = exception.Data["fixtureHttpStatus"] as int?,
+                tlsFailure = exception.Data["fixtureTlsFailure"] as string };
             exit = 1;
         }
         finally { Console.SetOut(originalOut); Console.SetError(originalError); }

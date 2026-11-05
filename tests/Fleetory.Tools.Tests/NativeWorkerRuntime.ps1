@@ -37,7 +37,8 @@ function Write-NativeWorkerFile($Context,[string]$Path,[byte[]]$Bytes){
     $names=@('infrastructure-ca','signer-policy','signer-postgresql','signer-server-ca','signer-server-cert','signer-server-key','signer-transit-public-key','signer-transit-token')
     $allowed=@('/tmp/ca.pem','/tmp/wrong-ca.pem')+@($names|ForEach-Object {'/run/fleetory-native/signer/'+$_})
     $serverNames=@('fleetory-postgresql','agent-gateway-root-ca','agent-gateway-server-cert','agent-gateway-server-key',
-        'admin-gateway-root-ca','admin-gateway-server-cert','admin-gateway-server-key','audit-immudb-password','infrastructure-ca')
+        'admin-gateway-root-ca','admin-gateway-server-cert','admin-gateway-server-key','audit-immudb-password','infrastructure-ca',
+        'agent-gateway-client-cert','agent-gateway-client-key','admin-gateway-client-cert','admin-gateway-client-key')
     $allowed+=@($serverNames|ForEach-Object {'/run/fleetory-native/server/'+$_})
     Assert-NativeSigner ($Path -cin $allowed -and $Bytes.Length -gt 0 -and $Bytes.Length -le 16384) 'worker-file-slot'
     Read-NativeWorkerContext $Context
