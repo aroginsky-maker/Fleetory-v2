@@ -2,10 +2,10 @@
 # Fresh Server DI components, PostgreSQL and immudb. No retained material or VPS.
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
-foreach($test in @('NativeJournalBoundary.Tests.ps1','NativeSignerBoundary.Tests.ps1','NativeAuditBoundary.Tests.ps1','NativeWorkerRuntime.Tests.ps1','DisposableClientTls.Tests.ps1')){& (Join-Path $PSScriptRoot $test)}
+foreach($test in @('NativeJournalBoundary.Tests.ps1','NativeSignerBoundary.Tests.ps1','NativeAuditBoundary.Tests.ps1','NativeWorkerRuntime.Tests.ps1','DisposableClientTls.Tests.ps1','NativeLiveHost.Tests.ps1')){& (Join-Path $PSScriptRoot $test)}
 $repoRoot=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 foreach($helper in @('PilotNativeProcess.ps1','../../eng/pilot/ProviderRecoveryTransport.ps1','../../eng/pilot/ProviderRecoveryPolicy.ps1',
-    'PilotDisposableTls.ps1','NativeSignerFixture.ps1','NativeJournalFixture.ps1','NativeAuditFixture.ps1','NativeWorkerRuntime.ps1','NativeOutboxPipeline.ps1','NativeOutboxWorker.ps1','NativeServerHost.ps1')){. (Join-Path $PSScriptRoot $helper)}
+    'PilotDisposableTls.ps1','NativeSignerFixture.ps1','NativeJournalFixture.ps1','NativeAuditFixture.ps1','NativeWorkerRuntime.ps1','NativeOutboxPipeline.ps1','NativeOutboxWorker.ps1','NativeLiveHost.ps1','NativeServerHost.ps1')){. (Join-Path $PSScriptRoot $helper)}
 $session=[Guid]::NewGuid().ToString('D');$dbId=$auditId=$worker=$null;$dbStarted=$auditStarted=$null;$dbImageId=$auditImageId=$null;$dbClaimed=$auditClaimed=$false
 $publicRoot=Join-Path $repoRoot ('artifacts/native-server-'+$session);$proof=$null;$stage='publish'
 $auditBuildClaimed=$false
@@ -54,6 +54,9 @@ function Write-ServerConnection([string]$Password,[string]$Mode='VerifyFull'){
 function Invoke-ServerProbe([string]$Mode,[string]$Expected,[byte[]]$Packet=$null,[switch]$WrongTrust){
     Read-Store 'postgres';if($auditId){Read-Store 'audit'}
     $r=Invoke-NativeWorker $worker 'ServerBackendProbe' $Mode $Packet $canaries.ToArray() -WrongTrust:$WrongTrust
+    return Read-ServerProbeRecord $r $Mode $Expected
+}
+function Read-ServerProbeRecord($r,[string]$Mode,[string]$Expected){
     $record=$r.Stdout|ConvertFrom-Json -AsHashtable
     if($r.ExitCode -ne 0 -or -not [string]::IsNullOrWhiteSpace($r.Stderr) -or $record.category -cne $Expected){
         $category=if($record.category -cmatch '^[a-z-]{1,32}$'){$record.category}else{'invalid'}
@@ -63,7 +66,7 @@ function Invoke-ServerProbe([string]$Mode,[string]$Expected,[byte[]]$Packet=$nul
         }
         throw ('Server probe mismatch: '+$Mode+';category='+$category+';exit='+$r.ExitCode+';stderrLength='+$r.Stderr.Length)
     }
-    if($Mode -cne 'schema'){Assert-True ($record.httpHostStarted -eq ($Mode -cin @('host-degraded','host-drain','host-registered','host-revoked')) -and $record.issuerActivated -eq $false) 'Host or issuer scope drift.'}
+    if($Mode -cne 'schema'){Assert-True ($record.httpHostStarted -eq ($Mode -cin @('host-degraded','host-drain','host-registered','host-live','host-revoked')) -and $record.issuerActivated -eq $false) 'Host or issuer scope drift.'}
     return $record
 }
 function Assert-DatabaseCount([int]$Expected){
@@ -154,6 +157,9 @@ try{
     Write-ServerSlot 'infrastructure-ca' $material.RootCertificatePem;Write-ServerSlot 'audit-immudb-password' $secrets.writer;Write-ServerConnection $secrets.database
     $httpContract=Invoke-ServerProbe 'http-contract' 'http-contract'
     Assert-True ($httpContract.contract.accepted -eq 4 -and $httpContract.contract.refused -eq 12) 'HTTP framing contract incomplete.'
+    $persistentContract=Invoke-ServerProbe 'persistent-contract' 'persistent-contract'
+    Assert-True ($persistentContract.contract.acceptedPairs -eq 2 -and $persistentContract.contract.refusedPairs -eq 14 -and
+        $persistentContract.identityContract.sameConnectionAccepted -eq 1 -and $persistentContract.identityContract.replacementOrInvalidRefusals -eq 3) 'Persistent HTTP/connection contract incomplete.'
     $stage='schema';$schema=Invoke-ServerProbe 'schema' 'schema'
     Assert-True ($schema.sql.Length -gt 0 -and $schema.sql.Length -le 131072) 'Native schema unbounded.'
     $null=Invoke-Database 'fleetory' ('SET ROLE fleetory_owner;'+"`n"+$schema.sql+"`nRESET ROLE; GRANT USAGE ON SCHEMA core,platform TO fleetory_server; GRANT SELECT ON ALL TABLES IN SCHEMA core,platform TO fleetory_server; GRANT INSERT ON platform.audit_events,platform.audit_export_queue TO fleetory_server;")
@@ -196,7 +202,8 @@ try{
     $stage='server-host';$hostLifecycle=Invoke-NativeServerHost
     $proof=[ordered]@{schema='fleetory.native-server-backend.v1';verified=$true;nativeDbContexts=2;nativeHealthChecksAccepted=2;
         auditOutboxCommitVerified=$true;explicitRollbackVerified=$true;partialWriteRollbackVerified=$true;databaseRefusals=9;
-        auditPublicationsAccepted=2;singleRevisionVerified=$true;auditKeyCount=8;directSinkAuditKeyCount=1;auditFieldsVerified=10;auditRefusals=5;pipeline=$pipeline;workerLifecycle=$workerLifecycle;hostLifecycle=$hostLifecycle;httpResponseContract=$httpContract.contract;originalMaterialUsed=$false;
+        auditPublicationsAccepted=2;singleRevisionVerified=$true;auditKeyCount=9;directSinkAuditKeyCount=1;auditFieldsVerified=10;auditRefusals=5;pipeline=$pipeline;workerLifecycle=$workerLifecycle;hostLifecycle=$hostLifecycle;httpResponseContract=$httpContract.contract;
+        persistentResponseContract=$persistentContract.contract;persistentIdentityContract=$persistentContract.identityContract;originalMaterialUsed=$false;
         sourceVpsAccessed=$false;httpHostStarted=$true;issuerActivated=$false;publishedPorts=0;workerOnlyLoopback=$true;
         postgresBoundaryRefusals=16;workerBoundaryRefusals=23;auditBoundaryRefusals=17;sharedWorkerRefusals=9;fullSystemRecoveryVerified=$false;phase7Complete=$false}
 }

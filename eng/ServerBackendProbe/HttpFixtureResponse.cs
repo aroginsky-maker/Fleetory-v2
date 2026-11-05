@@ -23,7 +23,7 @@ internal static class HttpFixtureResponse
         { throw new InvalidOperationException("Fixture HTTP framing/correlation drift."); }
     }
 
-    private static string[] Headers(string response, string name) => response.Split("\r\n")
+    internal static string[] Headers(string response, string name) => response.Split("\r\n")
         .Where(line => line.StartsWith(name + ":", StringComparison.OrdinalIgnoreCase))
         .Select(line => line[(name.Length + 1)..].Trim()).ToArray();
 

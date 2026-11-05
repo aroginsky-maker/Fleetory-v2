@@ -157,7 +157,7 @@ internal static class ClientTlsCases
     internal static X509Certificate2 ReadKeyPair(FileSecretProvider files, string prefix) =>
         X509Certificate2.CreateFromPem(files.GetRequiredSecret(prefix + "-cert"), files.GetRequiredSecret(prefix + "-key"));
 
-    private static X509ChainPolicy CreatePolicy(X509Certificate2 root, string purpose)
+    internal static X509ChainPolicy CreatePolicy(X509Certificate2 root, string purpose)
     {
         var policy = new X509ChainPolicy { TrustMode = X509ChainTrustMode.CustomRootTrust,
             RevocationMode = X509RevocationMode.NoCheck, DisableCertificateDownloads = true,

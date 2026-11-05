@@ -23,7 +23,7 @@ internal static class HostCases
         { throw new InvalidOperationException("Unexpected native host state."); }
         await platform.Database.OpenConnectionAsync(cancellation);
         await DatabaseCases.VerifyAsync(platform, "platform.person_projections", cancellation);
-        var registered = mode is "host-registered" or "host-revoked";
+        var registered = mode is "host-registered" or "host-live" or "host-revoked";
         WorkerCases.RequireQueue(await WorkerCases.ReadQueueAsync(platform, cancellation), registered ? 0 : 1, 0);
         await WorkerCases.RequireHealthAsync(app.Services, registered ? HealthStatus.Healthy : HealthStatus.Degraded, cancellation);
         var worker = WorkerCases.GetUnstartedWorker(app.Services);
@@ -35,6 +35,8 @@ internal static class HostCases
         object? clientTls = null;
         object? registeredBoundary = null;
         object? revokedBoundary = null;
+        object? liveRevokedBoundary = null;
+        object? liveConnections = null;
         try
         {
             await app.StartAsync(cancellation);
@@ -47,7 +49,14 @@ internal static class HostCases
             await VerifyHttpAsync(expected.ToString(), cancellation);
             foreach (var port in Ports) { await ProbePortAsync(port, true, cancellation); }
             if (mode == "host-drain") { clientTls = await ClientTlsCases.ExecuteAsync(app.Services, cancellation); }
-            if (registered)
+            if (mode == "host-live")
+            {
+                var live = await LiveRevocationCases.ExecuteAsync(app.Services, cancellation);
+                registeredBoundary = live.Registered;
+                liveRevokedBoundary = live.Revoked;
+                liveConnections = live.Connections;
+            }
+            else if (registered)
             {
                 using var tls = new TlsObservation();
                 var boundary = await RegistryCases.ExecuteAsync(app.Services, tls,
@@ -75,7 +84,8 @@ internal static class HostCases
             workerExecutionCompleted = true, stopElapsedMilliseconds = stop.ElapsedMilliseconds,
             claimFailures = observation.Errors, livenessBody = "Healthy", readinessBody = expected.ToString(),
             readinessStatusCode = 200, publicPrivilegedPathRefusals = 2, listeningPorts = Ports,
-            closedPortRefusals = 3, initialClosedPortRefusals = 3, clientTls, registeredBoundary, revokedBoundary };
+            closedPortRefusals = 3, initialClosedPortRefusals = 3, clientTls, registeredBoundary, revokedBoundary,
+            liveRevokedBoundary, liveConnections };
     }
 
     private static async Task WaitForWorkerAsync(string mode, BackgroundService worker, WorkerObservation observation,

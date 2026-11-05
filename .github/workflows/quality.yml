@@ -142,7 +142,9 @@ jobs:
 
       - name: Verify native Server audit boundary on Windows
         shell: pwsh
-        run: ./tests/Fleetory.Tools.Tests/NativeAuditBoundary.Tests.ps1
+        run: |
+          ./tests/Fleetory.Tools.Tests/NativeAuditBoundary.Tests.ps1
+          ./tests/Fleetory.Tools.Tests/NativeLiveHost.Tests.ps1
 
       - name: Verify fresh client TLS fixture on Windows
         shell: pwsh

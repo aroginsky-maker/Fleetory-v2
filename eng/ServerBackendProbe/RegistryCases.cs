@@ -12,7 +12,7 @@ using NpgsqlTypes;
 
 namespace ServerBackendProbe;
 
-internal enum CredentialState { Unregistered, Registered, Revoked }
+internal enum CredentialState { Unregistered, Registered, LiveRevoked, Revoked }
 
 internal static class RegistryCases
 {
@@ -22,6 +22,7 @@ internal static class RegistryCases
         {
             CredentialState.Unregistered => "native-registry-",
             CredentialState.Registered => "native-registered-",
+            CredentialState.LiveRevoked => "native-live-revoked-",
             CredentialState.Revoked => "native-revoked-",
             _ => throw new InvalidOperationException("Unknown fixture credential state.")
         }) + (port switch
@@ -30,19 +31,25 @@ internal static class RegistryCases
         _ => throw new InvalidOperationException("Unknown registry fixture endpoint.")
     });
 
+    internal static Task<object> ExecuteAsync(IServiceProvider services, TlsObservation observation,
+        CredentialState state, CancellationToken cancellation) => ExecuteAsync(services, observation, state, null, cancellation);
+
     internal static async Task<object> ExecuteAsync(IServiceProvider services, TlsObservation observation,
-        CredentialState state, CancellationToken cancellation)
+        CredentialState state, LiveGatewayPair? live, CancellationToken cancellation)
     {
         var (expectedAgent, expectedAdmin, events, action) = state switch
         {
             CredentialState.Unregistered => (AgentCertificateStatus.UnknownCertificate, AdminCertificateAccess.Unregistered, 4, DenialAction),
             CredentialState.Registered => (AgentCertificateStatus.Accepted, AdminCertificateAccess.Accepted, 5, "admin.oidc.denied"),
-            CredentialState.Revoked => (AgentCertificateStatus.Revoked, AdminCertificateAccess.Revoked, 6, "admin.certificate.revoked_denied"),
+            CredentialState.LiveRevoked => (AgentCertificateStatus.Revoked, AdminCertificateAccess.Revoked, 6, "admin.certificate.revoked_denied"),
+            CredentialState.Revoked => (AgentCertificateStatus.Revoked, AdminCertificateAccess.Revoked, 7, "admin.certificate.revoked_denied"),
             _ => throw new InvalidOperationException("Unknown fixture credential state.")
         };
         var registered = state != CredentialState.Unregistered;
         var admitted = state == CredentialState.Registered;
-        var revoked = state == CredentialState.Revoked;
+        var revoked = state is CredentialState.LiveRevoked or CredentialState.Revoked;
+        if (state == CredentialState.LiveRevoked && live is null)
+        { throw new InvalidOperationException("Live revocation requires its persistent connections."); }
         var files = new FileSecretProvider(Program.PrivateDirectory);
         using var agentRoot = ClientTlsCases.ReadCertificate(files, "agent-gateway-root-ca");
         using var adminRoot = ClientTlsCases.ReadCertificate(files, "admin-gateway-root-ca");
@@ -78,9 +85,9 @@ internal static class RegistryCases
         }
         await RequireInventoryAsync(connection, inventory, events, 0, cancellation);
         WorkerCases.RequireQueue(await WorkerCases.ReadQueueAsync(database, cancellation), 0, 0);
-        await ClientTlsCases.RequireRegistryResponseAsync(19581, agentRoot, agent, observation, state, cancellation);
+        await RequestAsync(19581, agentRoot, agent);
         await RequireInventoryAsync(connection, inventory, events, 0, cancellation);
-        await ClientTlsCases.RequireRegistryResponseAsync(19582, adminRoot, admin, observation, state, cancellation);
+        await RequestAsync(19582, adminRoot, admin);
         await RequireInventoryAsync(connection, inventory, events + 1, 1, cancellation);
         while ((await WorkerCases.ReadQueueAsync(database, cancellation)).Rows != 0)
         { await Task.Delay(TimeSpan.FromMilliseconds(50), cancellation); }
@@ -95,6 +102,11 @@ internal static class RegistryCases
             newAdminDenialEvents = 1, denialAction = action, correlation = Correlation(19582, state),
             actorSubjectId = actor.SubjectId, actorKind = (int)ActorKind.Person, certificateSha256 = adminHash, automaticWorkerDrain = true,
             positiveIdentityAdmissionVerified = false };
+
+        Task RequestAsync(int port, System.Security.Cryptography.X509Certificates.X509Certificate2 root,
+            System.Security.Cryptography.X509Certificates.X509Certificate2 leaf) => live is null ?
+            ClientTlsCases.RequireRegistryResponseAsync(port, root, leaf, observation, state, cancellation) :
+            live.RequireAsync(port, state, cancellation);
     }
 
     private sealed record Inventory(string Agent, string Admin, string Subject, Guid Device,
@@ -140,7 +152,8 @@ internal static class RegistryCases
                 AND clock_timestamp()<@agent_after AND clock_timestamp()<@admin_after
                 ELSE NOT EXISTS(SELECT 1 FROM platform.admin_certificate_revocations WHERE certificate_sha256=@admin) END)
               AND (SELECT count(*) FROM platform.audit_events)=@events
-              AND (SELECT count(*) FROM platform.audit_events WHERE action=@action)=@denials
+              AND (SELECT count(*) FROM platform.audit_events WHERE action=@action)=@denials+@prior_denials
+              AND (SELECT count(*) FROM platform.audit_events WHERE action=@action AND correlation_id=@correlation)=@denials
               AND (SELECT count(*) FROM platform.audit_events WHERE action=@action
                     AND actor_subject_id=@subject AND actor_kind=@kind AND correlation_id=@correlation
                     AND ((@oidc AND target_type IS NULL AND target_id IS NULL) OR
@@ -152,14 +165,15 @@ internal static class RegistryCases
             ("agent_before", NpgsqlDbType.TimestampTz, expected.AgentBefore), ("agent_after", NpgsqlDbType.TimestampTz, expected.AgentAfter),
             ("admin_before", NpgsqlDbType.TimestampTz, expected.AdminBefore), ("admin_after", NpgsqlDbType.TimestampTz, expected.AdminAfter),
             ("registered", NpgsqlDbType.Boolean, expected.State != CredentialState.Unregistered),
-            ("revoked", NpgsqlDbType.Boolean, expected.State == CredentialState.Revoked),
+            ("revoked", NpgsqlDbType.Boolean, expected.State is CredentialState.LiveRevoked or CredentialState.Revoked),
             ("revoked_at", NpgsqlDbType.TimestampTz, (object?)expected.RevokedAt ?? DBNull.Value),
             ("oidc", NpgsqlDbType.Boolean, expected.State == CredentialState.Registered),
             ("action", NpgsqlDbType.Varchar, expected.State switch { CredentialState.Registered => "admin.oidc.denied",
-                CredentialState.Revoked => "admin.certificate.revoked_denied", _ => DenialAction }),
+                CredentialState.LiveRevoked or CredentialState.Revoked => "admin.certificate.revoked_denied", _ => DenialAction }),
             ("correlation", NpgsqlDbType.Varchar, Correlation(19582, expected.State)),
             ("kind", NpgsqlDbType.Integer, (int)ActorKind.Person), ("events", NpgsqlDbType.Integer, events),
-            ("denials", NpgsqlDbType.Integer, denials) }) { command.Parameters.AddWithValue(name, type, value); }
+            ("denials", NpgsqlDbType.Integer, denials), ("prior_denials", NpgsqlDbType.Integer, expected.State == CredentialState.Revoked ? 1 : 0) })
+        { command.Parameters.AddWithValue(name, type, value); }
         if (await command.ExecuteScalarAsync(cancellation) is not true)
         { throw new InvalidOperationException("Native registry/audit inventory drift."); }
     }

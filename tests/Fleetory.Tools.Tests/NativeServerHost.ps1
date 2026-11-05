@@ -26,6 +26,22 @@ function Revoke-NativeFixtureIdentity([hashtable]$Seed){
     $sql="BEGIN; SET LOCAL ROLE fleetory_owner; WITH revoked AS (UPDATE core.agent_certificates SET revoked_at=clock_timestamp() WHERE certificate_sha256='"+$Seed.agentHash+"' AND revoked_at IS NULL RETURNING revoked_at), added AS (INSERT INTO platform.admin_certificate_revocations(certificate_sha256,revoked_at,incident_reference,operator_reference) SELECT '"+$Seed.adminHash+"',revoked_at,'fixture-not-approval','fixture-not-approval' FROM revoked RETURNING certificate_sha256) SELECT count(*)=1 FROM added; COMMIT;"
     Assert-True ((Invoke-Database 'fleetory' $sql).Stdout.Trim() -ceq 't') 'Fixture owner revocation did not affect exactly one pair.'
 }
+function Assert-NativeRevokedBoundary([hashtable]$Boundary,[string]$Event,[hashtable]$Seed,[string]$Correlation){
+    Assert-True ($Correlation -cin @('native-live-revoked-admin','native-revoked-admin')) 'Unknown revocation correlation.'
+    $denial=$Event|ConvertFrom-Json -AsHashtable
+    Assert-True ($denial.Action -ceq 'admin.certificate.revoked_denied' -and $denial.actorSubjectId -ceq $Seed.subject -and
+        $denial.actorSubjectId -ceq $Boundary.actorSubjectId -and $denial.actorKind -eq 1 -and
+        $denial.targetType -ceq 'admin_certificate' -and $denial.targetId -ceq $Seed.adminHash -and
+        $denial.correlationId -ceq $Correlation -and $Boundary.certificateSha256 -ceq $Seed.adminHash) 'Independent revocation denial event mismatch.'
+    Assert-True ($Boundary.agentStatus -ceq 'Revoked' -and $Boundary.adminStatus -ceq 'Revoked' -and
+        $Boundary.agentHttpStatus -eq 403 -and $Boundary.adminHttpStatus -eq 403 -and $Boundary.mutualTlsHttpRefusals -eq 2 -and
+        $Boundary.runtimeIdentityInsertRefusals -eq 2 -and $Boundary.runtimeRevocationWriteRefusals -eq 2 -and
+        $Boundary.sanParsersAccepted -eq 2 -and $Boundary.runtimeStorePreflights -eq 2 -and $Boundary.revokedInventories -eq 3 -and
+        $Boundary.newAdminDenialEvents -eq 1 -and $Boundary.denialAction -ceq 'admin.certificate.revoked_denied' -and
+        $Boundary.durableRevocationVerified -eq $true -and $Boundary.automaticWorkerDrain -eq $true -and
+        $Boundary.agentBindingAdmissionVerified -eq $false -and $Boundary.positiveIdentityAdmissionVerified -eq $false -and
+        $Boundary.emptyBodies -eq $true -and $Boundary.correlatedPrivateGets -eq 2) 'Revoked host boundary incomplete.'
+}
 function Invoke-NativeServerHost{
     $priorEvents=@((Get-PipelineEventJson),(Get-PipelineEventJson 'Fixture.Worker.Read'),(Get-PipelineEventJson 'Fixture.Worker.AfterStop'))
     $null=Invoke-ServerProbe 'db-host-write' 'db-write'
@@ -51,15 +67,23 @@ function Invoke-NativeServerHost{
     $captured=@($priorEvents)+@($hostEvent,$denialEvent)
     for($index=0;$index -lt 5;$index++){Assert-True ((Get-PipelineEventJson $actions[$index]) -ceq $captured[$index]) 'Host changed an immutable event.'}
     $seed=Seed-NativeRegisteredIdentity
-    $registered=Invoke-ServerProbe 'host-registered' 'host-registered'
-    Assert-WorkerQueue 6 0
-    $oidcEvent=Get-PipelineEventJson 'admin.oidc.denied';$oidc=$oidcEvent|ConvertFrom-Json -AsHashtable
+    $registered=Invoke-NativeLiveHost $seed $captured
+    Assert-WorkerQueue 7 0
+    $oidcEvent=$registered.acceptedOidcEvent;$oidc=$oidcEvent|ConvertFrom-Json -AsHashtable
     $admission=$registered.lifecycle.registeredBoundary
     Assert-True ($oidc.Action -ceq 'admin.oidc.denied' -and $oidc.actorSubjectId -ceq $seed.subject -and
         $oidc.actorSubjectId -ceq $admission.actorSubjectId -and $oidc.actorKind -eq 1 -and
         $null -eq $oidc.targetType -and $null -eq $oidc.targetId -and $oidc.correlationId -ceq 'native-registered-admin' -and
         $admission.certificateSha256 -ceq $seed.adminHash) 'Independent OIDC denial event mismatch.'
-    Assert-WorkerAudit (@($captured)+@($oidcEvent))
+    $liveEvent=Get-PipelineEventJson 'admin.certificate.revoked_denied' 'native-live-revoked-admin'
+    $liveRefusal=$registered.lifecycle.liveRevokedBoundary
+    Assert-NativeRevokedBoundary $liveRefusal $liveEvent $seed 'native-live-revoked-admin'
+    $connections=$registered.lifecycle.liveConnections
+    Assert-True ($connections.connections -eq 2 -and $connections.requestsPerConnection -eq 2 -and $connections.nativeHandshakes -eq 2 -and
+        $connections.replacementConnections -eq 0 -and ($connections.firstResponses -join ',') -ceq '204,401' -and
+        ($connections.secondResponses -join ',') -ceq '403,403' -and $connections.agentConnectionId -cne $connections.adminConnectionId -and
+        (Get-PipelineEventJson 'admin.oidc.denied') -ceq $oidcEvent) 'Same-connection live revocation proof incomplete.'
+    Assert-WorkerAudit (@($captured)+@($oidcEvent,$liveEvent))
     for($index=0;$index -lt 5;$index++){Assert-True ((Get-PipelineEventJson $actions[$index]) -ceq $captured[$index]) 'Registered host changed prior audit.'}
     Assert-True ($admission.agentStatus -ceq 'Accepted' -and $admission.adminStatus -ceq 'Accepted' -and
         $admission.agentHttpStatus -eq 204 -and $admission.adminHttpStatus -eq 401 -and $admission.runtimeIdentityInsertRefusals -eq 2 -and
@@ -67,26 +91,16 @@ function Invoke-NativeServerHost{
         $admission.newAdminDenialEvents -eq 1 -and $admission.denialAction -ceq 'admin.oidc.denied' -and
         $admission.agentBindingAdmissionVerified -eq $true -and $admission.automaticWorkerDrain -eq $true -and
         $admission.positiveIdentityAdmissionVerified -eq $false) 'Registered host admission/OIDC boundary incomplete.'
-    Revoke-NativeFixtureIdentity $seed
     $revoked=Invoke-ServerProbe 'host-revoked' 'host-revoked'
-    Assert-WorkerQueue 7 0
-    $revocationEvent=Get-PipelineEventJson 'admin.certificate.revoked_denied';$revocation=$revocationEvent|ConvertFrom-Json -AsHashtable
+    Assert-WorkerQueue 8 0
+    $revocationEvent=Get-PipelineEventJson 'admin.certificate.revoked_denied' 'native-revoked-admin'
     $refusal=$revoked.lifecycle.revokedBoundary
-    Assert-True ($revocation.Action -ceq 'admin.certificate.revoked_denied' -and $revocation.actorSubjectId -ceq $seed.subject -and
-        $revocation.actorSubjectId -ceq $refusal.actorSubjectId -and $revocation.actorKind -eq 1 -and
-        $revocation.targetType -ceq 'admin_certificate' -and $revocation.targetId -ceq $seed.adminHash -and
-        $revocation.correlationId -ceq 'native-revoked-admin' -and $refusal.certificateSha256 -ceq $seed.adminHash) 'Independent revocation denial event mismatch.'
-    $actions+=@('admin.oidc.denied');$captured+=@($oidcEvent)
+    Assert-NativeRevokedBoundary $refusal $revocationEvent $seed 'native-revoked-admin'
+    $captured+=@($oidcEvent,$liveEvent)
     Assert-WorkerAudit (@($captured)+@($revocationEvent))
-    for($index=0;$index -lt 6;$index++){Assert-True ((Get-PipelineEventJson $actions[$index]) -ceq $captured[$index]) 'Revoked host changed prior audit or OIDC denial.'}
-    Assert-True ($refusal.agentStatus -ceq 'Revoked' -and $refusal.adminStatus -ceq 'Revoked' -and
-        $refusal.agentHttpStatus -eq 403 -and $refusal.adminHttpStatus -eq 403 -and $refusal.mutualTlsHttpRefusals -eq 2 -and
-        $refusal.runtimeIdentityInsertRefusals -eq 2 -and $refusal.runtimeRevocationWriteRefusals -eq 2 -and
-        $refusal.sanParsersAccepted -eq 2 -and $refusal.runtimeStorePreflights -eq 2 -and $refusal.revokedInventories -eq 3 -and
-        $refusal.newAdminDenialEvents -eq 1 -and $refusal.denialAction -ceq 'admin.certificate.revoked_denied' -and
-        $refusal.durableRevocationVerified -eq $true -and $refusal.automaticWorkerDrain -eq $true -and
-        $refusal.agentBindingAdmissionVerified -eq $false -and $refusal.positiveIdentityAdmissionVerified -eq $false -and
-        $refusal.emptyBodies -eq $true -and $refusal.correlatedPrivateGets -eq 2) 'Revoked host boundary incomplete.'
+    for($index=0;$index -lt 5;$index++){Assert-True ((Get-PipelineEventJson $actions[$index]) -ceq $captured[$index]) 'Revoked host changed prior audit.'}
+    Assert-True ((Get-PipelineEventJson 'admin.oidc.denied') -ceq $oidcEvent -and
+        (Get-PipelineEventJson 'admin.certificate.revoked_denied' 'native-live-revoked-admin') -ceq $liveEvent) 'Cold restart changed prior OIDC/live denial.'
     $runs=@($degraded.lifecycle,$healthy.lifecycle,$registered.lifecycle,$revoked.lifecycle)
     Assert-True (@($runs.processId|Select-Object -Unique).Count -eq 4) 'Native host process identity drift.'
     foreach($run in $runs){
@@ -120,6 +134,7 @@ function Invoke-NativeServerHost{
     return [ordered]@{applicationStarts=4;applicationStops=4;maximumStopMilliseconds=($runs.stopElapsedMilliseconds|Measure-Object -Maximum).Maximum;
         workerExecutionCompleted=$true;httpHealthBodiesVerified=8;degradedAndHealthyBothStatus200=$true;publicPrivilegedPathRefusals=8;
         listenersVerifiedPerHost=3;closedPortRefusals=12;initialClosedPortRefusals=12;nativeClaimFailureObserved=$true;
-        automaticDrainVerified=$true;totalAuditKeys=8;hostEventRevision=1;registryDenialRevision=1;oidcDenialRevision=1;revocationDenialRevision=1;crossStoreFieldsPerEvent=10;
-        queueRowsAfterHostRestart=0;immutableEventsUnchanged=$true;manualWorkerStartsInHostCases=0;clientTls=$tls;registeredBoundary=$admission;revokedBoundary=$refusal;issuerActivated=$false}
+        automaticDrainVerified=$true;totalAuditKeys=9;hostEventRevision=1;registryDenialRevision=1;oidcDenialRevision=1;liveDenialRevision=1;revocationDenialRevision=1;crossStoreFieldsPerEvent=10;
+        queueRowsAfterHostRestart=0;immutableEventsUnchanged=$true;manualWorkerStartsInHostCases=0;clientTls=$tls;registeredBoundary=$admission;
+        liveRevokedBoundary=$liveRefusal;liveConnections=$connections;revokedBoundary=$refusal;issuerActivated=$false}
 }

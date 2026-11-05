@@ -12,8 +12,8 @@ original device, binding and Admin registration are retained. Both revocation
 references are literally `fixture-not-approval`. No clock override, new key,
 issuer, runtime grant, external approval or production decision is involved.
 
-The finite credential-state selector has three states: unregistered, registered
-and revoked. Real runtime store preflights must return `Revoked` for both leaves.
+The finite credential-state selector distinguishes unregistered, registered,
+live-revoked and cold-revoked. Real runtime store preflights must return `Revoked` for both leaves.
 Three parameterized inventories check unchanged identities/validity/registration,
 the exact shared revocation timestamp, fixture references, current leaf validity
 and audit counts. The revocation instant must lie within both leaf validity
@@ -31,9 +31,9 @@ unchanged; another OIDC refusal cannot satisfy this case. The existing bounded
 empty-response reader is reused, including its four valid/twelve unsafe forms.
 
 The actual hosted worker must drain automatically. Independent PostgreSQL and
-immudb readback requires seven immutable SQL events and eight immudb keys,
-all revision one and all ten fields equal. All prior seven keys and six SQL
-events are preserved. Exact-set scanning permits at most nine entries, keeping
+immudb readback now includes the preceding [live refusal](NativeLiveRevocation.md):
+eight immutable SQL events and nine immudb keys, all revision one and all ten
+fields equal. Prior values are preserved. Exact-set scanning permits at most ten entries, keeping
 one extra-key sentinel above the final accepted set; packets remain bounded
 to4096 bytes. No manual pump or worker start occurs in the host cases.
 

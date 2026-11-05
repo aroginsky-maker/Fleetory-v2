@@ -4,6 +4,15 @@
 
 ## Implemented
 
+- The third native Server host now retains its original Agent/Admin TLS connections
+  across fixture-owner durable revocation. Their second GETs must return403 on the
+  same exact native connections, with real Revoked readers/inventories and no
+  runtime owner privileges. A distinct pre-OIDC live denial is automatically
+  exported before the fourth-host cold refusal; eight SQL events/nine revision-one
+  immudb keys match all ten fields without changing prior records. Separate bounded
+  persistent framing and controller refusal tests preserve the original EOF/TLS
+  controls. See [NativeLiveRevocation](docs/operations/NativeLiveRevocation.md).
+
 - A fourth generated native Server host verifies durable revocation of the same
   previously accepted fixture Agent/Admin credentials after restart: both actual
   private GETs return403, with real Revoked store preflights and exact inventories.

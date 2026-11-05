@@ -23,7 +23,7 @@ internal static class Program
         "audit-database", "audit-tls", "audit-verify", "audit-health",
         "pump-auth", "pump-lostack", "pump-deliver", "pump-empty", "pump-update", "pipeline-pending", "pipeline-verify",
         "db-worker-write", "worker-denied", "worker-retain", "worker-drain", "worker-restart", "worker-verify",
-        "db-host-write", "host-degraded", "host-drain", "host-registered", "host-revoked", "http-contract"
+        "db-host-write", "host-degraded", "host-drain", "host-registered", "host-live", "host-revoked", "http-contract", "persistent-contract"
     };
 
     public static async Task<int> Main(string[] args)
@@ -54,6 +54,9 @@ internal static class Program
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(18));
         if (mode == "http-contract")
         { return new { category = mode, contract = HttpFixtureResponse.VerifyContract(), httpHostStarted = false, issuerActivated = false }; }
+        if (mode == "persistent-contract")
+        { return new { category = mode, contract = await PersistentHttpResponse.VerifyContractAsync(deadline.Token),
+            identityContract = TlsObservation.VerifyPersistentContract(), httpHostStarted = false, issuerActivated = false }; }
         if (mode is "pipeline-pending" or "pipeline-verify" or "worker-verify")
         {
             await PipelineFixtureControl.ExecuteAsync(mode, deadline.Token);
@@ -99,7 +102,7 @@ internal static class Program
             { throw new InvalidOperationException("Fixture HTTP host started."); }
             return new { category = mode, lifecycle, httpHostStarted = false, issuerActivated = false };
         }
-        if (mode is "host-degraded" or "host-drain" or "host-registered" or "host-revoked")
+        if (mode is "host-degraded" or "host-drain" or "host-registered" or "host-live" or "host-revoked")
         {
             var lifecycle = await HostCases.ExecuteAsync(mode, app, platform, deadline.Token);
             return new { category = mode, lifecycle, httpHostStarted = true, issuerActivated = false };

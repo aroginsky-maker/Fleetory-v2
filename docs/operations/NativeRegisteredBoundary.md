@@ -31,7 +31,7 @@ Fixed correlation headers must be echoed once. The registered worker must drain
 the new denial automatically before stop. Independent readback requires six
 immutable PostgreSQL events and seven immudb keys at revision one, with all ten
 fields equal and prior six keys unchanged. The shared exact-set verifier is
-bounded to nine entries for the later eight-key revocation stage. All three host lifecycles require
+bounded to ten entries for the later nine-key live/cold revocation stages. All three host lifecycles require
 completed workers, bounded stop and initial/final native refusal on three ports.
 
 The shared response reader treats204 separately: no Content-Length or
@@ -56,3 +56,6 @@ or full-system RPO/RTO. Phase7 stays open; PR#2 remains draft and unmerged.
 The subsequent [revocation stage](NativeRevokedBoundary.md) keeps this admission
 evidence, revokes the same fresh credentials in the owned database, and starts a
 fourth real host to verify403 before OIDC and automatic revocation-denial export.
+The [live stage](NativeLiveRevocation.md) retains the third host's original
+authenticated connections across the fixture-owner revocation and checks403
+on their second requests before the cold restart.

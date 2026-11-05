@@ -75,11 +75,13 @@ checks automatic OIDC-denial delivery while runtime identity INSERT stays denied
 The [revocation boundary](NativeRevokedBoundary.md) then revokes those same fresh
 bindings in the owned database and starts a fourth host, requiring Agent403 and
 Admin403 before OIDC, with a distinct automatically exported revocation denial.
+The third host now also checks [live revocation](NativeLiveRevocation.md) on its
+original authenticated connections, before that cold restart.
 
 Independent PostgreSQL counts and immudb exact-key/revision/content reads verify
 that the first host retained the event and the second delivered it. The original
-four PostgreSQL events remain unchanged; Admin registry, OIDC and revocation denials give seven events.
-The direct-sink, prior pump, two worker, host and three denial events give eight total
+four PostgreSQL events remain unchanged; Admin registry, OIDC, live and cold revocation denials give eight events.
+The direct-sink, prior pump, two worker, host and four denial events give nine total
 immudb keys, each at revision one with all ten expected fields. The final queue
 is empty. Existing generated-secret canaries, runtime
 constraints and verified resource absence remain mandatory.
