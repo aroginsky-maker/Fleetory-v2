@@ -229,7 +229,8 @@ def compose(reports, manifest):
     }
 
 
-def verify(root, expected):
+def read_reports(root, expected):
+    """Return the exact pinned metadata bytes as parsed records, without opening references."""
     expected = digest(expected)
     with files.rooted(root) as (directory, descriptor):
         pin, _, packet = files.inspect_file(directory, descriptor, MANIFEST, MAX_REPORT, retain=True)
@@ -253,7 +254,12 @@ def verify(root, expected):
             actual, size, packet = files.inspect_file(directory, descriptor, name, entry['bytes'], retain=True)
             archive.require(actual == entry['sha256'] and size == entry['bytes'])
             reports[kind] = archive.parse(packet, MAX_REPORT)
-        matrix = compose(reports, manifest)
+    return pin, manifest, reports, total
+
+
+def verify(root, expected):
+    pin, manifest, reports, total = read_reports(root, expected)
+    matrix = compose(reports, manifest)
     return {'schema': 'fleetory.recovery-component-composition.v1', 'status': 'PASS_PARTIAL_COMPONENT_COMPOSITION',
             'manifestSha256': pin, 'verifiedReports': len(REPORTS), 'verifiedReportBytes': total, 'components': matrix,
             'reportedSourceApplicationCommit': manifest['sourceApplicationCommit'],

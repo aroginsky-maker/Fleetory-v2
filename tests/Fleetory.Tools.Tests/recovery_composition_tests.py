@@ -98,6 +98,18 @@ def synthetic_reports():
                 configuration=configuration, release=release, images=images)
 
 
+def pin_reports(root, reports, record):
+    db = json.dumps(reports['database']).encode()
+    reports['login']['sourceRestoreProofSha256'] = hashlib.sha256(db).hexdigest()
+    for kind, name in policy.REPORTS.items():
+        packet = json.dumps(reports[kind]).encode()
+        (root / name).write_bytes(packet)
+        record['reports'][kind] = dict(bytes=len(packet), sha256=hashlib.sha256(packet).hexdigest())
+    packet = json.dumps(record).encode()
+    (root / policy.MANIFEST).write_bytes(packet)
+    return hashlib.sha256(packet).hexdigest()
+
+
 class RecoveryCompositionTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='fleetory-recovery-components-')
@@ -109,15 +121,7 @@ class RecoveryCompositionTests(unittest.TestCase):
         self.pin()
 
     def pin(self):
-        db = json.dumps(self.reports['database']).encode()
-        self.reports['login']['sourceRestoreProofSha256'] = hashlib.sha256(db).hexdigest()
-        for kind, name in policy.REPORTS.items():
-            packet = json.dumps(self.reports[kind]).encode()
-            (self.root / name).write_bytes(packet)
-            self.record['reports'][kind] = dict(bytes=len(packet), sha256=hashlib.sha256(packet).hexdigest())
-        packet = json.dumps(self.record).encode()
-        (self.root / policy.MANIFEST).write_bytes(packet)
-        self.expected = hashlib.sha256(packet).hexdigest()
+        self.expected = pin_reports(self.root, self.reports, self.record)
 
     def verify(self):
         return policy.verify(self.root, self.expected)

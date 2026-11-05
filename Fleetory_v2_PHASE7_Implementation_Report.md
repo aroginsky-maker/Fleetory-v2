@@ -4,6 +4,15 @@
 
 ## Implemented
 
+- The first Server recovery slice now has a closed two-input admission stage.
+  It binds fixed application/immudb bytes to the reconciled metadata set and
+  returns both immutable captured packets only after every check succeeds.
+  Fresh binary fixtures cover all-or-nothing delivery, later source replacement,
+  scope/pin/type/memory boundaries, canary-safe output and unintended input refusal.
+  Native restore, schema compatibility and Server startup remain unverified;
+  no original raw inputs are read for this implementation. See
+  [ServerDataInputs](docs/operations/ServerDataInputs.md).
+
 - A read-only component composition preflight now reconciles eight pinned pilot
   metadata reports before original-service recovery planning. It binds target-only
   LOGIN to the exact accepted database report/dumps/inventories, matches audit
