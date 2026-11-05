@@ -19,13 +19,17 @@ For each gateway (`19581` Agent, `19582` Admin), the native probe:
 - Requires a matching client to complete mutual TLS and return HTTP404 with an
   empty body for `GET /fixture/client-tls`. This path stops at the existing
   gateway path boundary, before device/actor/registry/OIDC lookup.
+- Requires the same trusted CN-only client, with no SAN identity, to receive
+  exact empty-body403 from the actual registered Agent/Admin private GET path.
+  See [native identity refusal](NativeIdentityBoundary.md).
 - Requires native authentication refusal for no client, the other gateway's
   valid client, and a same-root server-auth-only leaf. Explicit local certificate
   selection exercises the supplied client in the latter two cases.
 - Requires refusal with the wrong server root and with a hostname absent from
   the server SAN, retaining the matching client as the control.
 
-The matrix has two real HTTP responses and ten native authentication refusals:
+The matrix has four real HTTP responses and ten native authentication refusals:
+two safe-path404 controls and two identity403 responses;
 six correlated server-side client refusals and four client-side server trust
 refusals. It deliberately uses TLS1.2 and does not claim a TLS1.3 matrix.
 `SslStream` performs server chain and hostname validation
@@ -38,8 +42,9 @@ or an authentication/I/O exception. That observation alone never passes: native
 Kestrel `ConnectionStart` endpoints bind it to the exact connection ID, which must
 then have `TlsHandshakeFailed`, an unsuccessful `TlsHandshakeStop` and no
 `RequestStart`. Positive requests require the matching successful TLS1.2 stop and
-HTTP request. IPv4-mapped endpoints are normalized; the private observer retains
-at most32 connection records and ignores configuration/raw-request payloads.
+HTTP GET request with its exact expected path. IPv4-mapped endpoints are
+normalized; the private observer retains at most32 connection records and reads
+only connection/GET-path metadata, ignoring configuration, headers and bodies.
 Neither application options nor certificate-validation callbacks are replaced.
 The event contract is defined by [Kestrel's EventSource](https://github.com/dotnet/aspnetcore/blob/v10.0.0/src/Servers/Kestrel/Core/src/Internal/Infrastructure/KestrelEventSource.cs).
 

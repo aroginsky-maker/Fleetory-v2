@@ -63,6 +63,9 @@ against both actual gateway listeners before stopping. Matching clients receive
 the path-boundary404; missing/cross-root/wrong-purpose clients and incorrect
 server trust/hostname must fail native authentication. This is scoped TLS
 admission and does not establish identity or OIDC authorization.
+It also requires [identity refusal after successful TLS](NativeIdentityBoundary.md):
+both trusted CN-only clients receive exact empty403 from the actual private GET
+routes, with exact native request-path correlation and unchanged cross-store data.
 
 Independent PostgreSQL counts and immudb exact-key/revision/content reads verify
 that the first host retained the event and the second delivered it. All four

@@ -4,6 +4,14 @@
 
 ## Implemented
 
+- Native gateway checks now distinguish trusted TLS from Fleetory identity.
+  Fresh client leaves without a SAN identity receive exact empty403 from the
+  registered Agent identity and Admin role-version GET routes, correlated to
+  successful native TLS and the exact GET path. Existing404 controls, ten TLS
+  refusals, unchanged audit/outbox state and owned cleanup remain required.
+  Positive identity/OIDC admission and original-service recovery remain open.
+  See [NativeIdentityBoundary](docs/operations/NativeIdentityBoundary.md).
+
 - The generated native HTTP-host fixture now checks mutual TLS on both actual
   Agent/Admin Kestrel listeners: trusted-client HTTP responses and missing-client,
   cross-root, wrong-EKU, server-root and hostname refusals. Fresh client leaves

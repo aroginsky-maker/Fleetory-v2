@@ -34,9 +34,13 @@ function Invoke-NativeServerHost{
         $tls.missingClientRefusals -eq 2 -and $tls.crossRootClientRefusals -eq 2 -and $tls.wrongEkuClientRefusals -eq 2 -and
         $tls.serverRootRefusals -eq 2 -and $tls.serverHostnameRefusals -eq 2 -and $tls.protocol -ceq 'TLS1.2' -and
         $tls.nativeAuthenticationRefusals -eq 10 -and $tls.arbitraryTransportFailuresAccepted -eq 0 -and
-        $tls.serverCorrelatedHandshakeRefusals -eq 6 -and $tls.serverCorrelatedTrustedHandshakes -eq 2 -and
+        $tls.serverCorrelatedHandshakeRefusals -eq 6 -and $tls.serverCorrelatedTrustedHandshakes -eq 4 -and
         $tls.httpRequestsInClientRefusals -eq 0 -and
         $tls.responseStatus -eq 404 -and $tls.identityAdmissionVerified -eq $false) 'Native client TLS proof incomplete.'
+    $identity=$tls.identityBoundary
+    Assert-True ($identity.mutualTlsHttpRefusals -eq 2 -and $identity.statusCode -eq 403 -and $identity.emptyBodies -eq $true -and
+        $identity.clientsWithoutSan -eq 2 -and $identity.correlatedPrivateGets -eq 2 -and
+        $identity.positiveIdentityAdmissionVerified -eq $false) 'Native identity boundary proof incomplete.'
     return [ordered]@{applicationStarts=2;applicationStops=2;maximumStopMilliseconds=($runs.stopElapsedMilliseconds|Measure-Object -Maximum).Maximum;
         workerExecutionCompleted=$true;httpHealthBodiesVerified=4;degradedAndHealthyBothStatus200=$true;publicPrivilegedPathRefusals=4;
         listenersVerifiedPerHost=3;closedPortRefusals=6;initialClosedPortRefusals=6;nativeClaimFailureObserved=$true;

@@ -13,7 +13,7 @@ internal static class ClientTlsCases
 {
     private const string ClientPurpose = "1.3.6.1.5.5.7.3.2";
     private const string ServerPurpose = "1.3.6.1.5.5.7.3.1";
-    private enum TlsCase { Trusted, MissingClient, CrossRootClient, WrongEkuClient, ServerRoot, ServerHostname }
+    private enum TlsCase { Trusted, Identity, MissingClient, CrossRootClient, WrongEkuClient, ServerRoot, ServerHostname }
 
     internal static async Task<object> ExecuteAsync(CancellationToken cancellation)
     {
@@ -33,7 +33,9 @@ internal static class ClientTlsCases
             crossRootClientRefusals = 2, wrongEkuClientRefusals = 2, serverRootRefusals = 2,
             serverHostnameRefusals = 2, protocol = "TLS1.2", responseStatus = 404,
             nativeAuthenticationRefusals = 10, serverCorrelatedHandshakeRefusals = 6,
-            serverCorrelatedTrustedHandshakes = 2, httpRequestsInClientRefusals = 0, arbitraryTransportFailuresAccepted = 0,
+            serverCorrelatedTrustedHandshakes = 4, httpRequestsInClientRefusals = 0, arbitraryTransportFailuresAccepted = 0,
+            identityBoundary = new { mutualTlsHttpRefusals = 2, statusCode = 403, emptyBodies = true,
+                clientsWithoutSan = 2, correlatedPrivateGets = 2, positiveIdentityAdmissionVerified = false },
             identityAdmissionVerified = false };
     }
 
@@ -46,7 +48,10 @@ internal static class ClientTlsCases
         RequireChain(otherClient, root, ClientPurpose, false);
         RequireChain(server, root, ServerPurpose, true);
         RequireChain(server, root, ClientPurpose, false);
+        if (client.Extensions.Any(extension => extension.Oid?.Value == "2.5.29.17"))
+        { throw Failure("UnexpectedIdentitySan"); }
         await ConnectAsync(port, root, client, TlsCase.Trusted, observation, cancellation);
+        await ConnectAsync(port, root, client, TlsCase.Identity, observation, cancellation);
         await ConnectAsync(port, root, null, TlsCase.MissingClient, observation, cancellation);
         await ConnectAsync(port, root, otherClient, TlsCase.CrossRootClient, observation, cancellation);
         // Explicit selection forces the server-auth-only leaf rather than silently omitting it.
@@ -80,11 +85,11 @@ internal static class ClientTlsCases
             catch (AuthenticationException) { return; }
             throw Failure("ServerTrustAccepted");
         }
-        if (mode != TlsCase.Trusted)
+        if (mode is not (TlsCase.Trusted or TlsCase.Identity))
         {
             await ObservePeerRefusalAsync(tls, options, deadline.Token);
             if (mode is TlsCase.CrossRootClient or TlsCase.WrongEkuClient && !selected) { throw Failure("ClientSelection"); }
-            await observation.RequireAsync(serverEndpoint, clientEndpoint, true, deadline.Token);
+            await observation.RequireAsync(serverEndpoint, clientEndpoint, true, null, deadline.Token);
             return;
         }
         await tls.AuthenticateAsClientAsync(options, deadline.Token);
@@ -92,8 +97,11 @@ internal static class ClientTlsCases
             tls.LocalCertificate is null || client is null ||
             !tls.LocalCertificate.GetRawCertData().AsSpan().SequenceEqual(client.RawData))
         { throw Failure("MutualAuthentication"); }
-        await RequireHttpAsync(tls, deadline.Token);
-        await observation.RequireAsync(serverEndpoint, clientEndpoint, false, deadline.Token);
+        var path = mode == TlsCase.Identity ?
+            (port == 19581 ? "/agent/identity" : "/admin/authorization/roles/00000000-0000-4000-8000-000000000001/versions") :
+            "/fixture/client-tls";
+        await RequireHttpAsync(tls, path, mode == TlsCase.Identity ? HttpStatusCode.Forbidden : HttpStatusCode.NotFound, deadline.Token);
+        await observation.RequireAsync(serverEndpoint, clientEndpoint, false, path, deadline.Token);
     }
 
     private static async Task ObservePeerRefusalAsync(SslStream tls, SslClientAuthenticationOptions options,
@@ -109,9 +117,9 @@ internal static class ClientTlsCases
         { /* Peer outcome alone NEVER passes: require the matching native Kestrel failure below. */ }
     }
 
-    private static async Task RequireHttpAsync(SslStream tls, CancellationToken cancellation)
+    private static async Task RequireHttpAsync(SslStream tls, string path, HttpStatusCode expected, CancellationToken cancellation)
     {
-        var request = Encoding.ASCII.GetBytes("GET /fixture/client-tls HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
+        var request = Encoding.ASCII.GetBytes("GET " + path + " HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n");
         await tls.WriteAsync(request, cancellation);
         var buffer = new byte[1025];
         var length = 0;
@@ -122,7 +130,8 @@ internal static class ClientTlsCases
             length += read;
         }
         var response = Encoding.ASCII.GetString(buffer, 0, length);
-        if (length > 1024 || !response.StartsWith("HTTP/1.1 404 Not Found\r\n", StringComparison.Ordinal) ||
+        var statusLine = expected == HttpStatusCode.Forbidden ? "HTTP/1.1 403 Forbidden\r\n" : "HTTP/1.1 404 Not Found\r\n";
+        if (length > 1024 || !response.StartsWith(statusLine, StringComparison.Ordinal) ||
             !response.Contains("\r\nContent-Length: 0\r\n", StringComparison.OrdinalIgnoreCase) ||
             response.Contains("\r\nTransfer-Encoding:", StringComparison.OrdinalIgnoreCase) ||
             !response.EndsWith("\r\n\r\n", StringComparison.Ordinal))

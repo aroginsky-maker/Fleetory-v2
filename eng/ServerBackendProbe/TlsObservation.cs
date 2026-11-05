@@ -17,7 +17,7 @@ internal sealed class TlsObservation : EventListener
 
     protected override void OnEventWritten(EventWrittenEventArgs data)
     {
-        // In particular, never read the Configuration event or raw HTTP payloads.
+        // Read only endpoint/GET-path metadata; never Configuration, headers or bodies.
         if (data.EventName is not ("ConnectionStart" or "TlsHandshakeStop" or "TlsHandshakeFailed" or "RequestStart"))
         { return; }
         var current = Current;
@@ -33,7 +33,12 @@ internal sealed class TlsObservation : EventListener
             else if (current.Connections.TryGetValue(id, out var connection))
             {
                 if (data.EventName == "TlsHandshakeFailed") { connection.Failed = true; }
-                else if (data.EventName == "RequestStart") { connection.Http = true; }
+                else if (data.EventName == "RequestStart")
+                {
+                    if (connection.Http || data.Payload.Count != 5 || data.Payload[3] is not string path ||
+                        path.Length > 180 || data.Payload[4] is not string method || method != "GET") { current.Invalid = true; }
+                    else { connection.Http = true; connection.Path = path; }
+                }
                 else if (data.Payload.Count == 4 && data.Payload[1] is string protocol)
                 { connection.Established = protocol == "Tls12"; connection.Stopped = true; }
                 else { current.Invalid = true; }
@@ -44,7 +49,7 @@ internal sealed class TlsObservation : EventListener
     private static string Normalize(string endpoint) => IPEndPoint.TryParse(endpoint, out var parsed) ?
         new IPEndPoint(parsed.Address.IsIPv4MappedToIPv6 ? parsed.Address.MapToIPv4() : parsed.Address, parsed.Port).ToString() : "";
 
-    internal async Task RequireAsync(string server, string client, bool refused, CancellationToken cancellation)
+    internal async Task RequireAsync(string server, string client, bool refused, string? expectedPath, CancellationToken cancellation)
     {
         while (true)
         {
@@ -58,7 +63,7 @@ internal sealed class TlsObservation : EventListener
                 {
                     var connection = found[0];
                     if (refused ? connection.Failed && !connection.Established && !connection.Http :
-                        !connection.Failed && connection.Established && connection.Http) { return; }
+                        !connection.Failed && connection.Established && connection.Http && connection.Path == expectedPath) { return; }
                     throw new InvalidOperationException("Native Kestrel handshake outcome drift.");
                 }
             }
@@ -80,5 +85,6 @@ internal sealed class TlsObservation : EventListener
         internal bool Stopped;
         internal bool Established;
         internal bool Http;
+        internal string? Path;
     }
 }

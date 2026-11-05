@@ -217,4 +217,4 @@ finally{
     $secrets.Clear();$canaries.Clear();$material=$agent=$admin=$wrongMaterial=$packet=$null
     if($failures.Count -ne 0){throw ('Native Server cleanup unverified: '+($failures -join ','))}
 }
-if($proof){$proof.cleanupVerified=$true;$proof|ConvertTo-Json -Compress}
+if($proof){$proof.cleanupVerified=$true;$proof|ConvertTo-Json -Depth 12 -Compress -WarningAction Stop}
