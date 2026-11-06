@@ -70,7 +70,9 @@ native audit is observed in this test. Unrelated .NET/native local suites and
 closed original recovery operations need not be repeated. Production/test C# is
 unchanged; changed probe code is built, published and executed.
 
-This step uses generated data only. Before original execution, a separately
+The separate [PostgreSQL source reader](PostgreSqlAuditExpectationSource.md)
+now exercises export selection, pinned extraction and the producer's golden
+values on generated data. Before original execution, that separately
 scoped reader must bind already permitted source records, ordinary-file and byte
 pins, independent lineage and the specific missing-evidence purpose to a
 measured owned isolated plan. The [audit-only byte adapter](AuditArchiveInput.md)
