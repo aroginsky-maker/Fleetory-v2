@@ -104,6 +104,14 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/audit_history_inputs_tests.py
 
+      - name: Verify bounded audit observation on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/audit_observation_tests.py
+
+      - name: Verify audit observation refusal policy on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/AuditObservationPolicy.Tests.ps1
+
       - name: Verify generated v2 Server composition inputs on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/v2_server_composition_tests.py
@@ -384,6 +392,14 @@ jobs:
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/audit_history_inputs_tests.py
 
+      - name: Verify bounded audit observation
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/audit_observation_tests.py
+
+      - name: Verify audit observation refusal policy
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/AuditObservationPolicy.Tests.ps1
+
       - name: Verify generated v2 Server composition inputs
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/v2_server_composition_tests.py
@@ -455,6 +471,10 @@ jobs:
       - name: Verify generated five-transaction audit history and distinct signing keys
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/NativeAuditHistory.Tests.ps1 -Python (Get-Command python3).Source
+
+      - name: Verify bounded native audit observation and unknown entry kinds
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativeAuditHistory.Tests.ps1 -Profile observation -Python (Get-Command python3).Source
 
       - name: Verify coherent native Server pair restore and lifecycle
         shell: pwsh

@@ -60,8 +60,11 @@ restore, signature verification, source-VPS operation or sensitive input is repe
 Portable generated contract tests run on Windows and Linux CI. Unchanged local
 native/.NET suites and closed original recovery operations need not be rerun.
 
-Next prepare the smallest bounded original native observation adapter and test it
-on generated vectors. Record its specific missing-evidence purpose and audit the
+The [bounded native observation](BoundedAuditObservation.md) now tests the
+reader protocol on generated four-key/five-transaction and five-key/five-transaction
+datasets, retaining extra raw entry kinds as unreviewed state. It has not read the
+selected original archive. Next bind a narrow original-data execution adapter to
+this selection. Record its specific missing-evidence purpose and audit the
 existing data consent before opening original archives. New secret/PKI, source
 VPS, issuer/service or privileged provider actions require their own concrete
 plan and current specific permission. Source-root recovery remains excluded.

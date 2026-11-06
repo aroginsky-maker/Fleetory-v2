@@ -1,8 +1,8 @@
 #requires -Version 7.3
-param([string]$Python='',[ValidateSet('none','after-stores')][string]$FailurePoint='none')
+param([string]$Python='',[ValidateSet('none','after-stores')][string]$FailurePoint='none',[ValidateSet('history','observation')][string]$Profile='history')
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
-foreach($helper in @('PilotNativeProcess.ps1','../../eng/pilot/ProviderRecoveryTransport.ps1','../../eng/pilot/ProviderRecoveryPolicy.ps1','../../eng/pilot/ImmuDataRoundtripPolicy.ps1','../../eng/pilot/AuditHistoryPolicy.ps1','PilotDisposableTls.ps1','NativeSignerFixture.ps1','NativeAuditFixture.ps1','NativeWorkerRuntime.ps1','NativeAuditDataFixture.ps1')){. (Join-Path $PSScriptRoot $helper)}
+foreach($helper in @('PilotNativeProcess.ps1','../../eng/pilot/ProviderRecoveryTransport.ps1','../../eng/pilot/ProviderRecoveryPolicy.ps1','../../eng/pilot/ImmuDataRoundtripPolicy.ps1','../../eng/pilot/AuditHistoryPolicy.ps1','../../eng/pilot/AuditObservationPolicy.ps1','PilotDisposableTls.ps1','NativeSignerFixture.ps1','NativeAuditFixture.ps1','NativeWorkerRuntime.ps1','NativeAuditDataFixture.ps1')){. (Join-Path $PSScriptRoot $helper)}
 $repo=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 if(-not $Python){$Python=(Get-Command $(if($IsLinux){'python3'}else{'python'})).Source}
 $fixture=[Guid]::NewGuid().ToString('D');$root=Join-Path $repo ('artifacts/native-audit-history-'+$fixture)
@@ -21,12 +21,13 @@ function Invoke-Docker([string[]]$Arguments,[byte[]]$InputBytes=$null,[int]$Time
 function Probe($Store,[string]$Mode,[string]$ExpectedType='',[switch]$WrongPassword){
     Read-AuditDataStore $context $Store
     $body=@{fixture=$fixture;admin=$(if($WrongPassword){$context.Secrets.wrong}else{$context.Secrets[$Store.Role+'-admin']});reader=$context.Secrets[$Store.Role+'-reader'];writer=$context.Secrets[$Store.Role+'-writer']}
-    $r=Invoke-Docker @('exec','-i','-e','SSL_CERT_FILE=/tmp/ca.pem','-e','SSL_CERT_DIR=/tmp/empty-ca-dir',$Store.Id,'dotnet','/tool/ServerBackendProbe.dll',$Mode) ([Text.Encoding]::UTF8.GetBytes(($body|ConvertTo-Json -Compress))) -AllowFailure
+    if($Mode -ceq 'observation-read'){$body=@{fixture=$fixture;reader=$(if($WrongPassword){$context.Secrets.wrong}else{$context.Secrets[$Store.Role+'-reader']});observation=$script:observationExpectation}}
+    $r=Invoke-Docker @('exec','-i','-e','SSL_CERT_FILE=/tmp/ca.pem','-e','SSL_CERT_DIR=/tmp/empty-ca-dir',$Store.Id,'dotnet','/tool/ServerBackendProbe.dll',$Mode) ([Text.Encoding]::UTF8.GetBytes(($body|ConvertTo-Json -Depth 6 -Compress))) -AllowFailure
     $v=$r.Stdout|ConvertFrom-Json -AsHashtable -Depth 16
     if($r.ExitCode -ne 0 -and -not $ExpectedType -and $Mode -cne 'audit-health'){
         foreach($name in @('errorType','causeType','location')){if($v.ContainsKey($name) -and $v[$name] -cmatch '^[A-Za-z0-9_]{1,80}\z'){[Console]::Error.WriteLine('History probe '+$Mode+': '+$name+'='+$v[$name])}}
     }
-    Assert-AuditHistoryProbe $r $v $Mode $ExpectedType
+    if($Mode.StartsWith('observation-',[StringComparison]::Ordinal)){Assert-AuditObservationProbe $r $v $Mode $ExpectedType}else{Assert-AuditHistoryProbe $r $v $Mode $ExpectedType}
     return $v
 }
 function Invoke-AuditDataHealth($Store){$null=Probe $Store 'audit-health'}
@@ -73,6 +74,10 @@ try{
     foreach($pem in @($context.Tls.ServerPrivateKeyPem,$context.Tls.ClientPrivateKeyPem)+@($context.SigningPems.Values)){foreach($line in ($pem -split "`n")){if($line.Length -ge 40 -and -not $line.StartsWith('-----')){$canaries.Add($line.Substring(0,40))}}}
     $stage='stores';$source=New-AuditDataStore $context 'source';$target=New-AuditDataStore $context 'target'
     if($FailurePoint -ceq 'after-stores'){Write-Output 'AUDIT HISTORY INJECTED FAILURE AFTER STORES';throw 'Intentional history fixture failure.'}
+    if($Profile -ceq 'observation'){
+        . (Join-Path $PSScriptRoot 'NativeAuditObservationWorkflow.ps1')
+        $proof=Invoke-NativeAuditObservationWorkflow $source $target
+    }else{
     $stage='seed';$null=Probe $source 'history-seed';$script:expected=Point $source
     $stage='capture';Read-AuditDataStore $context $source
     $dump=(Invoke-Docker (Get-ImmuDataCliArguments $source.Id 'backup')).StdoutBytes;$pin=Get-ImmuDataHash $dump;Assert-ImmuDataPacket $dump $pin
@@ -120,6 +125,7 @@ try{
     Assert-ImmuData $stopped 'history-stop';Start-AuditDataServer $context $target
     Compare-Restore (Point $target 'history-reader');Same-SourcePoint (Point $source) $expected
     $proof=@{schema='fleetory.native-audit-history.v1';verified=$true;scope='generated five-transaction audit history only';events=4;keys=5;nativeTransactions=5;revisionsPerKey=1;nativeTransactionHeadersVerified=5;independentMerkleInclusionProofsVerified=$false;productionSinkEventFieldsVerified=$true;sourceTargetKeysDistinct=$true;sourceKeyContinuityClaimed=$false;signaturesAndOwnPinsVerified=$true;cryptoRefusals=6;nativeDataRefusals=3;readerWriteRefusals=3;targetWrongPasswordRefused=$true;nativeCorruptionRefused=$true;nativeTruncationRefused=$true;nonemptyRestoreRefused=$true;nativeRestores=$restores;backupBytes=$captured.Length;backupSha256=$pin;manifestSha256=$manifestPin;probeSha256=$context.ProbeHash;historySha256=$expected.historySha256;txHash=$expected.txHash;sourceKeyFingerprint=$expected.keyFingerprint;targetKeyFingerprint=(Point $target).keyFingerprint;capturedBytesFrozen=$true;sourceObservedStableAndUnchanged=$true;restartPreservedHistoryAndReader=$true;originalInputsRead=$false;sourceVpsAccessed=$false;originalPkiOrProviderUsed=$false;originalKeyRecovered=$false;serverApplicationStarted=$false;issuerActivated=$false;globalAtomicSnapshotClaimed=$false;untrustedArchiveSandboxVerified=$false;sessionTokenRevocationVerified=$false;fullSystemRecoveryVerified=$false;phase7Complete=$false}
+    }
 }catch{
     if($_.Exception.Message -cmatch '^Audit data fixture refused: ([a-z0-9-]{1,64})\z'){[Console]::Error.WriteLine('Audit history refusal category='+$Matches[1])}
     [Console]::Error.WriteLine('Native audit history failed at '+$stage+'; type='+$_.Exception.GetType().Name+'; line='+$_.InvocationInfo.ScriptLineNumber+'. No packet, value or credential logged.')
@@ -134,7 +140,7 @@ try{
     @{schema='fleetory.native-audit-history-cleanup.v1';fixture=$fixture;ids=@($context.Stores|ForEach-Object {$_.Id});image=$context.ImageName;cleanupVerified=$true;originalInputsRead=$false}|ConvertTo-Json -Compress
 }
 if($FailurePoint -ceq 'none'){
-    $fault=Invoke-NativeBytes ([Environment]::ProcessPath) @('-NoLogo','-NoProfile','-NonInteractive','-File',$PSCommandPath,'-Python',$Python,'-FailurePoint','after-stores') -TimeoutSeconds 120
+    $fault=Invoke-NativeBytes ([Environment]::ProcessPath) @('-NoLogo','-NoProfile','-NonInteractive','-File',$PSCommandPath,'-Python',$Python,'-FailurePoint','after-stores','-Profile',$Profile) -TimeoutSeconds 120
     Assert-ImmuData ($fault.ExitCode -ne 0 -and $fault.Stdout.Contains('AUDIT HISTORY INJECTED FAILURE AFTER STORES') -and $fault.Stderr.Contains('Native audit history fixture failed.')) 'history-fault-exit'
     $records=@($fault.Stdout -split '\r?\n'|Where-Object {$_.StartsWith('{')}|ForEach-Object {$_|ConvertFrom-Json -AsHashtable}|Where-Object {$_.schema -ceq 'fleetory.native-audit-history-cleanup.v1'})
     Assert-ImmuData ($records.Count -eq 1 -and $records[0].cleanupVerified -eq $true -and $records[0].originalInputsRead -eq $false -and @($records[0].ids).Count -eq 2 -and $records[0].image -ceq (Get-ImmuDataImageName $records[0].fixture)) 'history-fault-record'

@@ -69,3 +69,8 @@ one-shot permissions remain consumed. Original services, coordinated capture,
 human login, PKI/revocation/physical Agent, release authenticity, independent
 custody/WORM/approvals, whole-VPS loss and full RPO/RTO remain open. Phase 7 is
 incomplete; PR #2 remains draft and unmerged.
+
+The separate [bounded observation profile](BoundedAuditObservation.md) reads four
+known events while retaining unknown additional transaction state. It exercises
+both four and five current KV keys at transaction five. The control key in this
+history fixture remains a generated convention, not a retained-archive assumption.

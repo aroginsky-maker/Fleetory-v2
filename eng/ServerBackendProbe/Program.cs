@@ -17,6 +17,7 @@ internal static class Program
     internal const string PrivateDirectory = "/run/fleetory-native/server";
     private static readonly HashSet<string> Modes = new(StringComparer.Ordinal)
     {
+        "observation-read", "observation-seed", "observation-zset", "observation-kv", "observation-rewrite", "observation-many", "observation-reader-denial",
         "history-seed", "history-seed-reversed", "history-users", "history-read", "history-reader", "history-extra", "history-rewrite", "history-wrong-password",
         "v2pair-seed-sql", "v2pair-publish", "v2pair-read", "v2pair-host",
         "pair-seed-sql", "pair-publish", "pair-read", "pair-users", "pair-audit-drift", "pair-closed", "pair-host",
@@ -45,6 +46,7 @@ internal static class Program
             result = new { category = "unexpected", errorType = exception.GetType().Name,
                 causeType = exception.InnerException?.GetType().Name, location = exception.TargetSite?.Name,
                 controlStatus = exception.Data["fixtureHttpStatus"] as int?,
+                authenticationDenied = exception.Data["fixtureAuthenticationDenied"] as bool?,
                 tlsFailure = exception.Data["fixtureTlsFailure"] as string };
             exit = 1;
         }
@@ -56,6 +58,8 @@ internal static class Program
     private static async Task<object> RunAsync(string mode)
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(18));
+        if (mode == "observation-read") { return await AuditObservation.ExecuteAsync(deadline.Token); }
+        if (mode.StartsWith("observation-", StringComparison.Ordinal)) { return await AuditObservationFixture.ExecuteAsync(mode, deadline.Token); }
         if (mode.StartsWith("history-", StringComparison.Ordinal))
         { return await AuditHistoryControl.ExecuteAsync(mode, deadline.Token); }
         if (mode.StartsWith("v2pair-", StringComparison.Ordinal) && mode != "v2pair-host")
