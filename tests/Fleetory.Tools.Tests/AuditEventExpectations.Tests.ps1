@@ -26,10 +26,15 @@ try{
     $sourceProof=$integration.Stdout|ConvertFrom-Json -AsHashtable
     if($sourceProof.schema -cne 'fleetory.generated-expectation-source-integration.v1' -or $sourceProof.verified -ne $true -or $sourceProof.cleanupVerified -ne $true -or $sourceProof.productionGoldenValuesMatched -ne $true){throw 'Generated source integration proof refused.'}
     Write-Output $integration.Stdout.Trim()
+    $diagnostic=Invoke-NativeBytes $Python @('-B',(Join-Path $PSScriptRoot 'audit_expectation_diagnostic_tests.py'),'--integration-probe',$dll) -TimeoutSeconds 90
+    if($diagnostic.ExitCode -ne 0 -or -not [string]::IsNullOrWhiteSpace($diagnostic.Stderr)){throw 'Generated expectation diagnosis failed; no payload logged.'}
+    $diagnosticProof=$diagnostic.Stdout|ConvertFrom-Json -AsHashtable
+    if($diagnosticProof.schema -cne 'fleetory.generated-expectation-diagnostic.v1' -or $diagnosticProof.verified -ne $true -or $diagnosticProof.nativeCases -ne 7 -or $diagnosticProof.cleanupVerified -ne $true -or $diagnosticProof.originalExpectationsAccepted -ne $false){throw 'Generated expectation diagnostic proof refused.'}
+    Write-Output $diagnostic.Stdout.Trim()
     $proof=@{schema='fleetory.generated-event-expectations.v1';verified=$true;portableNativeMethods=19;eventFields=10;knownEvents=4;
         productionSinkSerializationUsed=$true;inMemoryRequestsPerSnapshot=16;exactAsciiGoldenValuesVerified=$true;
         sourceFieldMappingVerified=$true;unicodeOrdinalContextAndUtcVerified=$true;observerFrameCompatible=$true;
-        valueLimitBytes=8192;probeSha256=$probeHash;sourceReaderIntegrationVerified=$true;sourceOriginAuthenticated=$false;sourceIndependenceAuthenticated=$false;
+        valueLimitBytes=8192;probeSha256=$probeHash;sourceReaderIntegrationVerified=$true;diagnosticCompatibilityVerified=$true;sourceOriginAuthenticated=$false;sourceIndependenceAuthenticated=$false;
         realBackendContacted=$false;originalInputsRead=$false;sourceVpsAccessed=$false;originalPkiOrProviderUsed=$false;
         serverApplicationStarted=$false;issuerActivated=$false;signaturesVerified=$false;executionAuthorized=$false;
         fullSystemRecoveryVerified=$false;phase7Complete=$false}

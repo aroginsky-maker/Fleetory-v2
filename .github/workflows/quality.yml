@@ -116,6 +116,10 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/audit_expectation_source_tests.py
 
+      - name: Verify sanitized expectation diagnostics on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/audit_expectation_diagnostic_tests.py
+
       - name: Verify independent production audit expectations on Windows
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/AuditEventExpectations.Tests.ps1 -Python (Get-Command python).Source
@@ -415,6 +419,10 @@ jobs:
       - name: Verify scoped PostgreSQL expectation source
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/audit_expectation_source_tests.py
+
+      - name: Verify sanitized expectation diagnostics
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/audit_expectation_diagnostic_tests.py
 
       - name: Verify independent production audit expectations
         shell: pwsh

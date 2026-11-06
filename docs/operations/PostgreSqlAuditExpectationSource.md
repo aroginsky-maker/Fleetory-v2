@@ -32,6 +32,8 @@ an immutable canonical PostgreSQL snapshot of at most 128 KiB, preserving all te
 source fields and the exact `context_json` string. This feeds the separately
 validated [production expectation producer](IndependentAuditExpectations.md).
 Source-format details unsupported by that producer still fail closed there.
+The separate [compatibility diagnostic](AuditExpectationCompatibilityDiagnostics.md)
+can classify a refusal without returning source contents or expected values.
 Raw events stay in memory; CLI output is a metadata receipt without paths or
 event bodies.
 
