@@ -63,8 +63,11 @@ native/.NET suites and closed original recovery operations need not be rerun.
 The [bounded native observation](BoundedAuditObservation.md) now tests the
 reader protocol on generated four-key/five-transaction and five-key/five-transaction
 datasets, retaining extra raw entry kinds as unreviewed state. It has not read the
-selected original archive. Next bind a narrow original-data execution adapter to
-this selection. Record its specific missing-evidence purpose and audit the
+selected original archive. The [audit-only byte adapter](AuditArchiveInput.md)
+now exercises the exact-open file boundary on synthetic files, opening only the
+selected audit reference and keeping frozen bytes in memory. Original execution
+is still unperformed. Next establish independent known-event value expectations
+and bind this selection to a specific observation purpose. Record that purpose and audit the
 existing data consent before opening original archives. New secret/PKI, source
 VPS, issuer/service or privileged provider actions require their own concrete
 plan and current specific permission. Source-root recovery remains excluded.

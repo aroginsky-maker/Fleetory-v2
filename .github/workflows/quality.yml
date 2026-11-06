@@ -108,6 +108,10 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/audit_observation_tests.py
 
+      - name: Verify audit-only pinned byte capture on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/audit_archive_input_tests.py
+
       - name: Verify audit observation refusal policy on Windows
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/AuditObservationPolicy.Tests.ps1
@@ -395,6 +399,10 @@ jobs:
       - name: Verify bounded audit observation
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/audit_observation_tests.py
+
+      - name: Verify audit-only pinned byte capture
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/audit_archive_input_tests.py
 
       - name: Verify audit observation refusal policy
         shell: pwsh
