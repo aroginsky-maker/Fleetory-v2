@@ -14,6 +14,7 @@ DATA = (
     ('NativePgInventoryV2.Tests.ps1', ''), ('NativeImmuDataRoundtrip.Tests.ps1', ''),
     ('NativeAuditHistory.Tests.ps1', ''), ('NativeAuditHistory.Tests.ps1', '-Profile observation'),
     ('NativeAuditHistory.Tests.ps1', '-Profile historical-observation'),
+    ('NativeAuditHistory.Tests.ps1', '-Profile historical-controller'),
     ('NativeServerPair.Tests.ps1', ''), ('NativeServerPair.Tests.ps1', '-Profile v2'))
 PROVIDER = tuple((name, '') for name in ('PilotProvisioning.Tests.ps1', 'IdentityBackup.Tests.ps1',
     'OpenBaoRaftRecovery.Tests.ps1', 'NativeSignerBackend.Tests.ps1', 'NativeJournalBackend.Tests.ps1'))

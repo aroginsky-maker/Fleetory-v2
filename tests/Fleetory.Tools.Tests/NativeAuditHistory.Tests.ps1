@@ -1,5 +1,5 @@
 #requires -Version 7.3
-param([string]$Python='',[ValidateSet('none','after-stores')][string]$FailurePoint='none',[ValidateSet('history','observation','historical-observation')][string]$Profile='history')
+param([string]$Python='',[ValidateSet('none','after-stores')][string]$FailurePoint='none',[ValidateSet('history','observation','historical-observation','historical-controller')][string]$Profile='history')
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 foreach($helper in @('PilotNativeProcess.ps1','../../eng/pilot/ProviderRecoveryTransport.ps1','../../eng/pilot/ProviderRecoveryPolicy.ps1','../../eng/pilot/ImmuDataRoundtripPolicy.ps1','../../eng/pilot/AuditHistoryPolicy.ps1','../../eng/pilot/AuditObservationPolicy.ps1','PilotDisposableTls.ps1','NativeSignerFixture.ps1','NativeAuditFixture.ps1','NativeWorkerRuntime.ps1','NativeAuditDataFixture.ps1')){. (Join-Path $PSScriptRoot $helper)}
@@ -74,7 +74,12 @@ try{
     foreach($pem in @($context.Tls.ServerPrivateKeyPem,$context.Tls.ClientPrivateKeyPem)+@($context.SigningPems.Values)){foreach($line in ($pem -split "`n")){if($line.Length -ge 40 -and -not $line.StartsWith('-----')){$canaries.Add($line.Substring(0,40))}}}
     $stage='stores';$source=New-AuditDataStore $context 'source';$target=New-AuditDataStore $context 'target'
     if($FailurePoint -ceq 'after-stores'){Write-Output 'AUDIT HISTORY INJECTED FAILURE AFTER STORES';throw 'Intentional history fixture failure.'}
-    if($Profile -ceq 'historical-observation'){
+    if($Profile -ceq 'historical-controller'){
+        . (Join-Path $PSScriptRoot 'NativeAuditObservationWorkflow.ps1')
+        . (Join-Path $PSScriptRoot 'NativeHistoricalObservationWorkflow.ps1')
+        . (Join-Path $PSScriptRoot 'NativeHistoricalControllerWorkflow.ps1')
+        $proof=Invoke-NativeHistoricalControllerWorkflow $source $target
+    }elseif($Profile -ceq 'historical-observation'){
         . (Join-Path $PSScriptRoot 'NativeAuditObservationWorkflow.ps1')
         . (Join-Path $PSScriptRoot 'NativeHistoricalObservationWorkflow.ps1')
         $proof=Invoke-NativeHistoricalObservationWorkflow $source $target

@@ -1,5 +1,10 @@
 #requires -Version 7.3
-# Shared generated-only audit resources; caller owns bounded Invoke-Docker and health probe.
+# Shared fresh owned audit resources; caller owns bounded Invoke-Docker and health probe.
+function Get-AuditDataLifetime($Context){
+    $value=if($Context.ContainsKey('LifetimeSeconds')){$Context.LifetimeSeconds}else{3300}
+    Assert-ImmuData ($value -is [int] -and $value -cin @(3300,660)) 'store-lifetime'
+    return $value
+}
 function Write-AuditDataLedger($Context){
     $items=@($Context.Stores|ForEach-Object {@{Id=$_.Id;Session=$_.Session;Name=$_.Name;Started=$_.Started;Role=$_.Role}})
     [IO.File]::WriteAllText((Join-Path $Context.Root 'owned-stores.json'),(@{fixture=$Context.Fixture;image=$Context.ImageName;imageId=$Context.ImageId;stores=$items}|ConvertTo-Json -Depth 7),[Text.UTF8Encoding]::new($false))
@@ -11,7 +16,7 @@ function Read-AuditDataStore($Context,$Store,[switch]$Cleanup){
         $i.Config.Image -ceq $Context.ImageName -and $i.Image -ceq $Context.ImageId -and $i.Config.Labels['fleetory.immu-data.session'] -ceq $Store.Session -and
         $created -ge $Store.Started -and $created -le [DateTimeOffset]::UtcNow.AddSeconds(5)) 'store-ownership'
     if($Cleanup){return}
-    Assert-NativeStoreRuntime $i '3322:3322' 'audit'
+    Assert-NativeStoreRuntime $i '3322:3322' 'audit' (Get-AuditDataLifetime $Context)
     Assert-ImmuData ($i.HostConfig.NetworkMode -ceq 'none' -and (@($i.HostConfig.Tmpfs.Keys|Sort-Object)-join '|') -ceq (@($script:nativeAuditTmpfs.Keys|Sort-Object)-join '|')) 'store-network-tmpfs'
     foreach($path in $script:nativeAuditTmpfs.Keys){Assert-ImmuData ($i.HostConfig.Tmpfs[$path] -ceq $script:nativeAuditTmpfs[$path]) 'store-tmpfs'}
 }
@@ -40,7 +45,7 @@ function New-AuditDataStore($Context,[string]$Role){
     $arguments=@('run','-d','--rm','--name',$name,'--label',('fleetory.immu-data.session='+$session),'--network','none','--read-only','--user','3322:3322',
         '--cap-drop','ALL','--security-opt','no-new-privileges','--memory','384m','--cpus','1','--pids-limit','128','--ulimit','core=0',
         '--tmpfs',('/data:'+$script:nativeAuditTmpfs['/data']),'--tmpfs',('/tmp:'+$script:nativeAuditTmpfs['/tmp']),
-        '--entrypoint','/bin/sh',$Context.ImageName,'-c','exec /bin/sleep 3300')
+        '--entrypoint','/bin/sh',$Context.ImageName,'-c',('exec /bin/sleep '+(Get-AuditDataLifetime $Context)))
     $s.Id=(Invoke-Docker $arguments).Stdout.Trim();Write-AuditDataLedger $Context;Read-AuditDataStore $Context $s
     Assert-ImmuData ((Invoke-Docker @('exec',$s.Id,'sha256sum','/tool/ServerBackendProbe.dll')).Stdout.Split(' ')[0] -ceq $Context.ProbeHash) 'probe-code-identity'
     $null=Invoke-Docker @('exec',$s.Id,'/bin/mkdir','-m','700','/tmp/empty-ca-dir')

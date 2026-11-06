@@ -112,6 +112,14 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/historical_audit_observation_tests.py
 
+      - name: Verify historical controller input bounds on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/historical_audit_restore_tests.py
+
+      - name: Verify historical controller refusal policy on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/HistoricalAuditControllerPolicy.Tests.ps1
+
       - name: Verify independent recovery CI jobs on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/recovery_ci_layout_tests.py
@@ -424,6 +432,14 @@ jobs:
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/historical_audit_observation_tests.py
 
+      - name: Verify historical controller input bounds
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/historical_audit_restore_tests.py
+
+      - name: Verify historical controller refusal policy
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/HistoricalAuditControllerPolicy.Tests.ps1
+
       - name: Verify independent recovery CI jobs
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/recovery_ci_layout_tests.py
@@ -579,6 +595,10 @@ jobs:
       - name: Verify generated historical audit restore and observation scope
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/NativeAuditHistory.Tests.ps1 -Profile historical-observation -Python (Get-Command python3).Source
+
+      - name: Verify owned historical audit controller and cleanup
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativeAuditHistory.Tests.ps1 -Profile historical-controller -Python (Get-Command python3).Source
 
       - name: Verify coherent native Server pair restore and lifecycle
         shell: pwsh

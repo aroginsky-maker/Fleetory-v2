@@ -57,7 +57,7 @@ is used. Native setup and reader-write refusal probes are separate from the
 read-only observation mode. CI runs the eighteen portable contracts on both OSes
 and the generated native lifecycle on Linux.
 
-CI runs the nine database/audit native fixtures in the independent
+CI runs the ten database/audit native fixtures in the independent
 `Native database and audit recovery` job (20 minutes). Five provider/identity
 fixtures run in `Native provider and identity recovery` (15 minutes). Each job
 checks out the same revision, selects the pinned SDK, restores pinned tools,
@@ -74,6 +74,11 @@ cancelled, skipped and missing job results. This preserves the old required
 check's meaning without changing branch settings. This partition avoids
 exhausting the quality deadline on sequential
 independent fixtures; it does not change test bounds or repository budgets.
+
+The [owned native controller](OwnedHistoricalAuditController.md) adds a bounded
+input protocol, one fresh restore target and typed failure/cleanup contracts.
+Its external gate authentication, exclusive original-use ledger and original
+file-capture integration remain separate, explicitly unverified controls.
 
 This closes a generated protocol and lifecycle preparation step only. An
 original observation still needs a concrete owned controller, input/code/public
