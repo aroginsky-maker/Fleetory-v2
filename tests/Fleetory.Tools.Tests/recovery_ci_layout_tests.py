@@ -1,6 +1,11 @@
 """Keep every native recovery gate when independent fixture jobs are rearranged."""
 from pathlib import Path
+from collections import Counter
+import json
+import os
 import re
+import shutil
+import subprocess
 import unittest
 
 WORKFLOW = Path(__file__).resolve().parents[2] / '.github/workflows/quality.yml'
@@ -22,7 +27,10 @@ def jobs(text):
 
 def validate(text):
     blocks = jobs(text)
-    assert set(blocks) == {'windows-tls-chain', 'quality', 'native-data-recovery', 'native-provider-recovery'}
+    assert set(blocks) == {'windows-tls-chain', 'quality', 'native-data-recovery', 'native-provider-recovery', 'quality-gate'}
+    expected = Counter(name for name, _ in DATA + PROVIDER)
+    found = Counter(re.findall(r'\./tests/Fleetory.Tools.Tests/([A-Za-z0-9]+\.Tests\.ps1)', text))
+    assert all(found[name] == count for name, count in expected.items())
     for key, cases, minutes in (('native-data-recovery', DATA, 20), ('native-provider-recovery', PROVIDER, 15)):
         block = blocks[key]
         assert '    runs-on: ubuntu-24.04\n' in block and f'    timeout-minutes: {minutes}\n' in block
@@ -45,6 +53,11 @@ def validate(text):
         assert text.count(command) == 1 and command in blocks['quality']
     assert '    timeout-minutes: 30\n' in blocks['quality']
     assert '    timeout-minutes: 15\n' in blocks['windows-tls-chain']
+    aggregate = blocks['quality-gate']
+    assert '    name: Strict build, tests, coverage and Sonar\n' in aggregate
+    assert '    needs: [quality, windows-tls-chain, native-data-recovery, native-provider-recovery]\n' in aggregate
+    assert '    if: always()\n' in aggregate and 'continue-on-error:' not in aggregate
+    assert '    name: Strict build, tests, coverage and Sonar execution\n' in blocks['quality']
     return True
 
 
@@ -78,6 +91,24 @@ class RecoveryCiLayoutTests(unittest.TestCase):
         self.refused(self.text.replace('timeout-minutes: 30', 'timeout-minutes: 60'))
         self.refused(self.text.replace('./eng/verify-sonar-issues.ps1', './eng/omitted.ps1'))
         self.refused(self.text.replace('  native-data-recovery:\n', '  native-data-recovery:\n    env:\n      SONAR_TOKEN: copied\n'))
+
+    def test_actual_aggregate_rejects_failed_cancelled_skipped_or_missing_jobs(self):
+        block = jobs(self.text)['quality-gate']
+        self.refused(self.text.replace('    if: always()\n', ''))
+        script = '\n'.join(line[10:] for line in block.split('        run: |\n', 1)[1].splitlines())
+        executable = shutil.which('pwsh')
+        self.assertIsNotNone(executable)
+        names = ('quality', 'windows-tls-chain', 'native-data-recovery', 'native-provider-recovery')
+        success = {name: {'result': 'success', 'outputs': {}} for name in names}
+        cases = [(success, True), ({}, False), ({**success, 'extra': {'result': 'success'}}, False)]
+        for name in names:
+            for result in ('failure', 'cancelled', 'skipped', None):
+                cases.append(({**success, name: {'result': result}}, False))
+            cases.append(({key: value for key, value in success.items() if key != name}, False))
+        for value, accepted in cases:
+            env = dict(os.environ, FLEETORY_GATE_RESULTS=json.dumps(value))
+            run = subprocess.run([executable, '-NoProfile', '-Command', script], env=env, capture_output=True, timeout=10)
+            self.assertEqual(run.returncode == 0, accepted)
 
 
 if __name__ == '__main__':

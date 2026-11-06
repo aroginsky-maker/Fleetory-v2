@@ -261,7 +261,7 @@ jobs:
           ./tests/Fleetory.Tools.Tests/ImmudbRestoreCheckpoint.Tests.ps1
 
   quality:
-    name: Strict build, tests, coverage and Sonar
+    name: Strict build, tests, coverage and Sonar execution
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -640,3 +640,28 @@ jobs:
       - name: Verify generated native signer journal readiness
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/NativeJournalBackend.Tests.ps1
+
+  quality-gate:
+    name: Strict build, tests, coverage and Sonar
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    needs: [quality, windows-tls-chain, native-data-recovery, native-provider-recovery]
+    if: always()
+    permissions:
+      contents: read
+    steps:
+      - name: Require all execution jobs to succeed
+        shell: pwsh
+        env:
+          FLEETORY_GATE_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          $ErrorActionPreference='Stop'
+          Set-StrictMode -Version Latest
+          if ([string]::IsNullOrWhiteSpace($env:FLEETORY_GATE_RESULTS) -or $env:FLEETORY_GATE_RESULTS.Length -gt 16384) { throw 'Missing or oversized job results.' }
+          $results=$env:FLEETORY_GATE_RESULTS | ConvertFrom-Json -AsHashtable -Depth 4
+          $required=@('quality','windows-tls-chain','native-data-recovery','native-provider-recovery')
+          if ($results -isnot [hashtable] -or $results.Count -ne $required.Count) { throw 'Unexpected job result set.' }
+          foreach ($name in $required) {
+            if (-not $results.ContainsKey($name) -or $results[$name].result -cne 'success') { throw 'A required execution job did not succeed.' }
+          }
+          Write-Output 'ALL JOBS GATE PASS:4/4 required execution jobs succeeded.'

@@ -63,11 +63,16 @@ fixtures run in `Native provider and identity recovery` (15 minutes). Each job
 checks out the same revision, selects the pinned SDK, restores pinned tools,
 audits dependencies and builds its prerequisites before running unchanged
 fixture commands. Neither needs Sonar credentials or a successful upstream job.
-All jobs must succeed; partial success is not a green workflow. Five portable
+All jobs must succeed; partial success is not a green workflow. Six portable
 layout contracts reject missing/duplicated fixture commands, skip/soft-failure
 conditions, missing bootstrap gates and changed deadlines or Sonar ownership.
-The existing quality job keeps its 30-minute limit, coverage/issue gates and
-Sonar analysis. This partition avoids exhausting that limit on sequential
+The execution job keeps its 30-minute limit, coverage/issue gates and Sonar
+analysis. A final always-evaluated aggregate retains the previous check name
+`Strict build, tests, coverage and Sonar` and fails unless all four execution
+jobs succeed. The portable suite executes this actual aggregate with failed,
+cancelled, skipped and missing job results. This preserves the old required
+check's meaning without changing branch settings. This partition avoids
+exhausting the quality deadline on sequential
 independent fixtures; it does not change test bounds or repository budgets.
 
 This closes a generated protocol and lifecycle preparation step only. An
