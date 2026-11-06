@@ -4,6 +4,14 @@
 
 ## Implemented
 
+- A separately versioned native PostgreSQL v2 readback now preserves the legacy
+  inventory encoding while adding an independent role/settings/membership
+  fingerprint. Generated application18/24 and signer4/5 profiles use real schemas,
+  four roles, native restores and drift/refusal checks. Unsupported objects are
+  refused in the native read-only transaction before table values are read.
+  Original data and service recovery remain unverified. See
+  [NativePgInventoryV2](docs/operations/NativePgInventoryV2.md).
+
 - A separate retained-pair metadata reviewer now reconciles four pinned reports
   without opening their referenced backups or key paths. It preserves the actual
   18-table/24-row and four-event/five-transaction profile, rejects mixed inventories,

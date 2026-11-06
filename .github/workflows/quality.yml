@@ -92,6 +92,10 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/retained_pair_review_tests.py
 
+      - name: Verify PostgreSQL v2 transcript contract on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/pg_inventory_v2_tests.py
+
       - name: Verify recovery native exit gate on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/recovery_test_gate_tests.py
@@ -352,6 +356,10 @@ jobs:
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/retained_pair_review_tests.py
 
+      - name: Verify PostgreSQL v2 transcript contract
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/pg_inventory_v2_tests.py
+
       - name: Verify recovery native exit gate
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/recovery_test_gate_tests.py
@@ -403,6 +411,10 @@ jobs:
       - name: Verify nonempty native PostgreSQL data roundtrip
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/NativePgDataRoundtrip.Tests.ps1 -Python (Get-Command python3).Source
+
+      - name: Verify native PostgreSQL v2 readback and role omissions
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativePgInventoryV2.Tests.ps1 -Python (Get-Command python3).Source
 
       - name: Verify nonempty native immudb data roundtrip
         shell: pwsh
