@@ -87,8 +87,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -B ./tests/Fleetory.Tools.Tests/server_data_inputs_tests.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python -B ./tests/Fleetory.Tools.Tests/retained_pair_review_tests.py
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify retained Server pair metadata on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/retained_pair_review_tests.py
 
       - name: Verify recovery native exit gate on Windows
         shell: pwsh
@@ -345,8 +347,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python3 -B ./tests/Fleetory.Tools.Tests/server_data_inputs_tests.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          python3 -B ./tests/Fleetory.Tools.Tests/retained_pair_review_tests.py
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify retained Server pair metadata
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/retained_pair_review_tests.py
 
       - name: Verify recovery native exit gate
         shell: pwsh
