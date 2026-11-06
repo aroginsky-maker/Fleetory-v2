@@ -10,6 +10,8 @@ $root=Join-Path $repo ('artifacts/audit-event-expectations-'+$fixture)
 $proof=$null
 try{
     $null=New-Item -ItemType Directory -Path $root
+    $restore=Invoke-NativeBytes 'dotnet' @('restore',(Join-Path $repo 'eng/ServerBackendProbe/ServerBackendProbe.csproj'),'--disable-parallel') -TimeoutSeconds 120
+    if($restore.ExitCode -ne 0){throw 'Expectation probe restore failed; no diagnostic payload logged.'}
     $published=Publish-NativeProbe $repo 'ServerBackendProbe' $root
     $dll=Join-Path $published 'ServerBackendProbe.dll'
     $probeHash=(Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash.ToLowerInvariant()

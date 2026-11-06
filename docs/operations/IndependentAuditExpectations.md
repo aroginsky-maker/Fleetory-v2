@@ -57,7 +57,9 @@ Run the generated contract on Windows or Linux:
 ./tests/Fleetory.Tools.Tests/AuditEventExpectations.Tests.ps1 -Python python3
 ```
 
-The wrapper publishes and measures the native probe, invokes nineteen generated
+The wrapper explicitly restores its probe project before publishing, so the step
+also works in a clean checkout before other native fixtures. It publishes and
+measures the native probe, invokes nineteen generated
 contract methods and removes its owned public payload. Tests include independent
 ASCII golden wire hashes, every field's effect on the expected value, Unicode
 escaping and ordinal context order, microsecond timestamps, null/empty context,
