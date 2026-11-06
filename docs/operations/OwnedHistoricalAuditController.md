@@ -69,6 +69,11 @@ is killed. The configured container lifetime is not a test of abrupt owner
 termination. Existing audit-data consent persists; this component grants no new
 secret, private PKI, provider, source-root or production-token authority.
 
+The [pinned audit-use transaction](AuditUseTransaction.md) adds record admission,
+an exclusive consumed nonce ledger and one audit-only capture/dispatch slot.
+It keeps origin authentication and process/cleanup verification explicitly
+unverified; a callback result is not a native acceptance receipt.
+
 Writer admission, execution permission, independent custody/WORM/signoff,
 unknown original state, original native observation and full-system RPO/RTO stay
 open. Phase 7 is incomplete and PR #2 remains draft and unmerged.

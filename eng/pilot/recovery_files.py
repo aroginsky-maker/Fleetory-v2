@@ -45,8 +45,8 @@ def regular_single_file(info):
     return stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and not getattr(info, 'st_file_attributes', 0) & 0x400
 
 
-def windows_open(path):
-    """Deny write/delete sharing, refuse a reparse leaf and check the final path before reading."""
+def _windows_descriptor(path, new_file=False):
+    """Checked final handle: existing read-only input or exclusive new ledger."""
     import msvcrt
     from ctypes import wintypes
     kernel = ctypes.WinDLL('kernel32', use_last_error=True)
@@ -60,7 +60,8 @@ def windows_open(path):
     close = kernel.CloseHandle
     close.argtypes = [wintypes.HANDLE]
     close.restype = wintypes.BOOL
-    handle = create(str(path), 0x80000000, 1, None, 3, 0x08200000, None)
+    access, sharing, disposition, flags = (0xC0000000, 0, 1, 0x80200080) if new_file else (0x80000000, 1, 3, 0x08200000)
+    handle = create(str(path), access, sharing, None, disposition, flags, None)
     if handle == ctypes.c_void_p(-1).value:
         raise OSError('Recovery input cannot be opened.')
     try:
@@ -73,12 +74,23 @@ def windows_open(path):
         elif name.startswith('\\\\?\\'):
             name = name[4:]
         archive.require(os.path.normcase(name) == os.path.normcase(str(path)))
-        fd = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+        mode = os.O_RDWR if new_file else os.O_RDONLY
+        fd = msvcrt.open_osfhandle(handle, mode | os.O_BINARY)
         handle = None
         return fd
     finally:
         if handle is not None:
             close(handle)
+
+
+def windows_open(path):
+    """Deny write/delete sharing, refuse a reparse leaf and check the final path before reading."""
+    return _windows_descriptor(path)
+
+
+def windows_create_new(path):
+    """Never overwrite or share a new purpose ledger; keep its checked handle open."""
+    return _windows_descriptor(path, new_file=True)
 
 
 @contextmanager
