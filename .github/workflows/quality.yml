@@ -112,6 +112,10 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/historical_audit_observation_tests.py
 
+      - name: Verify independent recovery CI jobs on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/recovery_ci_layout_tests.py
+
       - name: Verify audit-only pinned byte capture on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/audit_archive_input_tests.py
@@ -420,6 +424,10 @@ jobs:
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/historical_audit_observation_tests.py
 
+      - name: Verify independent recovery CI jobs
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/recovery_ci_layout_tests.py
+
       - name: Verify audit-only pinned byte capture
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/audit_archive_input_tests.py
@@ -489,6 +497,58 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Pinned recovery runtime unavailable.' }
           python3 -B ./tests/Fleetory.Tools.Tests/recovery_configuration_tests.py --native-publish artifacts/recovery-configuration
 
+      - name: Verify Sonar issue gate
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/SonarIssueGate.Tests.ps1
+
+      - name: Run Fleetory quality verification
+        shell: pwsh
+        run: ./eng/verify-quality.ps1
+
+      - name: Enforce zero Sonar issues
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./eng/verify-sonar-issues.ps1
+
+      - name: Report Sonar percentages
+        if: always()
+        shell: pwsh
+        env:
+          SONAR_PULL_REQUEST: ${{ github.event.pull_request.number }}
+        run: |
+          ./eng/report-sonar-metrics.ps1
+
+  native-data-recovery:
+    name: Native database and audit recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6, Node.js 24
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: eng/global.ci.json
+
+      - name: Select the pinned CI SDK
+        shell: pwsh
+        run: Copy-Item -LiteralPath eng/global.ci.json -Destination global.json
+
+      - name: Build isolated native fixture prerequisites
+        shell: pwsh
+        run: |
+          dotnet tool restore
+          if ($LASTEXITCODE -ne 0) { throw 'Native fixture tool restore failed.' }
+          dotnet restore Fleetory.sln --force -warnaserror -p:FleetoryRequireDependencyAudit=true -p:NuGetAudit=true -p:NuGetAuditMode=all -p:NuGetAuditLevel=low -p:RestoreUseStaticGraphEvaluation=false
+          if ($LASTEXITCODE -ne 0) { throw 'Native fixture dependency audit failed.' }
+          dotnet build Fleetory.sln -c Release --no-restore --disable-build-servers --warnaserror
+          if ($LASTEXITCODE -ne 0) { throw 'Native fixture prerequisite build failed.' }
+
       - name: Verify generated native Server database and audit components
         shell: pwsh
         run: |
@@ -531,13 +591,35 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/NativeServerPair.Tests.ps1 -Profile v2 -Python (Get-Command python3).Source
 
-      - name: Verify Sonar issue gate
-        shell: pwsh
-        run: ./tests/Fleetory.Tools.Tests/SonarIssueGate.Tests.ps1
+  native-provider-recovery:
+    name: Native provider and identity recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
 
-      - name: Run Fleetory quality verification
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6, Node.js 24
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: eng/global.ci.json
+
+      - name: Select the pinned CI SDK
         shell: pwsh
-        run: ./eng/verify-quality.ps1
+        run: Copy-Item -LiteralPath eng/global.ci.json -Destination global.json
+
+      - name: Build isolated native fixture prerequisites
+        shell: pwsh
+        run: |
+          dotnet tool restore
+          if ($LASTEXITCODE -ne 0) { throw 'Native fixture tool restore failed.' }
+          dotnet restore Fleetory.sln --force -warnaserror -p:FleetoryRequireDependencyAudit=true -p:NuGetAudit=true -p:NuGetAuditMode=all -p:NuGetAuditLevel=low -p:RestoreUseStaticGraphEvaluation=false
+          if ($LASTEXITCODE -ne 0) { throw 'Native fixture dependency audit failed.' }
+          dotnet build Fleetory.sln -c Release --no-restore --disable-build-servers --warnaserror
+          if ($LASTEXITCODE -ne 0) { throw 'Native fixture prerequisite build failed.' }
 
       - name: Verify isolated pilot PKI and database provisioning
         shell: pwsh
@@ -558,17 +640,3 @@ jobs:
       - name: Verify generated native signer journal readiness
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/NativeJournalBackend.Tests.ps1
-
-      - name: Enforce zero Sonar issues
-        shell: pwsh
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: ./eng/verify-sonar-issues.ps1
-
-      - name: Report Sonar percentages
-        if: always()
-        shell: pwsh
-        env:
-          SONAR_PULL_REQUEST: ${{ github.event.pull_request.number }}
-        run: |
-          ./eng/report-sonar-metrics.ps1
