@@ -18,6 +18,7 @@ internal static class Program
     private static readonly HashSet<string> Modes = new(StringComparer.Ordinal)
     {
         "history-seed", "history-seed-reversed", "history-users", "history-read", "history-reader", "history-extra", "history-rewrite", "history-wrong-password",
+        "v2pair-seed-sql", "v2pair-publish", "v2pair-read", "v2pair-host",
         "pair-seed-sql", "pair-publish", "pair-read", "pair-users", "pair-audit-drift", "pair-closed", "pair-host",
         "immu-seed", "immu-inspect", "immu-reader-create", "immu-reader", "immu-wrong-password",
         "schema", "restore-schema", "db-ready", "db-write", "db-rollback", "db-atomic", "db-password", "db-tls", "db-plaintext",
@@ -57,6 +58,8 @@ internal static class Program
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(18));
         if (mode.StartsWith("history-", StringComparison.Ordinal))
         { return await AuditHistoryControl.ExecuteAsync(mode, deadline.Token); }
+        if (mode.StartsWith("v2pair-", StringComparison.Ordinal) && mode != "v2pair-host")
+        { return await V2PairControl.ExecuteAsync(mode, deadline.Token); }
         if (mode.StartsWith("pair-", StringComparison.Ordinal) && mode != "pair-host")
         { return await FreshPairControl.ExecuteAsync(mode, deadline.Token); }
         if (mode.StartsWith("immu-", StringComparison.Ordinal))
@@ -103,7 +106,7 @@ internal static class Program
         await using var scope = app.Services.CreateAsyncScope();
         var platform = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
         var core = scope.ServiceProvider.GetRequiredService<CoreDbContext>();
-        if (mode == "pair-host") { return await FreshPairHost.ExecuteAsync(app, platform, deadline.Token); }
+        if (mode is "pair-host" or "v2pair-host") { return await FreshPairHost.ExecuteAsync(app, platform, mode == "v2pair-host", deadline.Token); }
         if (mode == "schema")
         {
             var sql = platform.GetService<IMigrator>().GenerateScript() + core.GetService<IMigrator>().GenerateScript();

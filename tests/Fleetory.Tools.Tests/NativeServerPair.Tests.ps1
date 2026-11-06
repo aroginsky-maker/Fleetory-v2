@@ -1,10 +1,10 @@
 #requires -Version 7.3
-param([string]$Python='',[ValidateSet('none','after-stores')][string]$FailurePoint='none')
+param([string]$Python='',[ValidateSet('none','after-stores')][string]$FailurePoint='none',[ValidateSet('legacy','v2')][string]$Profile='legacy')
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 foreach($helper in @('PilotNativeProcess.ps1','../../eng/pilot/ProviderRecoveryTransport.ps1','../../eng/pilot/ProviderRecoveryPolicy.ps1',
     '../../eng/pilot/PgDataRoundtripPolicy.ps1','../../eng/pilot/ImmuDataRoundtripPolicy.ps1','PilotDisposableTls.ps1',
-    'NativeSignerFixture.ps1','NativeJournalFixture.ps1','NativeAuditFixture.ps1','NativeWorkerRuntime.ps1','NativePairFixture.ps1')){. (Join-Path $PSScriptRoot $helper)}
+    'NativeSignerFixture.ps1','NativeJournalFixture.ps1','NativeAuditFixture.ps1','NativeWorkerRuntime.ps1','NativePairFixture.ps1','NativePgV2Fixture.ps1','NativeV2PairWorkflow.ps1')){. (Join-Path $PSScriptRoot $helper)}
 $repo=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 if(-not $Python){$Python=(Get-Command $(if($IsLinux){'python3'}else{'python'})).Source}
 $fixture=[Guid]::NewGuid().ToString('D');$root=Join-Path $repo ('artifacts/native-pair-'+$fixture)
@@ -18,6 +18,7 @@ function Invoke-Docker([string[]]$Arguments,[byte[]]$InputBytes=$null,[int]$Time
         else{Invoke-NativeBytes 'docker' (@('--context','desktop-linux')+$Arguments) $InputBytes $TimeoutSeconds}
     $script:lastExit=$result.ExitCode;$script:lastClass='unclassified'
     foreach($kind in @('syntax error','does not exist','permission denied','no such file','authentication failed','connection refused')){if(($result.Stdout+$result.Stderr).Contains($kind,[StringComparison]::OrdinalIgnoreCase)){$script:lastClass=$kind.Replace(' ','-');break}}
+    if($result.Stderr -cmatch 'ERROR:\s+([A-Z0-9]{5})\b'){$script:lastClass='sqlstate-'+$Matches[1]}
     foreach($secret in $state.Canaries){Assert-Pair (-not ($result.Stdout+$result.Stderr).Contains($secret,[StringComparison]::Ordinal)) 'credential-canary'}
     if(-not $AllowFailure){Assert-Pair ($result.ExitCode -eq 0) 'docker-operation'}
     return $result
@@ -77,13 +78,23 @@ try{
     Assert-Pair ($built.Count -eq 1 -and $built[0].Config.Labels['fleetory.native-pair.build'] -ceq $fixture) 'build-identity';$state.ImageId=$built[0].Id
     $state.Tls=New-PilotDisposableTlsMaterial -IncludeClient
     foreach($role in @('agent','admin')){$state.GatewayTls[$role]=New-PilotDisposableTlsMaterial}
+    if($Profile -ceq 'v2'){
+        $state.SigningPems=@{}
+        foreach($role in @('source','target')){
+            $key=[Security.Cryptography.ECDsa]::Create([Security.Cryptography.ECCurve]::CreateFromFriendlyName('nistP256'))
+            try{$state.SigningPems[$role]=$key.ExportECPrivateKeyPem();[IO.File]::WriteAllText((Join-Path $root ($role+'-public.pem')),$key.ExportSubjectPublicKeyInfoPem(),[Text.UTF8Encoding]::new($false))}finally{$key.Dispose()}
+        }
+    }else{
     $key=[Security.Cryptography.ECDsa]::Create([Security.Cryptography.ECCurve]::CreateFromFriendlyName('nistP256'))
     try{$state.SigningPem=$key.ExportECPrivateKeyPem();[IO.File]::WriteAllText((Join-Path $root 'state-public.pem'),$key.ExportSubjectPublicKeyInfoPem(),[Text.UTF8Encoding]::new($false))}finally{$key.Dispose()}
+    }
     foreach($pem in @($state.Tls.ServerPrivateKeyPem,$state.Tls.ClientPrivateKeyPem,$state.SigningPem,$state.GatewayTls.agent.ServerPrivateKeyPem,$state.GatewayTls.admin.ServerPrivateKeyPem)){foreach($line in ($pem -split "`n")){if($line.Length -ge 40 -and -not $line.StartsWith('-----')){$state.Canaries.Add($line.Substring(0,40))}}}
+    if($Profile -ceq 'v2'){foreach($pem in $state.SigningPems.Values){foreach($line in ($pem -split "`n")){if($line.Length -ge 40 -and -not $line.StartsWith('-----')){$state.Canaries.Add($line.Substring(0,40))}}}}
     . (Join-Path $repo 'eng/verify-immudb-state.ps1') -Address 'https://127.0.0.1:8090' -PublicKeyPath (Join-Path $root 'state-public.pem') -AnchorPath (Join-Path $root 'unused-anchor')
     $stage='stores';$source=New-PairSide $state 'source';$target=New-PairSide $state 'target'
     New-PairAudit $state $source;New-PairAudit $state $target
     if($FailurePoint -ceq 'after-stores'){Write-Output 'PAIR INJECTED FAILURE AFTER STORES';throw 'Intentional fresh pair failure.'}
+    if($Profile -ceq 'v2'){$proof=Invoke-V2PairWorkflow}else{
     $stage='seed'
     $grants='RESET ROLE;GRANT USAGE ON SCHEMA core,platform TO fleetory_server;GRANT SELECT ON ALL TABLES IN SCHEMA core,platform TO fleetory_server;GRANT INSERT ON platform.audit_events,platform.audit_export_queue TO fleetory_server;GRANT UPDATE,DELETE ON platform.audit_export_queue TO fleetory_server;'
     $null=Pair-Sql $state $source 'fleetory' ("SET ROLE fleetory_migrator;`n"+$schema.sql+"`n"+$grants)
@@ -161,6 +172,7 @@ try{
         crossFieldHostRefusals=$mutations.Count;extraAuditKeyHostRefused=$true;refusedHostsNeverListened=$true;nativeApplicationStarts=2;nativeApplicationStops=2;targetRuntimeTlsVerified=$true;targetCredentialsRecreated=$true;
         restartAndHostReadbackVerified=$true;postHostDataAndAuditTipUnchanged=$true;sourceUnchanged=$true;componentApprovalFixturesUsed=$false;placeholderArtifactsUsed=$false;externalApprovalVerified=$false;originalInventoryV2Verified=$false;
         originalInputsRead=$false;sourceVpsAccessed=$false;originalPkiOrProviderUsed=$false;humanLoginVerified=$false;issuerActivated=$false;productionTokenIssued=$false;sessionTokenRevocationVerified=$false;untrustedArchiveSandboxVerified=$false;fullSystemRecoveryVerified=$false;phase7Complete=$false}
+    }
 }catch{
     if($_.Exception.Message -cmatch '^(?:Native pair|Native signer|PostgreSQL data|Audit data) (?:fixture )?refused: ([a-z0-9-]{1,64})\z'){[Console]::Error.WriteLine('Native pair category='+$Matches[1]+'; exit='+$lastExit+'; class='+$lastClass)}
     [Console]::Error.WriteLine('Native pair failed at '+$stage+'; type='+$_.Exception.GetType().Name+'; line='+$_.InvocationInfo.ScriptLineNumber+'. No rows, packet, SQL or credential logged.')
@@ -179,12 +191,12 @@ try{
         Assert-Pair ($r.ExitCode -ne 0 -and ($r.Stderr+$r.Stdout) -match '(?i)no such (object|image)') 'build-cleanup'
     }catch{$failures+='image'}}
     if(-not $failures.Count){try{Remove-NativePublicPayload $repo $root}catch{$failures+='payload'}}
-    $env:DOCKER_BUILDKIT=$oldBuildKit;$state.SigningPem=$state.Tls=$null;$state.GatewayTls.Clear();$state.Canaries.Clear();foreach($s in $state.Sides){$s.Secrets.Clear()};$pg=$audit=$pgCaptured=$auditCaptured=$capture=$captured=$packet=$null;$watch.Stop()
+    $env:DOCKER_BUILDKIT=$oldBuildKit;if($state.ContainsKey('SigningPems')){$state.SigningPems.Clear()};$state.SigningPem=$state.Tls=$null;$state.GatewayTls.Clear();$state.Canaries.Clear();foreach($s in $state.Sides){$s.Secrets.Clear()};$pg=$audit=$pgCaptured=$auditCaptured=$capture=$captured=$packet=$null;$watch.Stop()
     if($failures.Count){throw 'Native pair owned cleanup unverified; resource ledger retained.'}
     @{schema='fleetory.native-pair-cleanup.v1';fixture=$fixture;cleanupVerified=$true;ids=@($state.Sides|ForEach-Object {$_.Id})+@($state.Audits|ForEach-Object {$_.Id});image=$state.Image;aliases=@($state.Audits|ForEach-Object {$_.Image});originalInputsRead=$false}|ConvertTo-Json -Compress
 }
 if($FailurePoint -ceq 'none'){
-    $fault=Invoke-NativeBytes ([Environment]::ProcessPath) @('-NoLogo','-NoProfile','-NonInteractive','-File',$PSCommandPath,'-Python',$Python,'-FailurePoint','after-stores') -TimeoutSeconds 120
+    $fault=Invoke-NativeBytes ([Environment]::ProcessPath) @('-NoLogo','-NoProfile','-NonInteractive','-File',$PSCommandPath,'-Python',$Python,'-FailurePoint','after-stores','-Profile',$Profile) -TimeoutSeconds 120
     Assert-Pair ($fault.ExitCode -ne 0 -and $fault.Stdout.Contains('PAIR INJECTED FAILURE AFTER STORES') -and $fault.Stderr.Contains('Native Server pair recovery failed.')) 'injected-failure-exit'
     $records=@($fault.Stdout -split '\r?\n'|Where-Object {$_.StartsWith('{')}|ForEach-Object {$_|ConvertFrom-Json -AsHashtable}|Where-Object {$_.schema -ceq 'fleetory.native-pair-cleanup.v1'})
     Assert-Pair ($records.Count -eq 1 -and $records[0].cleanupVerified -eq $true -and $records[0].originalInputsRead -eq $false -and @($records[0].ids).Count -eq 4 -and @($records[0].aliases).Count -eq 2) 'fault-cleanup-record'

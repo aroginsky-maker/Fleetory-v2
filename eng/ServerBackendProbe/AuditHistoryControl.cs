@@ -3,6 +3,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Fleetory.Platform.Audit;
+using Fleetory.Platform.Contracts;
 using static ServerBackendProbe.FixtureAuditClient;
 
 namespace ServerBackendProbe;
@@ -55,7 +56,7 @@ internal static class AuditHistoryControl
     private static string ControlValue(Guid fixture) => JsonSerializer.Serialize(new
     { schema = "fleetory.generated-control.v1", fixture, scope = "generated-not-original-approval" });
 
-    private static async Task SeedAsync(FixtureAuditClient admin, JsonElement packet, Guid fixture, bool reversed, CancellationToken cancellation)
+    internal static async Task SeedAsync(FixtureAuditClient admin, JsonElement packet, Guid fixture, bool reversed, CancellationToken cancellation, AuditExportEvent[]? fromDatabase = null)
     {
         await admin.SendAsync(HttpMethod.Post, "api/db/create/v2", new { name = "fleetoryaudit" }, cancellation);
         await AuditFixtureControl.CreateUsersAsync(admin, packet, cancellation);
@@ -64,11 +65,11 @@ internal static class AuditHistoryControl
         { KVs = new[] { new { key = Encode(ControlKey(fixture)), value = Encode(ControlValue(fixture)) } } }, cancellation);
         using var sink = new ImmudbAuditExportSink(new Uri("https://127.0.0.1:8090/"), "fixture_writer",
             Secret(packet, "writer"), databaseName: "fleetoryaudit");
-        var events = FreshPairModel.Events(fixture);
+        var events = fromDatabase ?? FreshPairModel.Events(fixture);
         foreach (var item in reversed ? events.Reverse() : events) { await sink.PublishAsync(item, cancellation); }
     }
 
-    private static async Task<object> ReadbackAsync(JsonElement packet, Guid fixture, string mode, CancellationToken cancellation)
+    internal static async Task<object> ReadbackAsync(JsonElement packet, Guid fixture, string mode, CancellationToken cancellation)
     {
         using var reader = new FixtureAuditClient();
         await reader.LoginUserAsync("fixture_reader", Secret(packet, "reader"), cancellation);

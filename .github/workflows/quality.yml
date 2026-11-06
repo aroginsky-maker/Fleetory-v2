@@ -100,6 +100,10 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/audit_history_inputs_tests.py
 
+      - name: Verify generated v2 Server composition inputs on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/v2_server_composition_tests.py
+
       - name: Verify audit history typed refusal policy on Windows
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/AuditHistoryPolicy.Tests.ps1
@@ -372,6 +376,10 @@ jobs:
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/audit_history_inputs_tests.py
 
+      - name: Verify generated v2 Server composition inputs
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/v2_server_composition_tests.py
+
       - name: Verify audit history typed refusal policy
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/AuditHistoryPolicy.Tests.ps1
@@ -446,6 +454,10 @@ jobs:
           python3 -B ./tests/Fleetory.Tools.Tests/fresh_server_pair_tests.py
           if ($LASTEXITCODE -ne 0) { throw 'Fresh pair admission contract failed.' }
           ./tests/Fleetory.Tools.Tests/NativeServerPair.Tests.ps1 -Python (Get-Command python3).Source
+
+      - name: Verify generated v2 Server composition and before-start refusals
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativeServerPair.Tests.ps1 -Profile v2 -Python (Get-Command python3).Source
 
       - name: Verify Sonar issue gate
         shell: pwsh

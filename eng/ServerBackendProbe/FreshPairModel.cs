@@ -57,8 +57,6 @@ internal static class FreshPairModel
 
     internal static string SeedSql(Guid fixture)
     {
-        static string Literal(string? value) => value is null ? "NULL" : "'" + value.Replace("'", "''", StringComparison.Ordinal) + "'";
-        static string Time(DateTimeOffset value) => "'" + value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture) + "'";
         var sql = new StringBuilder("BEGIN;SET LOCAL standard_conforming_strings=on;SET LOCAL timezone='UTC';SET LOCAL ROLE fleetory_migrator;\n");
         for (var index = 0; index < 2; index++)
         {
@@ -67,6 +65,20 @@ internal static class FreshPairModel
             sql.Append("INSERT INTO platform.person_projections(person_id,display_name,updated_at) VALUES('").Append(Id(fixture, 20 + index))
                 .Append("','pair-person','1970-01-01Z');\n");
         }
+        AppendAuditEvents(sql, fixture);
+        return sql.Append("COMMIT;\n").ToString();
+    }
+    internal static string ReplaceAuditSql(Guid fixture)
+    {
+        var sql = new StringBuilder("BEGIN;SET LOCAL standard_conforming_strings=on;SET LOCAL timezone='UTC';SET LOCAL ROLE fleetory_migrator;DELETE FROM platform.audit_events;\n");
+        AppendAuditEvents(sql, fixture);
+        return sql.Append("COMMIT;\n").ToString();
+    }
+
+    private static void AppendAuditEvents(StringBuilder sql, Guid fixture)
+    {
+        static string Literal(string? value) => value is null ? "NULL" : "'" + value.Replace("'", "''", StringComparison.Ordinal) + "'";
+        static string Time(DateTimeOffset value) => "'" + value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture) + "'";
         foreach (var item in Events(fixture))
         {
             var r = item.Record;
@@ -76,6 +88,6 @@ internal static class FreshPairModel
                 .Append(Literal(r.CorrelationId.Value)).Append(',').Append(Time(r.OccurredAt)).Append(',').Append(Time(item.RecordedAt)).Append(',')
                 .Append(r.Context is null ? "NULL" : Literal(JsonSerializer.Serialize(r.Context)) + "::jsonb").Append(");\n");
         }
-        return sql.Append("COMMIT;\n").ToString();
     }
+
 }

@@ -40,12 +40,7 @@ internal static class FreshPairControl
             await admin.SendAsync(HttpMethod.Post, "api/db/set", new { KVs = new[] { new { key = Encode("extra-fixture-key"), value = Encode("drift") } } }, cancellation);
             return new { category = mode, derivedFixtureWrite = true };
         }
-        await using var connection = new NpgsqlConnection(new NpgsqlConnectionStringBuilder
-        {
-            Host = "127.0.0.1", Port = 5432, Database = "fleetory", Username = "fleetory_server",
-            Password = Secret(packet, "database"), SslMode = SslMode.VerifyFull, RootCertificate = "/run/fleetory-native/infrastructure-ca",
-            GssEncryptionMode = GssEncryptionMode.Disable, Pooling = false, Timeout = 5, CommandTimeout = 5
-        }.ConnectionString);
+        await using var connection = OpenRuntimeConnection(packet);
         var events = await ReadDatabaseAsync(connection, fixture, cancellation);
         if (mode == "pair-publish")
         {
@@ -62,7 +57,17 @@ internal static class FreshPairControl
         return await InspectAuditAsync(mode, packet, events, cancellation);
     }
 
-    private static async Task<AuditExportEvent[]> ReadDatabaseAsync(DbConnection connection, Guid fixture, CancellationToken cancellation)
+    internal static NpgsqlConnection OpenRuntimeConnection(JsonElement packet)
+    {
+        return new NpgsqlConnection(new NpgsqlConnectionStringBuilder
+        {
+            Host = "127.0.0.1", Port = 5432, Database = "fleetory", Username = "fleetory_server",
+            Password = Secret(packet, "database"), SslMode = SslMode.VerifyFull, RootCertificate = "/run/fleetory-native/infrastructure-ca",
+            GssEncryptionMode = GssEncryptionMode.Disable, Pooling = false, Timeout = 5, CommandTimeout = 5
+        }.ConnectionString);
+    }
+
+    internal static async Task<AuditExportEvent[]> ReadDatabaseAsync(DbConnection connection, Guid fixture, CancellationToken cancellation, bool v2 = false)
     {
         if (connection.State != ConnectionState.Open) { await connection.OpenAsync(cancellation); }
         await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.RepeatableRead, cancellation);
@@ -73,7 +78,9 @@ internal static class FreshPairControl
         await command.ExecuteNonQueryAsync(cancellation);
         command.CommandText = "SELECT current_user='fleetory_server' AND session_user=current_user AND current_database()='fleetory' AND ssl AND version IN ('TLSv1.2','TLSv1.3') FROM pg_stat_ssl WHERE pid=pg_backend_pid();";
         if (await command.ExecuteScalarAsync(cancellation) is not true) { throw new InvalidOperationException("Fresh pair runtime identity/TLS drift."); }
-        command.CommandText = "SELECT (SELECT count(*) FROM core.devices)=2 AND (SELECT count(*) FROM platform.person_projections)=2 AND (SELECT count(*) FROM platform.audit_events)=4 AND (SELECT count(*) FROM platform.audit_export_queue)=0;";
+        command.CommandText = v2
+            ? "SELECT (SELECT count(*) FROM core.devices)=0 AND (SELECT count(*) FROM platform.person_projections)=0 AND (SELECT count(*) FROM platform.authorization_roles)=1 AND (SELECT count(*) FROM platform.authorization_assignments)=1 AND (SELECT count(*) FROM platform.audit_events)=4 AND (SELECT count(*) FROM platform.audit_export_queue)=0;"
+            : "SELECT (SELECT count(*) FROM core.devices)=2 AND (SELECT count(*) FROM platform.person_projections)=2 AND (SELECT count(*) FROM platform.audit_events)=4 AND (SELECT count(*) FROM platform.audit_export_queue)=0;";
         if (await command.ExecuteScalarAsync(cancellation) is not true) { throw new InvalidOperationException("Fresh pair row count drift."); }
         command.CommandText = "SELECT event_id,actor_subject_id,actor_kind,action,target_type,target_id,correlation_id,occurred_at,recorded_at,context_json::text FROM platform.audit_events ORDER BY event_id;";
         var expected = FreshPairModel.Events(fixture).ToDictionary(item => item.EventId);

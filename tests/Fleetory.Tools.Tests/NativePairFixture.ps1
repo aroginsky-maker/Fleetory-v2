@@ -101,7 +101,7 @@ function New-PairAudit($State,$Side){
     $null=Invoke-Docker @('exec',$a.Id,'/bin/mkdir','-m','700','/tmp/empty-ca-dir','/run/fleetory-native/server')
     Assert-Pair ((Invoke-Docker @('exec',$a.Id,'sha256sum','/tool/ServerBackendProbe.dll')).Stdout.Split(' ')[0] -ceq $State.ProbeHash) 'probe-build-identity'
     foreach($entry in @(@('/tmp/ca.pem',$State.Tls.RootCertificatePem),@('/tmp/server.crt',$State.Tls.ServerCertificatePem),@('/tmp/server.key',$State.Tls.ServerPrivateKeyPem),
-        @('/tmp/client.crt',$State.Tls.ClientCertificatePem),@('/tmp/client.key',$State.Tls.ClientPrivateKeyPem),@('/tmp/state.key',$State.SigningPem),
+        @('/tmp/client.crt',$State.Tls.ClientCertificatePem),@('/tmp/client.key',$State.Tls.ClientPrivateKeyPem),@('/tmp/state.key',$(if($State.ContainsKey('SigningPems')){$State.SigningPems[$Side.Role]}else{$State.SigningPem})),
         @('/tmp/immudb.toml',('admin-password = "'+$Side.Secrets.admin+'"'+"`n")),@('/tmp/cli.toml',"# Fixed fresh-only CLI profile`n"),
         @('/run/fleetory-native/infrastructure-ca',$State.Tls.RootCertificatePem))){Write-PairFile $State $a 'audit' $entry[0] $entry[1]}
     Start-PairAudit $State $Side

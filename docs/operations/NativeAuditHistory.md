@@ -62,8 +62,8 @@ coverage are unchanged; the changed native probe is built, published and execute
 Coverage/scanner gates, exclusions, runners, timeouts, visibility and the $0
 Actions budget remain unchanged.
 
-This component prepares the next generated composition with PostgreSQL v2
-application/signer readback. It neither starts the Server application nor reads
+The separate [generated v2 composition](NativeV2ServerComposition.md) combines
+this history with application/signer readback. This audit-only component neither starts the Server application nor reads
 original backups, credentials, PKI/provider state or the source VPS. Consumed
 one-shot permissions remain consumed. Original services, coordinated capture,
 human login, PKI/revocation/physical Agent, release authenticity, independent
