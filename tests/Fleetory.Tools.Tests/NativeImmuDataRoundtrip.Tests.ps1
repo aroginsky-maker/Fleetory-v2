@@ -3,11 +3,11 @@ param([string]$Python='',[ValidateSet('none','after-stores')][string]$FailurePoi
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'ImmuDataRoundtripPolicy.Tests.ps1')
-foreach($helper in @('PilotNativeProcess.ps1','../../eng/pilot/ProviderRecoveryTransport.ps1','../../eng/pilot/ProviderRecoveryPolicy.ps1','PilotDisposableTls.ps1','NativeSignerFixture.ps1','NativeAuditFixture.ps1','NativeWorkerRuntime.ps1')){. (Join-Path $PSScriptRoot $helper)}
+foreach($helper in @('PilotNativeProcess.ps1','../../eng/pilot/ProviderRecoveryTransport.ps1','../../eng/pilot/ProviderRecoveryPolicy.ps1','PilotDisposableTls.ps1','NativeSignerFixture.ps1','NativeAuditFixture.ps1','NativeWorkerRuntime.ps1','NativeAuditDataFixture.ps1')){. (Join-Path $PSScriptRoot $helper)}
 $repo=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $fixture=[Guid]::NewGuid().ToString('D');$root=Join-Path $repo ('artifacts/native-immu-data-'+$fixture)
 $cliImage='codenotary/immuadmin:1.11.2@sha256:fd52f498485dcaf792677bf7d4b5b12c3bc77af80ab0718981aea9fd085ee8bd'
-$imageName=Get-ImmuDataImageName $fixture;$imageId=$null;$imageClaimed=$false;$stores=@();$stage='publish';$proof=$null;$cleaning=$false
+$imageName=Get-ImmuDataImageName $fixture;$stores=@();$stage='publish';$proof=$null;$cleaning=$false
 $previousBuildKit=$env:DOCKER_BUILDKIT;$env:DOCKER_BUILDKIT='0'
 $watch=[Diagnostics.Stopwatch]::StartNew();$canaries=[Collections.Generic.List[string]]::new();$lastExit=0;$lastOperation='none';$lastClass='none'
 $secrets=@{}
@@ -24,25 +24,9 @@ function Invoke-Docker([string[]]$Arguments,[byte[]]$InputBytes=$null,[int]$Time
     if(-not $AllowFailure){Assert-ImmuData ($r.ExitCode -eq 0) 'docker-operation'}
     return $r
 }
-function Ledger{[IO.File]::WriteAllText((Join-Path $root 'owned-stores.json'),(@{fixture=$fixture;image=$imageName;imageId=$imageId;stage=$stage;stores=$stores}|ConvertTo-Json -Depth 8),[Text.UTF8Encoding]::new($false))}
-function Owned($s,[switch]$Cleanup){
-    $items=@((Invoke-Docker @('inspect',$s.Id)).Stdout|ConvertFrom-Json -AsHashtable -Depth 32)
-    Assert-ImmuData ($items.Count -eq 1) 'store-inspect';$i=$items[0];$created=ConvertTo-ProviderTimestamp $i.Created
-    Assert-ImmuData ($s.Id -cmatch '^[a-f0-9]{64}\z' -and $i.Id -ceq $s.Id -and $i.Name -ceq ('/'+$s.Name) -and
-        $i.Config.Image -ceq $imageName -and $i.Image -ceq $imageId -and $i.Config.Labels['fleetory.immu-data.session'] -ceq $s.Session -and
-        $created -ge $s.Started -and $created -le [DateTimeOffset]::UtcNow.AddSeconds(5)) 'store-ownership'
-    if($Cleanup){return}
-    Assert-NativeStoreRuntime $i '3322:3322' 'audit'
-    Assert-ImmuData ($i.HostConfig.NetworkMode -ceq 'none' -and
-        (@($i.HostConfig.Tmpfs.Keys|Sort-Object)-join '|') -ceq (@($script:nativeAuditTmpfs.Keys|Sort-Object)-join '|')) 'store-network-tmpfs'
-    foreach($path in $script:nativeAuditTmpfs.Keys){Assert-ImmuData ($i.HostConfig.Tmpfs[$path] -ceq $script:nativeAuditTmpfs[$path]) 'store-tmpfs'}
-}
-function Slot($s,[string]$Path,[string]$Value){
-    Assert-ImmuData ($Path -cin @('/tmp/ca.pem','/tmp/server.crt','/tmp/server.key','/tmp/client.crt','/tmp/client.key','/tmp/state.key','/tmp/immudb.toml','/tmp/cli.toml')) 'slot'
-    Owned $s
-    $null=Invoke-Docker @('exec','-i',$s.Id,'/bin/sh','-c','umask 077; cat > "$1"','fixture',$Path) ([Text.Encoding]::UTF8.GetBytes($Value))
-    Assert-ImmuData ((Invoke-Docker @('exec',$s.Id,'stat','-c','%a:%u:%h',$Path)).Stdout.Trim() -ceq '600:3322:1') 'slot-permissions'
-}
+$auditContext=@{Fixture=$fixture;Root=$root;ImageName=$imageName;ImageId=$null;ImageClaimed=$false;ProbeHash=$null;Stores=[Collections.Generic.List[object]]::new();Tls=$null;SigningPems=@{};Secrets=$secrets}
+function Owned($s,[switch]$Cleanup){Read-AuditDataStore $auditContext $s -Cleanup:$Cleanup}
+function Invoke-AuditDataHealth($s){$null=Probe $s 'audit-health'}
 function Probe($s,[string]$Mode,[switch]$WrongPassword){
     Owned $s
     if($Mode -cne 'audit-health'){$script:stage=$s.Role+'-'+$Mode}
@@ -55,38 +39,10 @@ function Probe($s,[string]$Mode,[switch]$WrongPassword){
     Assert-ImmuData ($v.category -ceq $Mode) 'probe-category'
     return $v
 }
-function Start-Server($s){
-    Owned $s
-    $null=Invoke-Docker @('exec','-d','-e','SSL_CERT_FILE=/tmp/ca.pem','-e','SSL_CERT_DIR=/tmp/empty-ca-dir',$s.Id,'/usr/sbin/immudb','--config=/tmp/immudb.toml','--dir=/data','--address=127.0.0.1','--port=3322',
-        '--auth=true','--devmode=false','--web-server=true','--web-server-port=8090','--pgsql-server=false','--metrics-server=false',
-        '--certificate=/tmp/server.crt','--pkey=/tmp/server.key','--clientcas=/tmp/ca.pem','--signingKey=/tmp/state.key',
-        '--pidfile=/tmp/immudb.pid','--logdir=/tmp','--logfile=fixture.log','--max-active-databases=3')
-    $ready=$false
-    for($n=0;$n -lt 20;$n++){try{$null=Probe $s 'audit-health';$ready=$true;break}catch{Start-Sleep -Milliseconds 200}}
-    Assert-ImmuData $ready 'server-ready'
-}
+function Start-Server($s){Start-AuditDataServer $auditContext $s}
 function New-Store([string]$Role){
-    $session=[Guid]::NewGuid().ToString('D');$name='fleetory-immu-store-'+$session.Replace('-','')
-    $absent=Invoke-Docker @('inspect',$name) -AllowFailure
-    Assert-ImmuData ($absent.ExitCode -ne 0 -and ($absent.Stderr+$absent.Stdout) -match '(?i)no such (object|container)') 'fresh-name'
-    $s=@{Id=$null;Session=$session;Name=$name;Started=[DateTimeOffset]::UtcNow;Role=$Role};$script:stores+=,$s;Ledger
-    $storeArguments=@('run','-d','--rm','--name',$name,'--label',('fleetory.immu-data.session='+$session),'--network','none','--read-only','--user','3322:3322',
-        '--cap-drop','ALL','--security-opt','no-new-privileges','--memory','384m','--cpus','1','--pids-limit','128','--ulimit','core=0',
-        '--tmpfs',('/data:'+$script:nativeAuditTmpfs['/data']),'--tmpfs',('/tmp:'+$script:nativeAuditTmpfs['/tmp']),
-        '--entrypoint','/bin/sh',$imageName,'-c','exec /bin/sleep 3300')
-    $s.Id=(Invoke-Docker $storeArguments).Stdout.Trim();Ledger;Owned $s
-    $null=Invoke-Docker @('exec',$s.Id,'/bin/mkdir','-m','700','/tmp/empty-ca-dir')
-    foreach($entry in @(@('/tmp/ca.pem',$tls.RootCertificatePem),@('/tmp/server.crt',$tls.ServerCertificatePem),@('/tmp/server.key',$tls.ServerPrivateKeyPem),
-        @('/tmp/client.crt',$tls.ClientCertificatePem),@('/tmp/client.key',$tls.ClientPrivateKeyPem),@('/tmp/state.key',$script:signingPem))){Slot $s $entry[0] $entry[1]}
-    Slot $s '/tmp/immudb.toml' ('admin-password = "'+$secrets[$Role+'-admin']+'"'+"`n")
-    Slot $s '/tmp/cli.toml' "# Fixed generated fixture profile. No ambient config.`n"
-    Start-Server $s
-    $script:stage=$Role+'-cli-login'
-    # Upstream's nonterminal password reader consumes stdin verbatim, including LF.
-    $login=Invoke-Docker (Get-ImmuDataCliArguments $s.Id 'login') ([Text.Encoding]::UTF8.GetBytes($secrets[$Role+'-admin'])) -AllowFailure
-    Assert-ImmuData ($login.ExitCode -eq 0) 'cli-login-exit'
-    Assert-ImmuData ($login.Stdout -match 'logged in') 'cli-login'
-    return $s
+    $auditContext.Tls=$tls;$auditContext.SigningPems[$Role]=$script:signingPem
+    $s=New-AuditDataStore $auditContext $Role;$script:stores=@($auditContext.Stores.ToArray());return $s
 }
 function Point($s,[string]$Mode='immu-inspect'){
     $snapshot=Probe $s $Mode
@@ -102,21 +58,8 @@ try{
     $script:published=Publish-NativeProbe $repo 'ServerBackendProbe' $root
     . (Join-Path $repo 'eng/verify-immudb-state.ps1') -Address 'https://127.0.0.1:8090' -PublicKeyPath (Join-Path $root 'state-public.pem') -AnchorPath (Join-Path $root 'unused-anchor')
     $stage='build'
-    foreach($image in @($cliImage,$script:nativeAuditSourceImage,$script:nativeSignerImage)){
-        $r=Invoke-Docker @('image','inspect',$image) -AllowFailure
-        if($r.ExitCode -ne 0){$null=Invoke-Docker @('pull',$image) -TimeoutSeconds 120}
-    }
-    $r=Invoke-Docker @('image','inspect',$imageName) -AllowFailure
-    Assert-ImmuData ($r.ExitCode -ne 0 -and ($r.Stderr+$r.Stdout) -match '(?i)no such (object|image)') 'fresh-image'
-    $imageClaimed=$true
-    $dockerfile="FROM $($script:nativeAuditSourceImage) AS upstream`nFROM $cliImage AS cli`nFROM $($script:nativeSignerImage)`nCOPY --from=upstream /usr/sbin/immudb /usr/sbin/immudb`nCOPY --from=cli /usr/local/bin/immuadmin /usr/local/bin/immuadmin`nCOPY publish/ /tool/`nLABEL fleetory.immu-data.build=$fixture`nUSER 3322:3322`n"
-    [IO.File]::WriteAllText((Join-Path $root 'Dockerfile'),$dockerfile,[Text.UTF8Encoding]::new($false))
-    $archive=Invoke-NativeBytes 'tar' @('-cf','-','-C',$root,'Dockerfile','publish') -TimeoutSeconds 60
-    Assert-ImmuData ($archive.ExitCode -eq 0 -and $archive.StdoutBytes.Length -gt 0 -and $archive.StdoutBytes.Length -le 16777216) 'public-code-archive'
-    $null=Invoke-Docker @('build','--network','none','--pull=false','--tag',$imageName,'-') $archive.StdoutBytes -TimeoutSeconds 120
-    $archive=$null
-    $built=@((Invoke-Docker @('image','inspect',$imageName)).Stdout|ConvertFrom-Json -AsHashtable)
-    Assert-ImmuData ($built.Count -eq 1 -and $built[0].Config.Labels['fleetory.immu-data.build'] -ceq $fixture) 'build-identity';$imageId=$built[0].Id
+    $auditContext.ProbeHash=(Get-FileHash -LiteralPath (Join-Path $published 'ServerBackendProbe.dll')).Hash.ToLowerInvariant()
+    Build-AuditDataImage $auditContext $cliImage
     $tls=New-PilotDisposableTlsMaterial -IncludeClient
     $key=[Security.Cryptography.ECDsa]::Create([Security.Cryptography.ECCurve]::CreateFromFriendlyName('nistP256'))
     try{$script:signingPem=$key.ExportECPrivateKeyPem();[IO.File]::WriteAllText((Join-Path $root 'state-public.pem'),$key.ExportSubjectPublicKeyInfoPem(),[Text.UTF8Encoding]::new($false))}finally{$key.Dispose()}
@@ -186,18 +129,10 @@ try{
     throw 'Native audit data roundtrip failed.'
 }finally{
     $cleaning=$true;$failures=@()
-    foreach($s in $stores){try{
-        $lookup=if($s.Id){$s.Id}else{$s.Name};$r=Invoke-Docker @('inspect',$lookup) -AllowFailure
-        if($r.ExitCode -eq 0){if(-not $s.Id){$s.Id=@($r.Stdout|ConvertFrom-Json -AsHashtable)[0].Id};Owned $s -Cleanup;$null=Invoke-Docker @('rm','-f','-v',$s.Id);$r=Invoke-Docker @('inspect',$s.Id) -AllowFailure}
-        Assert-ImmuData ($r.ExitCode -ne 0 -and ($r.Stderr+$r.Stdout) -match '(?i)no such (object|container)') 'cleanup-absence'
-    }catch{$failures+='store'}}
-    if(-not $failures.Count -and $imageClaimed){try{
-        $r=Invoke-Docker @('image','inspect',$imageName) -AllowFailure
-        if($r.ExitCode -eq 0){$i=@($r.Stdout|ConvertFrom-Json -AsHashtable);Assert-ImmuData ($i.Count -eq 1 -and $i[0].Config.Labels['fleetory.immu-data.build'] -ceq $fixture -and ($null -eq $imageId -or $i[0].Id -ceq $imageId)) 'cleanup-image-owner';$null=Invoke-Docker @('image','rm',$imageName);$r=Invoke-Docker @('image','inspect',$imageName) -AllowFailure}
-        Assert-ImmuData ($r.ExitCode -ne 0 -and ($r.Stderr+$r.Stdout) -match '(?i)no such (object|image)') 'cleanup-image-absence'
-    }catch{$failures+='image'}}
+    foreach($s in $auditContext.Stores){try{Remove-AuditDataStore $auditContext $s}catch{$failures+='store'}}
+    if(-not $failures.Count){try{Remove-AuditDataImage $auditContext}catch{$failures+='image'}}
     if(-not $failures.Count){try{Remove-NativePublicPayload $repo $root}catch{$failures+='payload'}}
-    $env:DOCKER_BUILDKIT=$previousBuildKit;$secrets.Clear();$canaries.Clear();$tls=$script:signingPem=$dump=$captured=$capture=$c=$null;$watch.Stop()
+    $env:DOCKER_BUILDKIT=$previousBuildKit;$auditContext.SigningPems.Clear();$auditContext.Tls=$null;$secrets.Clear();$canaries.Clear();$tls=$script:signingPem=$dump=$captured=$capture=$c=$null;$watch.Stop()
     if($failures.Count){throw 'Native audit owned cleanup unverified; identity ledger retained.'}
     @{schema='fleetory.native-immu-cleanup.v1';fixture=$fixture;ids=@($stores|ForEach-Object {$_.Id});image=$imageName;cleanupVerified=$true;originalInputsRead=$false}|ConvertTo-Json -Compress
 }

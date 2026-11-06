@@ -69,10 +69,11 @@ Coverage/scanner gates, exclusions, runners, timeouts, visibility and the $0 Act
 budget remain unchanged.
 
 This closes generated PostgreSQL v2 encoder/readback compatibility, not original
-database or service recovery. The next separate component is audit history with
-four known events/five transactions: measure full keyset and per-event transaction,
-revision and value bindings without inferring them from counts. Keep retained
-public signed-state trust distinct from disposable target signing identity. No
+database or service recovery. The separate [generated audit history](NativeAuditHistory.md)
+component measures four known events/five transactions, the full keyset and
+per-key transaction, revision and value bindings without inferring them from
+counts. Its source and target use distinct disposable signing identities. Keep
+retained public signed-state trust separate from these generated identities. No
 original private-key reuse or consumed provider/root grant follows from this test.
 Independent custody/WORM/approvals, original service/configuration/provider/PKI,
 revocation, physical Agent, human identity, coordinated original capture,

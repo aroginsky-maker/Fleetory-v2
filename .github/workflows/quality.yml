@@ -96,6 +96,14 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/pg_inventory_v2_tests.py
 
+      - name: Verify generated audit history capture on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/audit_history_inputs_tests.py
+
+      - name: Verify audit history typed refusal policy on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/AuditHistoryPolicy.Tests.ps1
+
       - name: Verify recovery native exit gate on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/recovery_test_gate_tests.py
@@ -360,6 +368,14 @@ jobs:
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/pg_inventory_v2_tests.py
 
+      - name: Verify generated audit history capture
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/audit_history_inputs_tests.py
+
+      - name: Verify audit history typed refusal policy
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/AuditHistoryPolicy.Tests.ps1
+
       - name: Verify recovery native exit gate
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/recovery_test_gate_tests.py
@@ -419,6 +435,10 @@ jobs:
       - name: Verify nonempty native immudb data roundtrip
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/NativeImmuDataRoundtrip.Tests.ps1 -Python (Get-Command python3).Source
+
+      - name: Verify generated five-transaction audit history and distinct signing keys
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativeAuditHistory.Tests.ps1 -Python (Get-Command python3).Source
 
       - name: Verify coherent native Server pair restore and lifecycle
         shell: pwsh

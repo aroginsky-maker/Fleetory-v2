@@ -17,6 +17,7 @@ internal static class Program
     internal const string PrivateDirectory = "/run/fleetory-native/server";
     private static readonly HashSet<string> Modes = new(StringComparer.Ordinal)
     {
+        "history-seed", "history-seed-reversed", "history-users", "history-read", "history-reader", "history-extra", "history-rewrite", "history-wrong-password",
         "pair-seed-sql", "pair-publish", "pair-read", "pair-users", "pair-audit-drift", "pair-closed", "pair-host",
         "immu-seed", "immu-inspect", "immu-reader-create", "immu-reader", "immu-wrong-password",
         "schema", "restore-schema", "db-ready", "db-write", "db-rollback", "db-atomic", "db-password", "db-tls", "db-plaintext",
@@ -54,6 +55,8 @@ internal static class Program
     private static async Task<object> RunAsync(string mode)
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(18));
+        if (mode.StartsWith("history-", StringComparison.Ordinal))
+        { return await AuditHistoryControl.ExecuteAsync(mode, deadline.Token); }
         if (mode.StartsWith("pair-", StringComparison.Ordinal) && mode != "pair-host")
         { return await FreshPairControl.ExecuteAsync(mode, deadline.Token); }
         if (mode.StartsWith("immu-", StringComparison.Ordinal))
