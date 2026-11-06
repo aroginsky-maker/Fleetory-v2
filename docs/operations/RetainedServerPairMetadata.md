@@ -63,6 +63,10 @@ label is not independent release authentication.
 | Source VPS or new secret/PKI category | Not authorized by this metadata review | Concrete scoped plan before any dependent operation |
 | Human identity, physical Agent, WORM/custody and approvals | Open independent controls | Actual evidence, not synthetic acceptance flags |
 
+The [retained native input selector](RetainedNativeInputSelection.md) now narrows
+the six-file manifest to the three data archives for the next native observation.
+It binds metadata only and grants no execution or renewed sensitive permission.
+
 Next implement a separately versioned original-profile native readback on generated
 data that models these differences. Preserve the two independent algorithms and
 the additional role checks; compare exact actual event values, per-event

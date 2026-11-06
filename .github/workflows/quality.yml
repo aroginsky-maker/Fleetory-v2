@@ -92,6 +92,10 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/retained_pair_review_tests.py
 
+      - name: Verify retained native input selection on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/retained_input_selection_tests.py
+
       - name: Verify PostgreSQL v2 transcript contract on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/pg_inventory_v2_tests.py
@@ -367,6 +371,10 @@ jobs:
       - name: Verify retained Server pair metadata
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/retained_pair_review_tests.py
+
+      - name: Verify retained native input selection
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/retained_input_selection_tests.py
 
       - name: Verify PostgreSQL v2 transcript contract
         shell: pwsh
