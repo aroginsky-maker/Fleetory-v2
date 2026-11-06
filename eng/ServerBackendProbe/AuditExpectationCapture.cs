@@ -63,8 +63,8 @@ internal sealed class AuditExpectationCapture(ExpectedAuditSource source) : Http
         var bytes = Convert.FromBase64String(value);
         if (bytes.Length > AuditObservation.MaximumValueBytes) { throw new AuditExpectationValueBoundException(); }
         using var wire = JsonDocument.Parse(bytes);
-        FreshPairModel.RequireFields(wire.RootElement, AuditExpectationSnapshot.WireFields(source.Row));
-        var context = AuditExpectationSnapshot.Context(source.Row.GetProperty("context_json"));
+        FreshPairModel.RequireFields(wire.RootElement, AuditExpectationSnapshot.WireFields(source.Row, source.Profile));
+        var context = AuditExpectationSnapshot.Context(source.Row.GetProperty("context_json"), source.Profile);
         if (context is not null && !wire.RootElement.GetProperty("context").EnumerateObject().Select(field => field.Name)
                 .SequenceEqual(context.Keys.Order(StringComparer.Ordinal)))
         { throw new AuditExpectationCaptureException(); }

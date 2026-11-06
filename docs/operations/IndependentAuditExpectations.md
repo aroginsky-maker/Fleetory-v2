@@ -1,5 +1,9 @@
 # Independent audit value expectations
 
+The separately named [historical read-only profile](HistoricalAuditExpectations.md)
+preserves one literal null context member for comparison without changing this
+strict command or establishing current writer admissibility.
+
 Before a retained audit is observed, expected event values must come from an
 independent source. Hashing the same immudb `Get` response being checked would
 only establish self-consistency. The new producer accepts a pinned PostgreSQL

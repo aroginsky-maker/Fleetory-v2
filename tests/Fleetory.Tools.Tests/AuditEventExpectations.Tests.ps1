@@ -31,6 +31,15 @@ try{
     $diagnosticProof=$diagnostic.Stdout|ConvertFrom-Json -AsHashtable
     if($diagnosticProof.schema -cne 'fleetory.generated-expectation-diagnostic.v2' -or $diagnosticProof.verified -ne $true -or $diagnosticProof.nativeCases -ne 8 -or $diagnosticProof.cleanupVerified -ne $true -or $diagnosticProof.originalExpectationsAccepted -ne $false -or $diagnosticProof.independentTypeAndBoundRulesVerified -ne $true -or $diagnosticProof.contextValueKindCountersVerified -ne $true){throw 'Generated expectation diagnostic proof refused.'}
     Write-Output $diagnostic.Stdout.Trim()
+    $historical=Invoke-NativeBytes $Python @('-B',(Join-Path $PSScriptRoot 'audit_historical_expectations_tests.py'),'--probe',$dll) -TimeoutSeconds 120
+    if(($historical.Stdout+$historical.Stderr).Contains('PRIVATE_INPUT_CANARY',[StringComparison]::Ordinal)){throw 'Historical canary reached parent output.'}
+    if($historical.ExitCode -ne 0 -or $historical.Stderr -notmatch 'Ran 15 tests' -or $historical.Stderr -notmatch '(?m)^OK\s*$'){throw 'Generated historical expectations failed; no payload logged.'}
+    Write-Output $historical.Stderr.Trim()
+    @{schema='fleetory.generated-historical-expectations.v1';verified=$true;nativeMethods=15;nullContextMembers=1;
+        productionSinkSerializationUsed=$true;productionPumpDeserializationUsed=$true;exactAsciiGoldenValuesVerified=$true;
+        strictDefaultNullRefusalVerified=$true;historicalComparisonOnly=$true;writerAdmissionVerified=$false;
+        realBackendContacted=$false;originalInputsRead=$false;executionAuthorized=$false;originalExpectationsAccepted=$false;
+        fullSystemRecoveryVerified=$false;phase7Complete=$false}|ConvertTo-Json -Compress
     $proof=@{schema='fleetory.generated-event-expectations.v1';verified=$true;portableNativeMethods=19;eventFields=10;knownEvents=4;
         productionSinkSerializationUsed=$true;inMemoryRequestsPerSnapshot=16;exactAsciiGoldenValuesVerified=$true;
         sourceFieldMappingVerified=$true;unicodeOrdinalContextAndUtcVerified=$true;observerFrameCompatible=$true;

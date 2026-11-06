@@ -6,7 +6,9 @@ using Fleetory.SharedKernel;
 
 namespace ServerBackendProbe;
 
-internal sealed record ExpectedAuditSource(AuditExportEvent Event, JsonElement Row);
+internal enum AuditExpectationProfile { StrictWriter, HistoricalReadOnly }
+
+internal sealed record ExpectedAuditSource(AuditExportEvent Event, JsonElement Row, AuditExpectationProfile Profile);
 
 // Fixed four-event PostgreSQL export profile, not a generic archive or inventory parser.
 internal static class AuditExpectationSnapshot
@@ -28,7 +30,7 @@ internal static class AuditExpectationSnapshot
         Require(names.SetEquals(fields));
     }
 
-    internal static ExpectedAuditSource[] Parse(byte[] bytes)
+    internal static ExpectedAuditSource[] Parse(byte[] bytes, AuditExpectationProfile profile = AuditExpectationProfile.StrictWriter)
     {
         try
         {
@@ -39,7 +41,8 @@ internal static class AuditExpectationSnapshot
             Require(Integer(root.GetProperty("pendingExportCount"), 0, 0) == 0);
             var rows = root.GetProperty("events").EnumerateArray().ToArray();
             Require(rows.Length == 4);
-            var result = rows.Select(ParseRow).ToArray();
+            Require(Enum.IsDefined(profile));
+            var result = rows.Select(row => ParseRow(row, profile)).ToArray();
             var ids = result.Select(item => item.Event.EventId.ToString("D")).ToArray();
             Require(ids.Distinct(StringComparer.Ordinal).Count() == 4 && ids.SequenceEqual(ids.Order(StringComparer.Ordinal)));
             return result;
@@ -48,7 +51,7 @@ internal static class AuditExpectationSnapshot
         { throw new AuditExpectationInputException(); }
     }
 
-    private static ExpectedAuditSource ParseRow(JsonElement row)
+    private static ExpectedAuditSource ParseRow(JsonElement row, AuditExpectationProfile profile)
     {
         Object(row, Fields);
         var id = Identity(row.GetProperty("event_id").GetString());
@@ -58,8 +61,8 @@ internal static class AuditExpectationSnapshot
         var record = new AuditRecord(new ActorReference(Text(row.GetProperty("actor_subject_id"), 128),
             (ActorKind)Integer(row.GetProperty("actor_kind"), 0, 3)), Text(row.GetProperty("action"), 128),
             type is null ? null : new AuditTarget(type, target!), new CorrelationId(Text(row.GetProperty("correlation_id"), 128)),
-            Time(row.GetProperty("occurred_at")), Context(row.GetProperty("context_json")));
-        return new ExpectedAuditSource(new AuditExportEvent(id, record, Time(row.GetProperty("recorded_at"))), row.Clone());
+            Time(row.GetProperty("occurred_at")), Context(row.GetProperty("context_json"), profile));
+        return new ExpectedAuditSource(new AuditExportEvent(id, record, Time(row.GetProperty("recorded_at"))), row.Clone(), profile);
     }
 
     internal static Guid Identity(string? value)
@@ -89,33 +92,45 @@ internal static class AuditExpectationSnapshot
     private static string? NullableText(JsonElement value, int maximum) =>
         value.ValueKind == JsonValueKind.Null ? null : Text(value, maximum);
 
-    internal static Dictionary<string, string>? Context(JsonElement value)
+    internal static Dictionary<string, string>? Context(JsonElement value, AuditExpectationProfile profile = AuditExpectationProfile.StrictWriter)
     {
         if (value.ValueKind == JsonValueKind.Null) { return null; }
         var text = value.GetString()!;
         Require(Encoding.UTF8.GetByteCount(text) <= 16384);
         using var document = JsonDocument.Parse(text, new JsonDocumentOptions { MaxDepth = 2 });
         Require(document.RootElement.ValueKind == JsonValueKind.Object);
-        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        var names = new HashSet<string>(StringComparer.Ordinal);
         foreach (var field in document.RootElement.EnumerateObject())
         {
             Require(!string.IsNullOrWhiteSpace(field.Name) && field.Name.Length <= 64 && !field.Name.Contains('\0'));
             var content = field.Value.GetString();
-            Require(content is not null && content.Length <= 1024 && !content.Contains('\0') && result.TryAdd(field.Name, content));
+            Require(content is null
+                ? profile == AuditExpectationProfile.HistoricalReadOnly && field.Value.ValueKind == JsonValueKind.Null
+                : content.Length <= 1024 && !content.Contains('\0'));
+            Require(names.Add(field.Name));
         }
-        Require(result.Count <= 16);
-        return result;
+        Require(names.Count <= 16);
+        // Same deserialization as PostgreSqlAuditExportPump: preserve literal null members for read-only comparison.
+        return JsonSerializer.Deserialize<Dictionary<string, string>>(text) ?? throw new AuditExpectationInputException();
     }
 
     // Independent semantic witness from the source row, not the reconstructed Event model or an audit Get.
-    internal static JsonElement WireFields(JsonElement row) => JsonSerializer.SerializeToElement(new Dictionary<string, object?>
+    internal static JsonElement WireFields(JsonElement row, AuditExpectationProfile profile) => JsonSerializer.SerializeToElement(new Dictionary<string, object?>
     {
         ["eventId"] = Identity(row.GetProperty("event_id").GetString()).ToString("N"),
         ["actorSubjectId"] = row.GetProperty("actor_subject_id"), ["actorKind"] = row.GetProperty("actor_kind"),
         ["Action"] = row.GetProperty("action"), ["targetType"] = row.GetProperty("target_type"), ["targetId"] = row.GetProperty("target_id"),
         ["correlationId"] = row.GetProperty("correlation_id"), ["occurredAt"] = Time(row.GetProperty("occurred_at")),
-        ["recordedAt"] = Time(row.GetProperty("recorded_at")), ["context"] = Context(row.GetProperty("context_json"))
+        ["recordedAt"] = Time(row.GetProperty("recorded_at")), ["context"] = Context(row.GetProperty("context_json"), profile)
     });
+
+    internal static int NullContextMembers(ExpectedAuditSource source)
+    {
+        var value = source.Row.GetProperty("context_json");
+        if (value.ValueKind == JsonValueKind.Null) { return 0; }
+        using var document = JsonDocument.Parse(value.GetString()!);
+        return document.RootElement.EnumerateObject().Count(field => field.Value.ValueKind == JsonValueKind.Null);
+    }
 }
 
 internal sealed class AuditExpectationInputException : Exception;
