@@ -87,6 +87,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python -B ./tests/Fleetory.Tools.Tests/server_data_inputs_tests.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -B ./tests/Fleetory.Tools.Tests/retained_pair_review_tests.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Verify recovery native exit gate on Windows
         shell: pwsh
@@ -342,6 +344,8 @@ jobs:
           python3 -B ./tests/Fleetory.Tools.Tests/recovery_composition_tests.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           python3 -B ./tests/Fleetory.Tools.Tests/server_data_inputs_tests.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python3 -B ./tests/Fleetory.Tools.Tests/retained_pair_review_tests.py
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Verify recovery native exit gate

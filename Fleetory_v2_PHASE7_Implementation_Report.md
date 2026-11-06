@@ -4,6 +4,13 @@
 
 ## Implemented
 
+- A separate retained-pair metadata reviewer now reconciles four pinned reports
+  without opening their referenced backups or key paths. It preserves the actual
+  18-table/24-row and four-event/five-transaction profile, rejects mixed inventories,
+  points, events and invented authority, and documents the incompatible v1/v2 role,
+  ACL and hash scopes. Original native readback and service recovery remain open.
+  See [RetainedServerPairMetadata](docs/operations/RetainedServerPairMetadata.md).
+
 - A distinct fresh Server pair controller now uses one generated four-event model
   across real PostgreSQL and the production immudb sink, captures both native
   backups under measured metadata, restores into isolated targets and verifies
