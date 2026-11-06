@@ -91,7 +91,8 @@ def event_metadata(events):
 
 def review(manifest_bytes, expected_pin, reports):
     """Consume only four caller-supplied pinned metadata packets; never open paths."""
-    require(type(manifest_bytes) is bytes and packet.digest(manifest_bytes) == packet.hex_value(expected_pin))
+    require(type(manifest_bytes) is bytes and 0 < len(manifest_bytes) <= packet.MAX_MANIFEST)
+    require(packet.digest(manifest_bytes) == packet.hex_value(expected_pin))
     manifest = packet.strict_json(manifest_bytes, packet.MAX_MANIFEST)
     packet.keys(manifest, 'schema scope sourceApplicationCommit sourceConfigurationCommit postgresImage reports')
     composition.expect(manifest, {'schema': SCHEMA, 'scope': 'metadata-only-no-execution-grant'})

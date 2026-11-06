@@ -28,7 +28,7 @@ The retained pilot profile is deliberately separate from
 | Default rights | All default-ACL rows | Application schemas and global defaults |
 | Public schema | Tables/sequences allowed and inventoried; executable objects refused | Public relations refused; application functions fingerprinted |
 | Sequences | Definition, owner/ACL and current state included | Refused by profile |
-| Hash encoding | Length-prefixed PostgreSQL JSON text, binary sorted row hashes; separate security digest | Canonical catalog/table summary; per-table row-hash aggregate |
+| Hash encoding | Length-prefixed PostgreSQL JSON text, binary sorted row hashes; separate security digest | Exact NDJSON packet bytes, including catalog and per-table row-hash aggregates |
 
 These algorithms cannot be converted by renaming a field or normalizing their
 hashes. Native v1 does not prove the original v2 fingerprint. V2's historical

@@ -207,7 +207,7 @@ class RetainedPairReviewTests(unittest.TestCase):
         self.assertIs(self.review()['verifiedMetadataOnly'], True)
 
     def test_stale_pin_length_mutation_missing_extra_and_oversize_inputs(self):
-        for change in ('pin', 'bytes', 'missing', 'extra', 'oversize', 'manifest'):
+        for change in ('pin', 'bytes', 'missing', 'extra', 'oversize', 'manifest', 'manifest-bound'):
             self.setUp()
             if change == 'pin':
                 self.expected = '0' * 64
@@ -219,6 +219,9 @@ class RetainedPairReviewTests(unittest.TestCase):
                 self.packets['key'] = b'forbidden'
             elif change == 'oversize':
                 self.packets['audit'] = b' ' * (policy.MAX_REPORT + 1)
+            elif change == 'manifest-bound':
+                self.manifest_bytes = b' ' * (policy.packet.MAX_MANIFEST + 1)
+                self.expected = policy.packet.digest(self.manifest_bytes)
             else:
                 self.manifest['scope'] = 'execute-original-restore'
                 self.pin()
