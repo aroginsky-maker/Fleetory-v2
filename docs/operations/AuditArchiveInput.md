@@ -55,10 +55,13 @@ The new contracts and exact-revision static analysis still run. Quality gates,
 exclusions, runners, timeouts, repository visibility and the Actions budget are
 unchanged.
 
-Before original native execution, bind known event IDs and value expectations
-independently from already permitted application/audit data and exact production
-serialization; do not use the same audit `Get` results as their own expected
-digests. Establish the specific missing-evidence purpose and applicable existing
+The [independent event-expectation producer](IndependentAuditExpectations.md)
+now exercises exact production serialization from generated pinned PostgreSQL
+snapshots through a closed in-memory handler. It has not consumed original data
+or authenticated source lineage. Before original native execution, bind known
+event IDs and value expectations independently from already permitted
+application/audit data; do not use the same audit `Get` results as their own
+expected digests. Establish the specific missing-evidence purpose and applicable existing
 data consent. A measured owned isolated target may then consume frozen bytes
 within that authority; the [bounded observer](BoundedAuditObservation.md) must
 retain additional state as unreviewed. This adapter has no process, socket,

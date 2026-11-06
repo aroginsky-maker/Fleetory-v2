@@ -40,6 +40,11 @@ the producer measurement or verify signatures. The resource owner must measure
 the probe and verify both signed states against that instance's own pin. The
 decoder has no file, process, socket, restore or host-start API.
 
+The [independent expectation producer](IndependentAuditExpectations.md) can
+prepare the four known event digests using the exact production serialization
+from a pinned PostgreSQL snapshot. Its generated contracts do not authenticate
+an original source or authorize an original observation.
+
 Additional state is always reported as unreviewed. Neither complete current KV
 enumeration within this bound nor summaries of all native transactions prove a
 complete logical SQL/sorted-set/document inventory, independent Merkle inclusion

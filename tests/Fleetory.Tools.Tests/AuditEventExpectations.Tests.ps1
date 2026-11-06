@@ -1,0 +1,35 @@
+#requires -Version 7.3
+param([string]$Python='')
+$ErrorActionPreference='Stop'
+Set-StrictMode -Version Latest
+foreach($helper in @('PilotNativeProcess.ps1','../../eng/pilot/ProviderRecoveryPolicy.ps1','NativeSignerFixture.ps1','NativeWorkerRuntime.ps1')){. (Join-Path $PSScriptRoot $helper)}
+$repo=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
+if(-not $Python){$Python=(Get-Command $(if($IsLinux){'python3'}else{'python'})).Source}
+$fixture=[Guid]::NewGuid().ToString('D')
+$root=Join-Path $repo ('artifacts/audit-event-expectations-'+$fixture)
+$proof=$null
+try{
+    $null=New-Item -ItemType Directory -Path $root
+    $published=Publish-NativeProbe $repo 'ServerBackendProbe' $root
+    $dll=Join-Path $published 'ServerBackendProbe.dll'
+    $probeHash=(Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash.ToLowerInvariant()
+    $result=Invoke-NativeBytes $Python @('-B',(Join-Path $PSScriptRoot 'audit_event_expectations_tests.py'),'--probe',$dll) -TimeoutSeconds 120
+    if(($result.Stdout+$result.Stderr).Contains('PRIVATE_INPUT_CANARY',[StringComparison]::Ordinal)){throw 'Expectation canary reached parent output.'}
+    if($result.ExitCode -ne 0 -or $result.Stderr -notmatch 'Ran 19 tests' -or $result.Stderr -notmatch '(?m)^OK\s*$'){
+        throw 'Generated expectation contracts failed; no snapshot or diagnostic payload logged.'
+    }
+    Write-Output $result.Stderr.Trim()
+    $proof=@{schema='fleetory.generated-event-expectations.v1';verified=$true;portableNativeMethods=19;eventFields=10;knownEvents=4;
+        productionSinkSerializationUsed=$true;inMemoryRequestsPerSnapshot=16;exactAsciiGoldenValuesVerified=$true;
+        sourceFieldMappingVerified=$true;unicodeOrdinalContextAndUtcVerified=$true;observerFrameCompatible=$true;
+        valueLimitBytes=8192;probeSha256=$probeHash;sourceOriginAuthenticated=$false;sourceIndependenceAuthenticated=$false;
+        realBackendContacted=$false;originalInputsRead=$false;sourceVpsAccessed=$false;originalPkiOrProviderUsed=$false;
+        serverApplicationStarted=$false;issuerActivated=$false;signaturesVerified=$false;executionAuthorized=$false;
+        fullSystemRecoveryVerified=$false;phase7Complete=$false}
+}finally{
+    Remove-NativePublicPayload $repo $root
+}
+if(Test-Path -LiteralPath $root){throw 'Expectation public payload cleanup unverified.'}
+$proof.cleanupVerified=$true
+$proof|ConvertTo-Json -Compress -Depth 6
+$global:LASTEXITCODE=0

@@ -33,14 +33,15 @@ internal static class Program
 
     public static async Task<int> Main(string[] args)
     {
-        if (args.Length != 1 || !Modes.Contains(args[0])) { return 64; }
+        var expectations = args.Length > 0 && args[0] == "audit-expectations";
+        if (expectations ? args.Length != 3 : args.Length != 1 || !Modes.Contains(args[0])) { return 64; }
         var originalOut = Console.Out;
         var originalError = Console.Error;
         object result;
         var exit = 0;
         Console.SetOut(TextWriter.Null);
         Console.SetError(TextWriter.Null);
-        try { result = await RunAsync(args[0]); }
+        try { result = expectations ? await AuditEventExpectations.ExecuteAsync(args[1], args[2]) : await RunAsync(args[0]); }
         catch (Exception exception)
         {
             result = new { category = "unexpected", errorType = exception.GetType().Name,

@@ -8,6 +8,7 @@ namespace ServerBackendProbe;
 // Read-only fixed-origin observer. Expected metadata never authorizes a restore or host start.
 internal static class AuditObservation
 {
+    internal const int MaximumValueBytes = 8192;
     internal static string Hash(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
     internal static string JsonHash(JsonElement value) => Hash(JsonSerializer.SerializeToUtf8Bytes(value));
     internal static int Number(JsonElement value, string name) => int.Parse(value.GetProperty(name).GetString()!, CultureInfo.InvariantCulture);
@@ -79,7 +80,7 @@ internal static class AuditObservation
     {
         var stored = await reader.SendAsync(HttpMethod.Get, "api/db/get/" + Uri.EscapeDataString(key), null, cancellation);
         var bytes = Convert.FromBase64String(stored.GetProperty("value").GetString()!);
-        if (bytes.Length > 8192 || Convert.FromBase64String(key).Length is < 1 or > 512) { throw new AuditObservationBoundException(); }
+        if (bytes.Length > MaximumValueBytes || Convert.FromBase64String(key).Length is < 1 or > 512) { throw new AuditObservationBoundException(); }
         RequirePlain(stored, key, bytes);
         RequirePlain(scanned, key, bytes);
         var tx = Number(stored, "tx");

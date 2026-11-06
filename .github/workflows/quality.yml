@@ -112,6 +112,10 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/audit_archive_input_tests.py
 
+      - name: Verify independent production audit expectations on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/AuditEventExpectations.Tests.ps1 -Python (Get-Command python).Source
+
       - name: Verify audit observation refusal policy on Windows
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/AuditObservationPolicy.Tests.ps1
@@ -403,6 +407,10 @@ jobs:
       - name: Verify audit-only pinned byte capture
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/audit_archive_input_tests.py
+
+      - name: Verify independent production audit expectations
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/AuditEventExpectations.Tests.ps1 -Python (Get-Command python3).Source
 
       - name: Verify audit observation refusal policy
         shell: pwsh
