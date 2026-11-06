@@ -1,5 +1,6 @@
 """Separate pinned PostgreSQL audit-export source. No native archive, restore or connection API."""
 from dataclasses import dataclass
+import ctypes
 import json
 import os
 from pathlib import Path
@@ -100,12 +101,41 @@ def extract(data, plan, nonce):
     return CapturedSource(canonical, identity, plan.artifact.sha256, len(frozen), last, plan.metadata_pins)
 
 
+def windows_short_prefix(prefix):
+    # prefix is exclusively an already checked operator-root ancestor, never metadata input.
+    convert = ctypes.WinDLL('kernel32', use_last_error=True).GetShortPathNameW
+    convert.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
+    convert.restype = ctypes.c_uint32
+    buffer = ctypes.create_unicode_buffer(32768)
+    length = convert(str(prefix), buffer, len(buffer))
+    packet.require(0 < length < len(buffer))
+    return Path(buffer.value)
+
+
+def bound_components(candidate, allowed):
+    return len(candidate) == len(allowed) and all(os.path.normcase(part) in options for part, options in zip(candidate, allowed))
+
+
+def metadata_path_matches(value, directory, relative):
+    candidate = Path(value)
+    if not candidate.is_absolute():
+        return False
+    allowed = []
+    for index, part in enumerate(directory.parts):
+        names = {os.path.normcase(part)}
+        if os.name == 'nt':
+            names.add(os.path.normcase(windows_short_prefix(Path(*directory.parts[:index + 1])).parts[-1]))
+        allowed.append(names)
+    allowed.extend({os.path.normcase(part)} for part in files.relative_parts(relative))
+    return bound_components(candidate.parts, allowed)
+
+
 def capture(root, metadata, expected_pins, nonce):
     identity = packet.identity(nonce)
     plan = source_plan(metadata, expected_pins)
     with files.rooted(root) as (directory, descriptor):
         # The metadata path is only compared, never resolved/opened as an independent path.
-        packet.require(os.path.normcase(plan.absolute_path) == os.path.normcase(str(directory / plan.artifact.path)))
+        packet.require(metadata_path_matches(plan.absolute_path, directory, plan.artifact.path))
         digest, size, data = files.inspect_file(directory, descriptor, plan.artifact.path, plan.artifact.bytes, retain=True)
     packet.require(size == plan.artifact.bytes and digest == plan.artifact.sha256)
     return extract(data, plan, identity)

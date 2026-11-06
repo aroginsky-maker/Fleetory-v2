@@ -16,8 +16,11 @@ historical status/limit fields must match. Those historical declarations remain
 operator metadata, not new custody or origin authentication.
 
 The operator owns the root. CLI input cannot replace it. The checkpoint's
-absolute path is compared with the selected path under that root; it is never
-resolved or opened independently. The actual file is opened through the existing
+absolute path is compared component by component with the selected path under
+that root; it is never resolved or opened independently. On Windows, valid long
+and 8.3 names are obtained only from already checked operator-root prefixes.
+Mixed short-ancestor/long-leaf paths do not require following metadata paths or
+accepting another root. The actual file is opened through the existing
 rooted descriptor, ordinary single-link file, no-follow/reparse, canonical
 containment, size/state and streaming-digest guards. The declared size is the
 read limit, with an absolute 1 MiB export bound. The broad six-file verifier and
@@ -43,7 +46,7 @@ come from the selected PostgreSQL export, not the immudb `Get` being checked.
 python -B tests/Fleetory.Tools.Tests/audit_expectation_source_tests.py
 ```
 
-Fifteen portable synthetic methods cover one-file-only access, frozen metadata
+Seventeen portable synthetic methods cover one-file-only access, frozen metadata
 and pins, wrong/stale metadata, excluded-reference relabelling, absolute-path
 mismatch, false readiness promotion, changed bytes, broken receipt/snapshot
 bindings, event counts/order/duplicates/pending state, input bounds, links,

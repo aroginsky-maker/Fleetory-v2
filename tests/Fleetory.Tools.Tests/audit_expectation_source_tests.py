@@ -259,6 +259,31 @@ class AuditExpectationSourceTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             policy.extract(b' ' * (policy.MAX_EXPORT + 1), altered, NONCE)
 
+    def test_root_component_aliases_do_not_authorize_other_paths(self):
+        allowed = [{os.path.normcase('root')}, {os.path.normcase('LongOwner'), os.path.normcase('OWNER~1')},
+                   {os.path.normcase('snapshot')}, {os.path.normcase('export.json')}]
+        self.assertTrue(policy.bound_components(['root', 'OWNER~1', 'snapshot', 'export.json'], allowed))
+        self.assertTrue(policy.bound_components(['root', 'LongOwner', 'snapshot', 'export.json'], allowed))
+        for candidate in (['root', 'other', 'snapshot', 'export.json'], ['root', 'OWNER~1', '..', 'export.json'],
+                          ['root', 'OWNER~1', 'snapshot', 'export.json:stream'], ['root', 'OWNER~1', 'export.json']):
+            self.assertFalse(policy.bound_components(candidate, allowed))
+
+    def test_windows_mixed_short_ancestor_and_long_leaf_path(self):
+        if os.name == 'nt':
+            with policy.files.rooted(self.root) as (long_root, _):
+                # GetShortPathName may shorten several components; metadata mixes each valid alias with long leaf names.
+                parts = list(long_root.parts)
+                for index in range(len(parts)):
+                    short = policy.windows_short_prefix(Path(*long_root.parts[:index + 1])).parts[-1]
+                    changed = list(parts)
+                    changed[index] = short
+                    self.checkpoint['artifactPath'] = str(Path(*changed) / self.relative)
+                    self.pin()
+                    self.assertEqual(self.capture().snapshot, policy.archive.canonical(self.snapshot))
+        else:
+            self.assertTrue(policy.metadata_path_matches(str(self.path), self.root, self.relative))
+            self.assertFalse(policy.metadata_path_matches(str(self.path).upper(), self.root, self.relative))
+
 
 def integration(probe):
     case = AuditExpectationSourceTests('test_exactly_one_source_open_and_no_native_or_broad_apis')
