@@ -45,6 +45,10 @@ prepare the four known event digests using the exact production serialization
 from a pinned PostgreSQL snapshot. Its generated contracts do not authenticate
 an original source or authorize an original observation.
 
+The separate [historical observation profile](HistoricalAuditObservation.md)
+carries historical comparison scope through expectation, native read and report
+boundaries. The strict observer rejects that profile's complete envelope.
+
 Additional state is always reported as unreviewed. Neither complete current KV
 enumeration within this bound nor summaries of all native transactions prove a
 complete logical SQL/sorted-set/document inventory, independent Merkle inclusion

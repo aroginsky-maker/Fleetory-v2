@@ -108,6 +108,10 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/audit_observation_tests.py
 
+      - name: Verify historical audit observation scope on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/historical_audit_observation_tests.py
+
       - name: Verify audit-only pinned byte capture on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/audit_archive_input_tests.py
@@ -412,6 +416,10 @@ jobs:
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/audit_observation_tests.py
 
+      - name: Verify historical audit observation scope
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/historical_audit_observation_tests.py
+
       - name: Verify audit-only pinned byte capture
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/audit_archive_input_tests.py
@@ -507,6 +515,10 @@ jobs:
       - name: Verify bounded native audit observation and unknown entry kinds
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/NativeAuditHistory.Tests.ps1 -Profile observation -Python (Get-Command python3).Source
+
+      - name: Verify generated historical audit restore and observation scope
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativeAuditHistory.Tests.ps1 -Profile historical-observation -Python (Get-Command python3).Source
 
       - name: Verify coherent native Server pair restore and lifecycle
         shell: pwsh

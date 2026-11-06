@@ -8,6 +8,14 @@ internal static class AuditEventExpectations
         AuditExpectationSnapshot.Require(expectedPin.Length == 64 && expectedPin.All(char.IsAsciiHexDigitLower));
         _ = AuditExpectationSnapshot.Identity(nonce);
         var bytes = await ReadAsync(deadline.Token);
+        return await FromSnapshotAsync(bytes, expectedPin, nonce, historical, deadline.Token);
+    }
+
+    internal static async Task<object> FromSnapshotAsync(byte[] bytes, string expectedPin, string nonce, bool historical, CancellationToken cancellation)
+    {
+        AuditExpectationSnapshot.Require(bytes.Length is > 0 and <= AuditExpectationSnapshot.MaximumBytes);
+        AuditExpectationSnapshot.Require(expectedPin.Length == 64 && expectedPin.All(char.IsAsciiHexDigitLower));
+        _ = AuditExpectationSnapshot.Identity(nonce);
         AuditExpectationSnapshot.Require(AuditObservation.Hash(bytes) == expectedPin);
         var profile = historical ? AuditExpectationProfile.HistoricalReadOnly : AuditExpectationProfile.StrictWriter;
         var events = AuditExpectationSnapshot.Parse(bytes, profile);
@@ -17,7 +25,7 @@ internal static class AuditEventExpectations
         var requests = 0;
         foreach (var source in events)
         {
-            var captured = await AuditExpectationCapture.SerializeAsync(source, deadline.Token);
+            var captured = await AuditExpectationCapture.SerializeAsync(source, cancellation);
             requests += captured.Requests;
             known.Add(new { eventId = source.Event.EventId, key = FixtureAuditClient.EventKey(source.Event.EventId), revision = 1, valueSha256 = captured.Hash });
         }

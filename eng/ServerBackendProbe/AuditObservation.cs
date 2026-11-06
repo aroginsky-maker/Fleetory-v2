@@ -15,11 +15,12 @@ internal static class AuditObservation
     internal static JsonElement[] Array(JsonElement value, string name) => value.TryGetProperty(name, out var found)
         ? found.EnumerateArray().ToArray() : [];
 
-    internal static async Task<object> ExecuteAsync(CancellationToken cancellation)
+    internal static async Task<object> ExecuteAsync(CancellationToken cancellation, bool historical = false)
     {
         using var input = await ReadPacketAsync(cancellation);
         var packet = input.RootElement;
         var expected = packet.GetProperty("observation");
+        HistoricalObservationBinding.Validate(expected, historical);
         var fixture = FreshPairModel.Fixture(packet);
         if (expected.GetProperty("nonce").GetString() != fixture.ToString("D")) { throw new AuditObservationBindingException(); }
         var known = ReadExpected(expected);
@@ -43,9 +44,16 @@ internal static class AuditObservation
         for (var id = 1; id <= 5; id++) { transactions.Add(await InspectTransactionAsync(reader, id, cancellation)); }
         var after = await reader.SendAsync(HttpMethod.Get, "api/db/state", null, cancellation);
         RequirePoint(after, expected);
-        return new { category = "observation-read", schema = "fleetory.audit-native-observation.v1", nonce = fixture,
-            stateBefore = before, stateAfter = after, scan = new { prefix = "", limit = 17, entries }, transactions,
-            executionAuthorized = false, independentInclusionProofsVerified = false };
+        var result = new Dictionary<string, object?>
+        {
+            ["category"] = historical ? "observation-history-read" : "observation-read",
+            ["schema"] = historical ? HistoricalObservationBinding.Observed : "fleetory.audit-native-observation.v1",
+            ["nonce"] = fixture, ["stateBefore"] = before, ["stateAfter"] = after,
+            ["scan"] = new { prefix = "", limit = 17, entries }, ["transactions"] = transactions,
+            ["executionAuthorized"] = false, ["independentInclusionProofsVerified"] = false
+        };
+        if (historical) { result["comparison"] = expected.GetProperty("comparison").Clone(); }
+        return result;
     }
 
     private static Dictionary<string, JsonElement> ReadExpected(JsonElement expected)

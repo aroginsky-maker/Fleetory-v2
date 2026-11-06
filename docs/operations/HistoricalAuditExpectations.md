@@ -34,6 +34,9 @@ These hashes are for read-only recovery comparison. They do not prove that a
 record could pass the current writer, explain its creation or authenticate a
 deployed image or source. The strict diagnostic contract rejects this response.
 
+The [historical observation protocol](HistoricalAuditObservation.md) preserves
+these limitations when binding known hashes to a bounded native audit read.
+
 The native expectation wrapper runs fifteen generated historical methods on
 Windows and Linux, in addition to the existing strict and diagnostic contracts.
 An independent ASCII golden vector checks the exact bytes of all four values,

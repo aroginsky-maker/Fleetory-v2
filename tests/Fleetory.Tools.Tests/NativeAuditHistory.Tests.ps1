@@ -1,5 +1,5 @@
 #requires -Version 7.3
-param([string]$Python='',[ValidateSet('none','after-stores')][string]$FailurePoint='none',[ValidateSet('history','observation')][string]$Profile='history')
+param([string]$Python='',[ValidateSet('none','after-stores')][string]$FailurePoint='none',[ValidateSet('history','observation','historical-observation')][string]$Profile='history')
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 foreach($helper in @('PilotNativeProcess.ps1','../../eng/pilot/ProviderRecoveryTransport.ps1','../../eng/pilot/ProviderRecoveryPolicy.ps1','../../eng/pilot/ImmuDataRoundtripPolicy.ps1','../../eng/pilot/AuditHistoryPolicy.ps1','../../eng/pilot/AuditObservationPolicy.ps1','PilotDisposableTls.ps1','NativeSignerFixture.ps1','NativeAuditFixture.ps1','NativeWorkerRuntime.ps1','NativeAuditDataFixture.ps1')){. (Join-Path $PSScriptRoot $helper)}
@@ -21,7 +21,7 @@ function Invoke-Docker([string[]]$Arguments,[byte[]]$InputBytes=$null,[int]$Time
 function Probe($Store,[string]$Mode,[string]$ExpectedType='',[switch]$WrongPassword){
     Read-AuditDataStore $context $Store
     $body=@{fixture=$fixture;admin=$(if($WrongPassword){$context.Secrets.wrong}else{$context.Secrets[$Store.Role+'-admin']});reader=$context.Secrets[$Store.Role+'-reader'];writer=$context.Secrets[$Store.Role+'-writer']}
-    if($Mode -ceq 'observation-read'){$body=@{fixture=$fixture;reader=$(if($WrongPassword){$context.Secrets.wrong}else{$context.Secrets[$Store.Role+'-reader']});observation=$script:observationExpectation}}
+    if($Mode -cin @('observation-read','observation-history-read')){$body=@{fixture=$fixture;reader=$(if($WrongPassword){$context.Secrets.wrong}else{$context.Secrets[$Store.Role+'-reader']});observation=$script:observationExpectation}}
     $r=Invoke-Docker @('exec','-i','-e','SSL_CERT_FILE=/tmp/ca.pem','-e','SSL_CERT_DIR=/tmp/empty-ca-dir',$Store.Id,'dotnet','/tool/ServerBackendProbe.dll',$Mode) ([Text.Encoding]::UTF8.GetBytes(($body|ConvertTo-Json -Depth 6 -Compress))) -AllowFailure
     $v=$r.Stdout|ConvertFrom-Json -AsHashtable -Depth 16
     if($r.ExitCode -ne 0 -and -not $ExpectedType -and $Mode -cne 'audit-health'){
@@ -74,7 +74,11 @@ try{
     foreach($pem in @($context.Tls.ServerPrivateKeyPem,$context.Tls.ClientPrivateKeyPem)+@($context.SigningPems.Values)){foreach($line in ($pem -split "`n")){if($line.Length -ge 40 -and -not $line.StartsWith('-----')){$canaries.Add($line.Substring(0,40))}}}
     $stage='stores';$source=New-AuditDataStore $context 'source';$target=New-AuditDataStore $context 'target'
     if($FailurePoint -ceq 'after-stores'){Write-Output 'AUDIT HISTORY INJECTED FAILURE AFTER STORES';throw 'Intentional history fixture failure.'}
-    if($Profile -ceq 'observation'){
+    if($Profile -ceq 'historical-observation'){
+        . (Join-Path $PSScriptRoot 'NativeAuditObservationWorkflow.ps1')
+        . (Join-Path $PSScriptRoot 'NativeHistoricalObservationWorkflow.ps1')
+        $proof=Invoke-NativeHistoricalObservationWorkflow $source $target
+    }elseif($Profile -ceq 'observation'){
         . (Join-Path $PSScriptRoot 'NativeAuditObservationWorkflow.ps1')
         $proof=Invoke-NativeAuditObservationWorkflow $source $target
     }else{
