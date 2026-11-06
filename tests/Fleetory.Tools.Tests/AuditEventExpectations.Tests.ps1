@@ -29,7 +29,7 @@ try{
     $diagnostic=Invoke-NativeBytes $Python @('-B',(Join-Path $PSScriptRoot 'audit_expectation_diagnostic_tests.py'),'--integration-probe',$dll) -TimeoutSeconds 90
     if($diagnostic.ExitCode -ne 0 -or -not [string]::IsNullOrWhiteSpace($diagnostic.Stderr)){throw 'Generated expectation diagnosis failed; no payload logged.'}
     $diagnosticProof=$diagnostic.Stdout|ConvertFrom-Json -AsHashtable
-    if($diagnosticProof.schema -cne 'fleetory.generated-expectation-diagnostic.v1' -or $diagnosticProof.verified -ne $true -or $diagnosticProof.nativeCases -ne 7 -or $diagnosticProof.cleanupVerified -ne $true -or $diagnosticProof.originalExpectationsAccepted -ne $false){throw 'Generated expectation diagnostic proof refused.'}
+    if($diagnosticProof.schema -cne 'fleetory.generated-expectation-diagnostic.v2' -or $diagnosticProof.verified -ne $true -or $diagnosticProof.nativeCases -ne 8 -or $diagnosticProof.cleanupVerified -ne $true -or $diagnosticProof.originalExpectationsAccepted -ne $false -or $diagnosticProof.independentTypeAndBoundRulesVerified -ne $true -or $diagnosticProof.contextValueKindCountersVerified -ne $true){throw 'Generated expectation diagnostic proof refused.'}
     Write-Output $diagnostic.Stdout.Trim()
     $proof=@{schema='fleetory.generated-event-expectations.v1';verified=$true;portableNativeMethods=19;eventFields=10;knownEvents=4;
         productionSinkSerializationUsed=$true;inMemoryRequestsPerSnapshot=16;exactAsciiGoldenValuesVerified=$true;

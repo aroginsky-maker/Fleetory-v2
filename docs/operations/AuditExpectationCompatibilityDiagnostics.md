@@ -8,6 +8,14 @@ source identifiers, strings, timestamps, context values, expected wire hashes
 or keys are copied into the diagnostic. The caller's nonce and snapshot hash
 bind the report to the measured invocation.
 
+The v2 report distinguishes type violations from size violations. A non-string
+context member fails the type profile; it does not itself fail the size profile.
+String values, keys, entry counts and UTF-8 size retain their existing bounds.
+Fixed counters describe only root/member JSON kinds, including SQL NULL versus
+a JSON null root versus a null object member. They reveal no keys or values.
+The current production writer and strict expectation producer both reject null
+context members. Diagnostics cannot normalize them or admit them as ready data.
+
 The controller accepts one immutable snapshot of at most 128 KiB and an external
 SHA-256 pin. Existing archive validation admits exactly four ordered events and
 zero pending exports. The module delegates exactly one native invocation to a
@@ -37,12 +45,14 @@ opened, and the native three-artifact selection is unchanged.
 python -B tests/Fleetory.Tools.Tests/audit_expectation_diagnostic_tests.py
 ```
 
-Eighteen portable generated methods cover fixed error categories, operational
+Twenty portable generated methods cover fixed error categories, operational
 versus input failure, unknown-name redaction, malformed output, stale bindings,
 authority mutations, frozen input, source-open/invocation bounds, advisory
 profiles and absent file/process/socket effects in the pure policy. The native
-expectation wrapper additionally runs seven generated source/probe cases: one
-valid diagnostic, five input refusals and one serialized-value-bound refusal.
+expectation wrapper additionally runs eight generated source/probe cases: one
+valid diagnostic, six input refusals and one serialized-value-bound refusal.
+An explicit null-member regression checks type rejection at the native boundary
+without reporting a size failure; fixed kind counts remain metadata only.
 Generated fixtures and published payloads must be removed.
 
 An original-data diagnostic needs a concrete new reason, a measured controller,

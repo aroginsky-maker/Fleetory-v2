@@ -38,9 +38,30 @@ def context_profiles(value):
     types = all(type(item) is str for item in context.values())
     bounds = (len(value.encode('utf-8')) <= 16384 and len(context) <= 16
         and all(text_profile(name, 64) for name in context)
-        and all(type(item) is str and '\0' not in item and len(item.encode('utf-16-le')) // 2 <= 1024
+        and all(type(item) is not str or ('\0' not in item and len(item.encode('utf-16-le')) // 2 <= 1024)
             for item in context.values()))
     return types, bounds
+
+
+def value_kind(value):
+    return {str: 'string', type(None): 'jsonNull', int: 'number', float: 'number',
+        bool: 'boolean', dict: 'object', list: 'array'}[type(value)]
+
+
+def context_kinds(snapshot):
+    kinds = ('jsonNull', 'string', 'number', 'boolean', 'object', 'array')
+    roots = dict.fromkeys(('sqlNull', *kinds), 0)
+    members = dict.fromkeys(kinds, 0)
+    for row in snapshot['events']:
+        if row['context_json'] is None:
+            roots['sqlNull'] += 1
+            continue
+        context = json.loads(row['context_json'])
+        roots[value_kind(context)] += 1
+        if type(context) is dict:
+            for value in context.values():
+                members[value_kind(value)] += 1
+    return dict(roots=roots, members=members)
 
 
 def row_profiles(row):
@@ -123,9 +144,9 @@ def diagnose(snapshot_bytes, expected_pin, nonce, invoke):
     packet.require(type(native.stdout) is bytes and type(native.stderr) is bytes and not native.stderr)
     value = packet.strict_json(native.stdout, MAX_OUTPUT)
     result = accepted_result(value, snapshot, pin, identity) if native.exit_code == 0 else refused_result(value)
-    return dict(schema='fleetory.audit-expectation-diagnostic.v1', nonce=identity, snapshotSha256=pin,
+    return dict(schema='fleetory.audit-expectation-diagnostic.v2', nonce=identity, snapshotSha256=pin,
         nativeOutcome=result['outcome'], nativeErrorType=result['errorType'], nativeCauseType=result['causeType'],
-        nativeLocation=result['location'], diagnosticComplete=result['complete'], advisoryRules=rules,
+        nativeLocation=result['location'], diagnosticComplete=result['complete'], advisoryRules=rules, contextKinds=context_kinds(snapshot),
         advisoryRulesAreAuthoritative=False, nativeInvocations=1, expectedEvents=4, expectedFieldsPerEvent=10,
         nativeValuesDiscarded=True, originalExpectationsAccepted=False, sourceOriginAuthenticated=False,
         sourceIndependenceAuthenticated=False, realBackendContacted=False, signaturesVerified=False,

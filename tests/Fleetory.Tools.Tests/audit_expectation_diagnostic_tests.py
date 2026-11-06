@@ -177,8 +177,22 @@ class AuditExpectationDiagnosticTests(unittest.TestCase):
         report = self.diagnose()
         rules = {r['code']: r['affectedRows'] for r in report['advisoryRules']}
         self.assertEqual(rules['CONTEXT_TYPE_PROFILE'], 2)
-        self.assertEqual(rules['CONTEXT_BOUND_PROFILE'], 3)
+        self.assertEqual(rules['CONTEXT_BOUND_PROFILE'], 2)
         self.assertFalse(report['advisoryRulesAreAuthoritative'])
+
+    def test_null_and_other_value_kinds_do_not_become_size_failures_or_echo_contents(self):
+        rows = self.snapshot['events']
+        rows[0]['context_json'] = None
+        rows[1]['context_json'] = json.dumps({CANARY: None, 'text': CANARY})
+        rows[2]['context_json'] = 'null'
+        rows[3]['context_json'] = '{"n":1,"b":true,"o":{},"a":[]}'
+        report = self.diagnose()
+        self.assertEqual(report['contextKinds']['roots'], dict(sqlNull=1, jsonNull=1, string=0, number=0, boolean=0, object=2, array=0))
+        self.assertEqual(report['contextKinds']['members'], dict(jsonNull=1, string=1, number=1, boolean=1, object=1, array=1))
+        rules = {r['code']: r['affectedRows'] for r in report['advisoryRules']}
+        self.assertEqual(rules['CONTEXT_TYPE_PROFILE'], 3)
+        self.assertEqual(rules['CONTEXT_BOUND_PROFILE'], 0)
+        self.assertNotIn(CANARY, json.dumps(report))
 
     def test_valid_null_empty_and_unicode_context_has_no_advisory_failures(self):
         self.snapshot['events'][0].update(target_type=None, target_id=None, context_json=None)
@@ -186,6 +200,14 @@ class AuditExpectationDiagnosticTests(unittest.TestCase):
         self.snapshot['events'][2]['context_json'] = '{"A":""}'
         self.snapshot['events'][3]['context_json'] = json.dumps({'𐀀': '界'})
         self.assertTrue(all(r['affectedRows'] == 0 for r in self.diagnose(exit_code=0)['advisoryRules']))
+
+    def test_scalar_and_array_root_kind_counts_never_echo_input(self):
+        for row, value in zip(self.snapshot['events'], (json.dumps(CANARY), '123', 'false', '[]')):
+            row['context_json'] = value
+        report = self.diagnose()
+        self.assertEqual(report['contextKinds']['roots'], dict(sqlNull=0, jsonNull=0, string=1, number=1, boolean=1, object=0, array=1))
+        self.assertTrue(all(count == 0 for count in report['contextKinds']['members'].values()))
+        self.assertNotIn(CANARY, json.dumps(report))
 
     def test_generated_source_controller_opens_one_file_and_invokes_once(self):
         case = self.fixture()
@@ -233,7 +255,7 @@ def integration(probe):
     cases = (('valid', 'NATIVE_ACCEPTED_DIAGNOSTIC_ONLY'), ('whitespace', 'INPUT_PROFILE_REFUSED'),
         ('context-null-text', 'INPUT_PROFILE_REFUSED'), ('actor', 'INPUT_PROFILE_REFUSED'),
         ('value-bound', 'SERIALIZED_VALUE_BOUND_REFUSED'), ('target-pair', 'INPUT_PROFILE_REFUSED'),
-        ('empty-target', 'INPUT_PROFILE_REFUSED'))
+        ('empty-target', 'INPUT_PROFILE_REFUSED'), ('context-null-member', 'INPUT_PROFILE_REFUSED'))
     for name, outcome in cases:
         case = fixtures.AuditExpectationSourceTests('test_exactly_one_source_open_and_no_native_or_broad_apis')
         case.setUp()
@@ -253,6 +275,8 @@ def integration(probe):
                 row['target_id'] = None
             elif name == 'empty-target':
                 row.update(target_type='', target_id='')
+            elif name == 'context-null-member':
+                row['context_json'] = '{"Optional":null}'
             case.republish()
             def invoke(data, pin, nonce):
                 calls.append(True)
@@ -265,11 +289,18 @@ def integration(probe):
             case.assertTrue(result['diagnostic']['diagnosticComplete'])
             case.assertFalse(result['diagnostic']['originalExpectationsAccepted'])
             case.assertNotIn('knownEvents', result['diagnostic'])
+            if name == 'context-null-member':
+                rules = {r['code']: r['affectedRows'] for r in result['diagnostic']['advisoryRules']}
+                case.assertEqual(result['diagnostic']['nativeLocation'], 'Require')
+                case.assertEqual(rules['CONTEXT_TYPE_PROFILE'], 1)
+                case.assertEqual(rules['CONTEXT_BOUND_PROFILE'], 0)
+                case.assertEqual(result['diagnostic']['contextKinds']['members']['jsonNull'], 1)
         finally:
             case.doCleanups()
         case.assertFalse(root.exists())
-    return dict(schema='fleetory.generated-expectation-diagnostic.v1', verified=True, nativeCases=len(cases),
-        validDiagnosticCases=1, inputRefusalCases=5, valueBoundCases=1, cleanupVerified=True,
+    return dict(schema='fleetory.generated-expectation-diagnostic.v2', verified=True, nativeCases=len(cases),
+        validDiagnosticCases=1, inputRefusalCases=6, valueBoundCases=1, cleanupVerified=True, independentTypeAndBoundRulesVerified=True,
+        contextValueKindCountersVerified=True,
         originalInputsRead=False, realBackendContacted=False, nativeValuesDiscarded=True, originalExpectationsAccepted=False,
         sourceVpsAccessed=False, originalPkiOrProviderUsed=False, executionAuthorized=False,
         fullSystemRecoveryVerified=False, phase7Complete=False)
