@@ -206,12 +206,16 @@ def _create_fence(process):
     return platform.GroupFence(process)
 
 
+def _check_deadline(start, seconds):
+    if time.monotonic_ns() - start >= seconds * 1_000_000_000:
+        raise LaunchError('deadline')
+
+
 def _wait_for_owner(process, fence, pumps, start, seconds):
     while True:
         if pumps.errors:
             raise LaunchError(pumps.errors[0])
-        if time.monotonic_ns() - start >= seconds * 1_000_000_000:
-            raise LaunchError('deadline')
+        _check_deadline(start, seconds)
         exited = process.poll() is not None if os.name == 'nt' else fence.exited()
         if exited:
             return
@@ -280,6 +284,7 @@ def _run_owned(command, session, input_bytes, seconds):
         pins_rechecked = True
         session.bind_assertion(process.pid, start_wall, command.executable.digest)
         session.check()
+        _check_deadline(start, seconds)
         pumps = _Pumps(process, data)
         pumps.start()  # No input was written before OS identity and lifetime fencing.
         _wait_for_owner(process, fence, pumps, start, seconds)

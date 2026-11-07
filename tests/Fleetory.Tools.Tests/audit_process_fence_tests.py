@@ -93,6 +93,26 @@ class ProcessFenceTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     policy._run_owned(command, session, b'x', 5)
 
+    def test_creation_deadline_refuses_before_releasing_input_and_kills_owned_process(self):
+        actual = policy._spawn
+        def delayed(command):
+            time.sleep(1.1)
+            return actual(command)
+        with ExitStack() as held, self.session() as session:
+            command = self.command(held, 'echo')
+            with patch.object(policy, '_spawn', side_effect=delayed):
+                with self.assertRaises(policy.LaunchError) as seen:
+                    policy._run_owned(command, session, b'PRIVATE_INPUT_CANARY', 1)
+            self.assertEqual(seen.exception.category, 'deadline')
+            value = json.loads(seen.exception.evidence)
+            self.assertTrue(value['processIdentityAuthenticated'])
+            self.assertTrue(value['entrypointPinsMatched'])
+            self.assertFalse(value['inputReleased'])
+            self.assertEqual(value['inputBytesWritten'], 0)
+            self.assertTrue(value['fence']['noRunningMembersVerified'])
+            self.assertFalse(self.running(value['osIdentity']['pid']))
+            self.assertTrue(session.report()['launchAttemptConsumed'])
+
     def test_failed_spawn_is_consumed_and_does_not_echo_private_data(self):
         with ExitStack() as held, self.session() as session:
             command = self.command(held, 'echo')

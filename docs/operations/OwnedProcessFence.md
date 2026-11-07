@@ -53,7 +53,9 @@ The private primitive has an integer deadline up to 600 seconds; the fixed
 pre-admission probe uses 30 seconds. Existing native600/container660/fixture3300
 limits are unchanged. The OS creation syscall itself cannot be interrupted by
 this loop; no input is released while it is pending. Bounded pipe pumps begin
-only after OS observations, pin checks, fencing and control binding. Owner exit
+only after OS observations, pin checks, fencing, control binding and a fresh
+deadline check. If process creation or those checks exhaust the budget, the
+created process is terminated with zero input bytes written. Owner exit
 also triggers fence termination, including descendants still holding pipe ends.
 Timeout, input backpressure and output overflow retain the consumed attempt;
 exception categories contain no input or output contents. The environment is a
@@ -72,9 +74,10 @@ namespace, immutable ownership and independent absence checks.
 python -B tests/Fleetory.Tools.Tests/audit_process_fence_tests.py
 ```
 
-CI requires 19 actual generated process contracts on each OS: image/birth
+CI requires 20 actual generated process contracts on each OS: image/birth
 observation before input, a flushed one-use launch attempt, failed spawn,
 claim/binding/pin refusal, an actual impostor image, deadline and backpressure,
+an expired creation budget that releases no input,
 typed stdout/stderr bounds, owner death and descendant termination, preservation
 of a foreign process, environment filtering and the actual fixed native-owner
 pre-admission refusal. Tests use synthetic bytes and no original files, private
