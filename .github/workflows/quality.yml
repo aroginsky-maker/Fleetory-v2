@@ -128,6 +128,10 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/audit_control_identity_tests.py
 
+      - name: Verify owned process identity and lifetime fence on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/audit_process_fence_tests.py
+
       - name: Verify pinned audit-use gate admission on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/audit_use_admission_tests.py
@@ -463,6 +467,10 @@ jobs:
       - name: Verify held audit control namespace identity
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/audit_control_identity_tests.py
+
+      - name: Verify owned process identity and lifetime fence
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/audit_process_fence_tests.py
 
       - name: Verify pinned audit-use gate admission
         shell: pwsh

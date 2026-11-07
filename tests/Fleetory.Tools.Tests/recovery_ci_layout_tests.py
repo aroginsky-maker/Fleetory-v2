@@ -51,14 +51,16 @@ def validate(text):
             assert len(matches) == 1, (key, name, profile)
         assert len(commands) == len(cases)
     for key, platform, executable in (('windows-tls-chain', ' on Windows', 'python'), ('quality', '', 'python3')):
-        step = ('      - name: Verify held audit control namespace identity' + platform + '\n'
-            '        shell: pwsh\n'
-            '        run: ' + executable + ' -B ./tests/Fleetory.Tools.Tests/audit_control_identity_tests.py\n')
-        block = blocks[key]
-        assert block.count(step) == 1
-        start = block.index(step)
-        end = block.find('      - name:', start + len(step))
-        assert block[start:end if end >= 0 else len(block)].strip() == step.strip()
+        for title, filename in (('held audit control namespace identity', 'audit_control_identity_tests.py'),
+                ('owned process identity and lifetime fence', 'audit_process_fence_tests.py')):
+            step = ('      - name: Verify ' + title + platform + '\n'
+                '        shell: pwsh\n'
+                '        run: ' + executable + ' -B ./tests/Fleetory.Tools.Tests/' + filename + '\n')
+            block = blocks[key]
+            assert block.count(step) == 1
+            start = block.index(step)
+            end = block.find('      - name:', start + len(step))
+            assert block[start:end if end >= 0 else len(block)].strip() == step.strip()
     for command in ('./eng/verify-quality.ps1', './eng/verify-sonar-issues.ps1', './eng/report-sonar-metrics.ps1'):
         assert text.count(command) == 1 and command in blocks['quality']
     assert '    timeout-minutes: 30\n' in blocks['quality']
@@ -105,6 +107,13 @@ class RecoveryCiLayoutTests(unittest.TestCase):
     def test_control_identity_gate_is_required_once_and_cannot_be_softened(self):
         for executable in ('python', 'python3'):
             command = executable + ' -B ./tests/Fleetory.Tools.Tests/audit_control_identity_tests.py'
+            self.refused(self.text.replace(command, 'omitted', 1))
+            self.refused(self.text.replace(command, command + '\n          ' + command, 1))
+            self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
+
+    def test_process_fence_gate_is_required_once_and_cannot_be_softened(self):
+        for executable in ('python', 'python3'):
+            command = executable + ' -B ./tests/Fleetory.Tools.Tests/audit_process_fence_tests.py'
             self.refused(self.text.replace(command, 'omitted', 1))
             self.refused(self.text.replace(command, command + '\n          ' + command, 1))
             self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))

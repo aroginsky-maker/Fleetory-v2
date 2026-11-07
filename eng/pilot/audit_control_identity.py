@@ -149,6 +149,7 @@ class ControlIdentity:
         self._plan, self._plan_bytes = plan, plan_bytes
         self._records = {}
         self._binding_attempted = False
+        self._launch_attempted = False
         self._closed = False
         self._created = time.time_ns()
 
@@ -181,7 +182,7 @@ class ControlIdentity:
 
     def _write_once(self, name, value):
         self.check()
-        packet.require(name in ('reservation.json', 'binding.json') and name not in self._records)
+        packet.require(name in ('reservation.json', 'binding.json', 'launch-attempt.json') and name not in self._records)
         data = json.dumps(value, sort_keys=True, separators=(',', ':')).encode() + b'\n'
         packet.require(0 < len(data) <= MAX_RECORD)
         if os.name == 'nt':
@@ -200,6 +201,15 @@ class ControlIdentity:
         if os.name == 'posix':
             os.fsync(self._directory.fd)
         self.check()
+
+    def consume_launch_attempt(self):
+        self.check()
+        packet.require(not self._launch_attempted and not self._binding_attempted)
+        self._launch_attempted = True
+        self._write_once('launch-attempt.json', dict(schema='fleetory.audit-control-launch-attempt.v1',
+            nonce=self._plan['nonce'], reservationSha256=packet.digest(self._records['reservation.json'][1]),
+            status='ATTEMPT_CONSUMED', launchAuthorized=False))
+        return self.report()
 
     def bind_assertion(self, pid, started_ns, runtime_pin):
         self.check()
@@ -220,6 +230,7 @@ class ControlIdentity:
         return dict(schema='fleetory.audit-control-identity.v1', nonce=self._plan['nonce'],
             reservationSha256=packet.digest(self._records['reservation.json'][1]),
             bindingSha256=packet.digest(self._records['binding.json'][1]) if 'binding.json' in self._records else None,
+            launchAttemptConsumed=self._launch_attempted,
             directoryHandlesHeld=True, recordHandlesHeld=True, nonceConsumed=True,
             processIdentityAuthenticated=False, runtimeContinuityVerified=False, launchAuthorized=False,
             backendNamespaceBound=False, processSupervisionVerified=False, cleanupAuthorized=False,

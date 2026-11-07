@@ -76,3 +76,11 @@ normal exit and forced death. Only then can the existing audit-only capture and
 consumed purpose transaction be integrated with authenticated current gates and
 original public checkpoint trust. Existing data consent persists; this metadata
 component grants no new authority. Phase 7 remains open and PR #2 stays draft.
+
+The [owned process fence](OwnedProcessFence.md) adds a separate, exclusive
+`launch-attempt.json` that is flushed before process creation. That attempt is
+consumed even if creation or transport fails. `launchAttemptConsumed` is not
+launch authority. The fence independently observes OS image/birth identity;
+this component's PID binding remains an assertion. Its fixed actual-owner probe
+only exercises pre-admission refusal; positive restore and backend cleanup still
+require their own integration and acceptance.

@@ -106,3 +106,10 @@ child-assertion records. It neither exposes the owner's payload namespace nor
 authenticates a child process. Its two generated writer-death tests are not
 native backend cleanup acceptance; a fixed measured launcher and actual
 owner/resource supervision remain separate integration work.
+
+The [owned process fence](OwnedProcessFence.md) now verifies the fixed owner's
+actual runtime image/birth identity and typed pre-admission refusal through
+bounded private pipes. Process lifetime evidence is separate from native
+payload/resource identity. The existing native payload is still internally
+random; no positive restore or forced-owner-death backend cleanup is authorized
+or certified by the new refusal probe.
