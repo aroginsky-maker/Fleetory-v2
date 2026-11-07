@@ -217,6 +217,24 @@ class ProcessFenceTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 with policy.PinnedFile(self.python, 'f' * 64, True):
                     self.fail('Wrong runtime pin accepted.')
+            runtime = self.root / 'runtime'
+            runtime.mkdir(mode=0o700)
+            executable = runtime / self.python.name
+            shutil.copy2(self.python, executable)
+            twin = runtime / ('hardlinked-' + self.python.name)
+            os.link(executable, twin)
+            with self.assertRaises(policy.files.archive.ArchiveError):
+                with policy.PinnedFile(executable, sha(executable), True):
+                    self.fail('Hardlinked runtime accepted.')
+            twin.unlink()
+            if os.name == 'posix':
+                runtime.chmod(0o777)
+                try:
+                    with self.assertRaises(policy.files.archive.ArchiveError):
+                        with policy.PinnedFile(executable, sha(executable), True):
+                            self.fail('Writable runtime directory accepted.')
+                finally:
+                    runtime.chmod(0o700)
 
     def test_source_handle_inheritance_change_invalidates_pin(self):
         source = self.root / 'source.py'
@@ -264,13 +282,23 @@ class ProcessFenceTests(unittest.TestCase):
     def test_real_native_owner_refusal_uses_fixed_arguments_and_actual_runtime_identity(self):
         repo = Path(__file__).resolve().parents[2]
         owner = repo / 'eng/pilot/Invoke-HistoricalAuditObservation.ps1'
-        plan = {**self.plan, 'runtimes': dict(python=sha(self.python), powershell=sha(self.pwsh))}
+        powershell = self.pwsh
+        if os.name == 'posix':
+            # Hosted installations may have writable ancestors. Do not relax the
+            # pin boundary or change shared host modes: use a private fixture copy.
+            distribution = self.root / 'powershell'
+            shutil.copytree(powershell.parent, distribution, symlinks=True)
+            for directory, _, _ in os.walk(distribution, followlinks=False):
+                Path(directory).chmod(0o700)
+            powershell = distribution / powershell.name
+            self.assertEqual(sha(powershell), sha(self.pwsh))
+        plan = {**self.plan, 'runtimes': dict(python=sha(self.python), powershell=sha(powershell))}
         with self.session(plan) as session:
-            result = policy.native_refusal_probe(repo, self.pwsh, self.python, sha(owner), session)
+            result = policy.native_refusal_probe(repo, powershell, self.python, sha(owner), session)
             self.assertEqual(result.exit_code, 1)
             value = json.loads(result.evidence)
             self.assertEqual(value['profile'], 'native-admission-refusal')
-            self.assertEqual(value['osIdentity']['imageSha256'], sha(self.pwsh))
+            self.assertEqual(value['osIdentity']['imageSha256'], sha(powershell))
             self.assertTrue(value['processIdentityAuthenticated'])
             self.assertFalse(value['backendNamespaceBound'])
             self.assertFalse(value['backendCleanupVerified'])

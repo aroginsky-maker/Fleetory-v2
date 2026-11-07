@@ -80,6 +80,14 @@ of a foreign process, environment filtering and the actual fixed native-owner
 pre-admission refusal. Tests use synthetic bytes and no original files, private
 PKI, source VPS, provider root or issuer. No generic process CLI is provided.
 
+The Linux native-refusal fixture copies the installed PowerShell distribution
+into its own temporary directory, makes the copied directories private and
+checks that the runtime bytes match. Hosted installations with writable ancestor
+directories are refused by the runtime boundary. The fixture does not change
+shared host permissions or relax that boundary; matching-hash runtimes with
+writable parents or multiple hard links are explicit negative cases. Installed
+dependencies remain a trusted-host assumption, not a supply-chain proof.
+
 The next integration must measure the complete approved toolchain/code/probe,
 bind the native owner's payload and resource intents to retained control
 identity, and prove actual owner death after container creation and after
