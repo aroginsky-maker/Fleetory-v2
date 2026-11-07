@@ -103,14 +103,21 @@ def observation(data, intent, returned_id, now):
 
 class ContainerBinding:
     """One held controller, one consumed intent and one consumed observation attempt."""
-    def __init__(self, session, data, expected_pin):
+    _slot, _kind, _intent_schema = 'backend', 'container', SCHEMA
+    _admit, _observe = staticmethod(admit), staticmethod(observation)
+
+    def _consume(self, session):
         session.consume_backend_attempt()
+
+    def __init__(self, session, data, expected_pin):
+        packet.require((self._slot, self._kind) in (('backend', 'container'), ('image', 'image')))
+        self._consume(session)
         self.session = session
-        self.intent, self._intent_bytes = admit(data, expected_pin, session)
+        self.intent, self._intent_bytes = self._admit(data, expected_pin, session)
         self._pin = expected_pin
         self._attempted, self._bound = False, None
         self._deadline = time.monotonic() + min(60, (self.intent['expiresNs'] - time.time_ns()) / 1_000_000_000)
-        session._write_once('backend-intent.json', dict(schema=SCHEMA, intent=self.intent,
+        session._write_once(self._slot + '-intent.json', dict(schema=self._intent_schema, intent=self.intent,
             intentSha256=expected_pin, backendCreationAuthorized=False, cleanupAuthorized=False))
         self._check()
 
@@ -123,30 +130,35 @@ class ContainerBinding:
         self._check()
         packet.require(not self._attempted)
         self._attempted = True
-        self.session._write_once('backend-binding-attempt.json', dict(schema='fleetory.audit-backend-binding-attempt.v1',
+        self.session._write_once(self._slot + '-binding-attempt.json', dict(schema='fleetory.audit-' + self._slot + '-binding-attempt.v1',
             nonce=self.intent['nonce'], intentSha256=self._pin, status='ATTEMPT_CONSUMED', cleanupAuthorized=False))
         packet.require(type(data) in (bytes, bytearray) and 0 < len(data) <= MAX_OBSERVATION)
         frozen = bytes(data)
         now = time.time_ns()
-        value, created = observation(frozen, self.intent, returned_id, now)
+        value, created = self._observe(frozen, self.intent, returned_id, now)
         self._check()
-        self.session._write_once('backend-binding.json', dict(schema='fleetory.audit-generated-container-binding.v1',
-            nonce=self.intent['nonce'], reservationSha256=self.intent['controlSha256'], intentSha256=self._pin,
-            containerId=value['id'], name=value['name'], imageId=value['imageId'], createdNs=created,
-            observedAtNs=now, observationSha256=packet.digest(frozen), cleanupAuthorized=False))
+        self.session._write_once(self._slot + '-binding.json', self._record(value, created, now, frozen))
         # A flush that crosses either deadline must not return an accepted binding.
         self._check()
         self._bound = value['id']
         return self.report()
 
+    def _record(self, value, created, now, frozen):
+        return dict(schema='fleetory.audit-generated-container-binding.v1', nonce=self.intent['nonce'],
+            reservationSha256=self.intent['controlSha256'], intentSha256=self._pin,
+            containerId=value['id'], name=value['name'], imageId=value['imageId'], createdNs=created,
+            observedAtNs=now, observationSha256=packet.digest(frozen), cleanupAuthorized=False)
+
     def report(self):
         self._check()
-        return dict(schema='fleetory.audit-generated-container-binding-result.v1', nonce=self.intent['nonce'],
+        result = dict(schema='fleetory.audit-generated-' + self._kind + '-binding-result.v1', nonce=self.intent['nonce'],
             intentSha256=self._pin, intentRecorded=True, observationAttemptConsumed=self._attempted,
-            generatedContainerIdBound=self._bound is not None, containerId=self._bound,
             dockerObservationAuthenticated=False, runtimeContinuityVerified=False, legacyNativeOwnerIntegrated=False,
             backendNamespaceBound=False, cleanupAuthorized=False, backendCleanupVerified=False,
             originalInputsRead=False, executionAuthorized=False, fullSystemRecoveryVerified=False, phase7Complete=False)
+        result['generated' + self._kind.title() + 'IdBound'] = self._bound is not None
+        result[self._kind + 'Id'] = self._bound
+        return result
 
 
 if __name__ == '__main__':

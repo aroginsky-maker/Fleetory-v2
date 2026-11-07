@@ -144,6 +144,10 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/audit_backend_binding_tests.py
 
+      - name: Verify consumed untagged image binding on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/audit_image_binding_tests.py
+
       - name: Verify pinned audit-use gate admission on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/audit_use_admission_tests.py
@@ -496,6 +500,10 @@ jobs:
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/audit_backend_binding_tests.py
 
+      - name: Verify consumed untagged image binding
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/audit_image_binding_tests.py
+
       - name: Verify pinned audit-use gate admission
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/audit_use_admission_tests.py
@@ -547,6 +555,10 @@ jobs:
       - name: Verify actual generated Docker control binding
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/native_audit_resource_binding.py
+
+      - name: Verify actual untagged Docker image binding
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/native_audit_image_binding.py
 
       - name: Verify pinned release input inventory
         shell: pwsh

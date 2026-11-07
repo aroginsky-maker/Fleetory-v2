@@ -54,7 +54,8 @@ def validate(text):
         for title, filename in (('held audit control namespace identity', 'audit_control_identity_tests.py'),
                 ('owned process identity and lifetime fence', 'audit_process_fence_tests.py'),
                 ('pinned payload reservation and controller binding', 'audit_payload_launch_tests.py'),
-                ('consumed generated container binding', 'audit_backend_binding_tests.py')):
+                ('consumed generated container binding', 'audit_backend_binding_tests.py'),
+                ('consumed untagged image binding', 'audit_image_binding_tests.py')):
             step = ('      - name: Verify ' + title + platform + '\n'
                 '        shell: pwsh\n'
                 '        run: ' + executable + ' -B ./tests/Fleetory.Tools.Tests/' + filename + '\n')
@@ -79,6 +80,13 @@ def validate(text):
     start = block.index(native_step)
     end = block.find('      - name:', start + len(native_step))
     assert block[start:end if end >= 0 else len(block)].strip() == native_step.strip()
+    image_step = ('      - name: Verify actual untagged Docker image binding\n'
+        '        shell: pwsh\n'
+        '        run: python3 -B ./tests/Fleetory.Tools.Tests/native_audit_image_binding.py\n')
+    assert block.count(image_step) == 1
+    start = block.index(image_step)
+    end = block.find('      - name:', start + len(image_step))
+    assert block[start:end if end >= 0 else len(block)].strip() == image_step.strip()
     for command in ('./eng/verify-quality.ps1', './eng/verify-sonar-issues.ps1', './eng/report-sonar-metrics.ps1'):
         assert text.count(command) == 1 and command in blocks['quality']
     assert '    timeout-minutes: 30\n' in blocks['quality']
@@ -160,6 +168,19 @@ class RecoveryCiLayoutTests(unittest.TestCase):
 
     def test_actual_docker_binding_gate_cannot_be_omitted_or_softened(self):
         command = 'python3 -B ./tests/Fleetory.Tools.Tests/native_audit_resource_binding.py'
+        self.refused(self.text.replace(command, 'omitted', 1))
+        self.refused(self.text.replace(command, command + '\n          ' + command, 1))
+        self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
+
+    def test_image_binding_gate_is_required_on_both_platforms(self):
+        for executable in ('python', 'python3'):
+            command = executable + ' -B ./tests/Fleetory.Tools.Tests/audit_image_binding_tests.py'
+            self.refused(self.text.replace(command, 'omitted', 1))
+            self.refused(self.text.replace(command, command + '\n          ' + command, 1))
+            self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
+
+    def test_actual_image_gate_cannot_be_omitted_or_softened(self):
+        command = 'python3 -B ./tests/Fleetory.Tools.Tests/native_audit_image_binding.py'
         self.refused(self.text.replace(command, 'omitted', 1))
         self.refused(self.text.replace(command, command + '\n          ' + command, 1))
         self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))

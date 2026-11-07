@@ -156,7 +156,7 @@ class ControlIdentity:
         self._records = {}
         self._binding_attempted = False
         self._launch_attempted = False
-        self._backend_attempted = False
+        self._metadata_attempts = set()
         self._closed = False
         self._created = time.time_ns()
 
@@ -191,7 +191,8 @@ class ControlIdentity:
         self.check()
         packet.require(name in ('reservation.json', 'binding.json', 'launch-attempt.json',
             'payload-binding.json', 'payload-release.json', 'backend-attempt.json', 'backend-intent.json',
-            'backend-binding-attempt.json', 'backend-binding.json') and name not in self._records)
+            'backend-binding-attempt.json', 'backend-binding.json', 'image-attempt.json', 'image-intent.json',
+            'image-binding-attempt.json', 'image-binding.json') and name not in self._records)
         data = json.dumps(value, sort_keys=True, separators=(',', ':')).encode() + b'\n'
         packet.require(0 < len(data) <= MAX_RECORD)
         if os.name == 'nt':
@@ -221,10 +222,16 @@ class ControlIdentity:
         return self.report()
 
     def consume_backend_attempt(self):
+        self._consume_metadata_attempt('backend')
+
+    def consume_image_attempt(self):
+        self._consume_metadata_attempt('image')
+
+    def _consume_metadata_attempt(self, kind):
         self.check()
-        packet.require(not self._backend_attempted)
-        self._backend_attempted = True
-        self._write_once('backend-attempt.json', dict(schema='fleetory.audit-backend-attempt.v1',
+        packet.require(kind in ('backend', 'image') and kind not in self._metadata_attempts)
+        self._metadata_attempts.add(kind)
+        self._write_once(kind + '-attempt.json', dict(schema='fleetory.audit-' + kind + '-attempt.v1',
             nonce=self._plan['nonce'], reservationSha256=packet.digest(self._records['reservation.json'][1]),
             status='ATTEMPT_CONSUMED', backendCreationAuthorized=False, cleanupAuthorized=False))
 
