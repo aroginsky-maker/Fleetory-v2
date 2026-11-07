@@ -74,6 +74,19 @@ checks resource absence, rejects a foreign fixture's longer lifetime and checks
 that its generated source is unchanged. The public test proof includes no input
 values or private comparison hashes.
 
+Each of those eight invocations now receives a distinct canonical operation
+nonce. The case builder copies the plan and packet, consumes that child nonce
+in a bounded, ordinal in-memory set before serialization, replaces only the
+plan nonce and repins the encoded plan. It rejects the parent/source nonce,
+noncanonical or zero identities, duplicate/changed-plan reuse, a ninth case
+and oversized output. Failed preparation stays consumed in that set. Caller
+plans, packets, source expectation nonce and known event bytes are preserved.
+The observation fingerprint stays tied to the same data while the expectation
+hash changes with the operation. Portable tests and all eight native cases
+check this separation. This fixture set is neither a durable purpose ledger
+nor authority to retry an original operation. The owner's payload/image names
+remain internally random; held control/resource binding is still open.
+
 ```powershell
 ./tests/Fleetory.Tools.Tests/AuditDataResourceOwnership.Tests.ps1
 python -B tests/Fleetory.Tools.Tests/historical_audit_restore_tests.py

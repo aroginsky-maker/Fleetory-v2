@@ -15,11 +15,9 @@ function Assert-ControllerResourcesAbsent($Resources,[int]$Count){
     Assert-ImmuData (-not (Test-Path -LiteralPath (Join-Path $repo ('artifacts/native-audit-controller-'+$Resources.fixture)))) 'controller-payload-absent'
 }
 function Invoke-GeneratedController($Plan,$Packet,[string]$ExpectedRefusal='',[int]$Resources=0,[string]$Failure='none'){
-    $planBytes=[Text.Encoding]::UTF8.GetBytes(($Plan|ConvertTo-Json -Depth 8 -Compress))
-    $Packet.planBase64=[Convert]::ToBase64String($planBytes)
-    $bytes=[Text.Encoding]::UTF8.GetBytes(($Packet|ConvertTo-Json -Depth 8 -Compress))
+    $case=New-HistoricalControllerCase $Plan $Packet ([Guid]::NewGuid().ToString('D')) $script:controllerCaseNonces
     $r=Invoke-NativeBytes ([Environment]::ProcessPath) @('-NoLogo','-NoProfile','-NonInteractive','-File',(Join-Path $repo 'eng/pilot/Invoke-HistoricalAuditObservation.ps1'),
-        '-ExpectedPlanSha256',(Get-ImmuDataHash $planBytes),'-Python',$Python,'-FailurePoint',$Failure) $bytes 120
+        '-ExpectedPlanSha256',$case.planSha256,'-Python',$Python,'-FailurePoint',$Failure) $case.bytes 120
     $value=$r.Stdout|ConvertFrom-Json -AsHashtable -Depth 20
     if($ExpectedRefusal){
         if($r.ExitCode -ne 1 -or $value.refusal -cne $ExpectedRefusal){
@@ -35,6 +33,7 @@ function Invoke-GeneratedController($Plan,$Packet,[string]$ExpectedRefusal='',[i
     return $value
 }
 function Invoke-NativeHistoricalControllerWorkflow($Source,$Foreign){
+    $script:controllerCaseNonces=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     $script:controllerSourceId=$Source.Id;$script:controllerForeignId=$Foreign.Id
     $script:stage='controller-source';$setup=Probe $Source 'observation-history-seed'
     $expected=New-HistoricalObservationExpectation $Source $setup
@@ -49,12 +48,15 @@ function Invoke-NativeHistoricalControllerWorkflow($Source,$Foreign){
         codeSha256=(Get-HistoricalAuditCodeHash);probeSha256=$context.ProbeHash;ciEvidenceSha256=('a'*64);localEvidenceSha256=('b'*64);
         inputs=$inputs;scope=$scope;limits=@{nativeSeconds=600;containerSeconds=660;maximumArchiveBytes=65536;maximumPacketBytes=131072}}
     $packet=@{schema='fleetory.historical-audit-restore-packet.v1';planBase64=''};foreach($name in $parts.Keys){$packet[$name+'Base64']=[Convert]::ToBase64String($parts[$name])}
+    $parentPlan=ConvertTo-Json $plan -Depth 8 -Compress;$parentPacket=ConvertTo-Json $packet -Depth 8 -Compress
     $script:stage='controller-positive';$positive=Invoke-GeneratedController $plan $packet -Resources 1
     foreach($name in @('sourceStateSignatureVerified','targetStateSignaturesVerified','codeAndProbePinsMatched','inputDigestsMatched','wrongPasswordRefused','readerWriteRefused','restartPreservedObservation','freshTargetCredentialsAndKeys')){Assert-ImmuData ($positive[$name] -eq $true) 'controller-positive-evidence'}
     foreach($name in @('dataOriginAuthenticated','externalGatesAuthenticated','exclusiveUseLedgerVerified','originalPrivatePkiUsed','executionAuthorized','writerAdmissionVerified','fullSystemRecoveryVerified','phase7Complete')){Assert-ImmuData ($positive[$name] -eq $false) 'controller-no-authority-promotion'}
     Assert-ImmuData ($positive.targetLifetimeSeconds -eq 660 -and $positive.nativeDeadlineSeconds -eq 600 -and $positive.nativeRestores -eq 1 -and
         $positive.observation.knownEvents -eq 4 -and $positive.observation.currentKvKeys -eq 4 -and $positive.observation.nativeTransactions -eq 5 -and
         $positive.observation.comparison.nullContextMembersPreserved -eq 1 -and $positive.observation.additionalStateReviewed -eq $false -and
+        $positive.observation.comparison.sourceNonce -ceq $fixture -and
+        $positive.observation.comparison.knownValuesCommitment -ceq $expected.comparison.knownValuesCommitment -and
         $positive.observation.wholeKeyspaceVerified -eq $false -and $positive.observation.observationSha256 -ceq $before.Parsed.observationSha256) 'controller-observed-copy'
     $script:stage='controller-fault-cleanup'
     foreach($failure in @('after-container','after-restore')){$null=Invoke-GeneratedController $plan $packet 'controller-injected-failure' 1 $failure}
@@ -86,8 +88,12 @@ function Invoke-NativeHistoricalControllerWorkflow($Source,$Foreign){
     Assert-ImmuData $denied 'controller-foreign-lifetime-refused';Read-AuditDataStore $context $Foreign
     $after=Read-HistoricalObservation $Source $expected
     Assert-ImmuData ($after.Parsed.observationSha256 -ceq $before.Parsed.observationSha256) 'controller-source-unchanged'
+    Assert-ImmuData ($script:controllerCaseNonces.Count -eq 8 -and -not $script:controllerCaseNonces.Contains($fixture) -and
+        (ConvertTo-Json $plan -Depth 8 -Compress) -ceq $parentPlan -and
+        (ConvertTo-Json $packet -Depth 8 -Compress) -ceq $parentPacket) 'controller-distinct-cases'
     return @{schema='fleetory.generated-historical-audit-controller.v1';verified=$true;scope='generated-only';privateOwnerPipeVerified=$true;
         knownEvents=4;nullMembersPreserved=1;nativeTransactions=5;controllerCases=8;faultCleanupCases=2;typedRefusals=5;nativeArchiveCorruptionRefused=$true;
+        distinctOperationNonces=8;operationNoncesDifferFromSource=$true;sourceIdentityPreserved=$true;parentInputsUnchanged=$true;
         foreignLifetimeRefused=$true;sourceUnchanged=$true;nativeOwnerCleanupVerified=$true;targetLifetimeSeconds=660;nativeDeadlineSeconds=600;
         originalInputsRead=$false;originalPrivatePkiUsed=$false;sourceVpsAccessed=$false;externalGatesAuthenticated=$false;exclusiveUseLedgerVerified=$false;
         historicalComparisonOnly=$true;writerAdmissionVerified=$false;executionAuthorized=$false;fullSystemRecoveryVerified=$false;phase7Complete=$false}

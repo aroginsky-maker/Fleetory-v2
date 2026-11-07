@@ -61,6 +61,24 @@ class HistoricalObservationTests(unittest.TestCase):
         self.assertFalse(value['wholeKeyspaceVerified'])
         self.assertEqual(value['comparison'], self.expected['comparison'])
 
+    def test_distinct_operation_nonce_preserves_source_identity_and_data_fingerprint(self):
+        first = self.observe()
+        source = policy.core.canonical(self.source)
+        for operation in ('abcdefab-1234-4123-8123-000000000001', 'abcdefab-1234-4123-8123-000000000002'):
+            self.expected = policy.build(source, H(source), operation, self.strict['point'], self.strict['producer'])
+            self.observed['nonce'] = operation
+            self.observed['comparison'] = copy.deepcopy(self.expected['comparison'])
+            value = self.observe()
+            self.assertEqual(self.expected['nonce'], operation)
+            self.assertEqual(value['comparison']['sourceNonce'], NONCE)
+            self.assertEqual(self.expected['knownEvents'], self.source['knownEvents'])
+            self.assertEqual(value['comparison'], first['comparison'])
+            self.assertEqual(value['observationSha256'], first['observationSha256'])
+            self.assertNotEqual(value['expectedSha256'], first['expectedSha256'])
+            self.assertFalse(value['executionAuthorized'])
+        self.observed['nonce'] = NONCE
+        self.refused()
+
     def test_strict_and_historical_protocols_do_not_accept_each_other(self):
         with self.assertRaises(ValueError):
             policy.core.expectation(self.expected)
