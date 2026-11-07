@@ -137,6 +137,12 @@ class DirectoryLease:
             fd, self.fd = self.fd, None
             os.close(fd)
 
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        self.close()
+
 
 def namespace_name(nonce):
     packet.identity(nonce)
@@ -182,7 +188,8 @@ class ControlIdentity:
 
     def _write_once(self, name, value):
         self.check()
-        packet.require(name in ('reservation.json', 'binding.json', 'launch-attempt.json') and name not in self._records)
+        packet.require(name in ('reservation.json', 'binding.json', 'launch-attempt.json',
+            'payload-binding.json', 'payload-release.json') and name not in self._records)
         data = json.dumps(value, sort_keys=True, separators=(',', ':')).encode() + b'\n'
         packet.require(0 < len(data) <= MAX_RECORD)
         if os.name == 'nt':

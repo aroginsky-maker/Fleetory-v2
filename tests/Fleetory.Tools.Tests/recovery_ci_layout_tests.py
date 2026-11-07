@@ -52,7 +52,8 @@ def validate(text):
         assert len(commands) == len(cases)
     for key, platform, executable in (('windows-tls-chain', ' on Windows', 'python'), ('quality', '', 'python3')):
         for title, filename in (('held audit control namespace identity', 'audit_control_identity_tests.py'),
-                ('owned process identity and lifetime fence', 'audit_process_fence_tests.py')):
+                ('owned process identity and lifetime fence', 'audit_process_fence_tests.py'),
+                ('pinned payload reservation and controller binding', 'audit_payload_launch_tests.py')):
             step = ('      - name: Verify ' + title + platform + '\n'
                 '        shell: pwsh\n'
                 '        run: ' + executable + ' -B ./tests/Fleetory.Tools.Tests/' + filename + '\n')
@@ -114,6 +115,13 @@ class RecoveryCiLayoutTests(unittest.TestCase):
     def test_process_fence_gate_is_required_once_and_cannot_be_softened(self):
         for executable in ('python', 'python3'):
             command = executable + ' -B ./tests/Fleetory.Tools.Tests/audit_process_fence_tests.py'
+            self.refused(self.text.replace(command, 'omitted', 1))
+            self.refused(self.text.replace(command, command + '\n          ' + command, 1))
+            self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
+
+    def test_payload_binding_gate_is_required_once_and_cannot_be_softened(self):
+        for executable in ('python', 'python3'):
+            command = executable + ' -B ./tests/Fleetory.Tools.Tests/audit_payload_launch_tests.py'
             self.refused(self.text.replace(command, 'omitted', 1))
             self.refused(self.text.replace(command, command + '\n          ' + command, 1))
             self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))

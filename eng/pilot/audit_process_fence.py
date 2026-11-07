@@ -111,7 +111,7 @@ class _Command:
     profile: str
 
     def check(self):
-        packet.require(self.profile in ('generated-worker', 'native-admission-refusal'))
+        packet.require(self.profile in ('generated-worker', 'native-admission-refusal', 'payload-reservation'))
         packet.require(type(self.arguments) is tuple and all(type(x) is str for x in self.arguments))
         self.executable.check()
         for source in self.sources:
@@ -124,6 +124,9 @@ class _Pumps:
         self.stdout, self.stderr = bytearray(), bytearray()
         self.errors, self.threads = [], []
         self.input_written = 0
+        self.expected_input_bytes = len(data)
+        self.resource_metadata = None
+        self.stopping = threading.Event()
 
     def _read(self, stream, target, bound, category):
         try:
@@ -135,27 +138,36 @@ class _Pumps:
                     self.errors.append(category)
                     return
                 target.extend(data)
-        except OSError:
+                self._on_output(category, data)
+        except Exception:
             self.errors.append('output-io')
+
+    def _on_output(self, category, data):
+        return None  # Ordinary workers return opaque application bytes, without a control protocol.
+
+    def _send(self, data):
+        view = memoryview(data)
+        while view:
+            chunk = view[:4096]
+            count = os.write(self.process.stdin.fileno(), chunk)
+            if not 0 < count <= len(chunk):
+                raise OSError('Owned input write refused.')
+            self.input_written += count
+            view = view[count:]
+
+    def _close_input(self):
+        try:
+            self.process.stdin.close()
+        except (OSError, ValueError):
+            self.errors.append('input-io')
 
     def _write(self):
         try:
-            view = memoryview(self.data)
-            while view:
-                chunk = view[:4096]
-                count = os.write(self.process.stdin.fileno(), chunk)
-                if not 0 < count <= len(chunk):
-                    self.errors.append('input-io')
-                    return
-                self.input_written += count
-                view = view[count:]
+            self._send(self.data)
         except OSError:
             self.errors.append('input-io')
         finally:
-            try:
-                self.process.stdin.close()
-            except OSError:
-                self.errors.append('input-io')
+            self._close_input()
 
     def start(self):
         for target, args in ((self._read, (self.process.stdout, self.stdout, MAX_STDOUT, 'stdout-bound')),
@@ -165,6 +177,7 @@ class _Pumps:
             thread.start()
 
     def finish(self):
+        self.stopping.set()
         deadline = time.monotonic_ns() + 3_000_000_000
         for thread in self.threads:
             thread.join(max(0, deadline - time.monotonic_ns()) / 1_000_000_000)
@@ -260,8 +273,25 @@ def _process_evidence(command, observed, ended, pumps, pins_rechecked):
         nativePayloadAccepted=False, nativeResultAuthenticated=False, backendNamespaceBound=False,
         backendCleanupVerified=False, gateOriginAuthenticated=False, dataConsentAuthenticated=False,
         originalInputsRead=False, originalPrivatePkiUsed=False, launchAuthorized=False,
-        fullSystemRecoveryVerified=False, phase7Complete=False)
+        fullSystemRecoveryVerified=False, phase7Complete=False, payload=pumps.resource_metadata if pumps else None)
     return json.dumps(value, sort_keys=True, separators=(',', ':')).encode()
+
+
+def _make_pumps(command, session, child, fence, data, start, seconds):
+    if command.profile == 'payload-reservation':
+        from audit_payload_launch import _ReservationPumps
+        return _ReservationPumps(child, data, command, session, fence, start, seconds)
+    return _Pumps(child, data)
+
+
+def _finish_binding(command, pumps, child, ended, failure):
+    if command.profile != 'payload-reservation' or pumps is None:
+        return failure
+    try:
+        pumps.finalize_binding(child, ended, failure or pumps.errors)
+    except Exception:
+        return failure or 'payload-binding-unverified'
+    return failure
 
 
 def _run_owned(command, session, input_bytes, seconds):
@@ -271,7 +301,8 @@ def _run_owned(command, session, input_bytes, seconds):
     packet.require(type(seconds) is int and 1 <= seconds <= 600)
     data = bytes(input_bytes)
     command.check()
-    packet.require(session._plan['runtimes']['powershell'] == command.executable.digest)
+    role = 'python' if command.profile == 'payload-reservation' else 'powershell'
+    packet.require(session._plan['runtimes'][role] == command.executable.digest)
     session.consume_launch_attempt()  # Persist consumption before creating any process.
     process, fence, pumps, observed, ended, failure = None, None, None, None, None, None
     pins_rechecked = False
@@ -285,7 +316,7 @@ def _run_owned(command, session, input_bytes, seconds):
         session.bind_assertion(process.pid, start_wall, command.executable.digest)
         session.check()
         _check_deadline(start, seconds)
-        pumps = _Pumps(process, data)
+        pumps = _make_pumps(command, session, process, fence, data, start, seconds)
         pumps.start()  # No input was written before OS identity and lifetime fencing.
         _wait_for_owner(process, fence, pumps, start, seconds)
     except Exception as error:
@@ -293,12 +324,13 @@ def _run_owned(command, session, input_bytes, seconds):
     finally:
         ended, close_failure = _finish_owned(process, fence, pumps)
         failure = close_failure or failure
+        failure = _finish_binding(command, pumps, process, ended, failure)
     encoded = _process_evidence(command, observed, ended, pumps, pins_rechecked)
     if failure is not None:
         raise LaunchError(failure, encoded)
     if pumps is not None and pumps.errors:
         raise LaunchError(pumps.errors[0], encoded)
-    if ended is None or not ended['noRunningMembersVerified'] or pumps is None or pumps.input_written != len(data):
+    if ended is None or not ended['noRunningMembersVerified'] or pumps is None or pumps.input_written != pumps.expected_input_bytes:
         raise LaunchError('io-or-fence-unverified', encoded)
     session.check()
     return FencedResult(process.returncode, bytes(pumps.stdout), bytes(pumps.stderr), encoded)

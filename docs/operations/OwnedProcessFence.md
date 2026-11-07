@@ -100,3 +100,5 @@ Original audit dispatch still requires current authenticated gates, original
 public checkpoint trust and the existing consumed audit-only transaction. This
 component creates no new original-data, secret, private-PKI or provider scope.
 Phase 7 remains open; PR #2 stays draft and unmerged.
+
+The separate [pinned payload reservation](PinnedPayloadReservation.md) profile now pins its fixed Python/local-source inventory and binds an exclusively child-created directory to the held control identity before release. Its metadata-only protocol loads no archive, private key or backend. The legacy PowerShell restore owner and backend death cleanup remain separate integration work.
