@@ -21,10 +21,280 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  windows-tls-chain:
+    name: Windows root-only TLS chain
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6, Node.js 24
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: eng/global.ci.json
+
+      - name: Select the pinned CI SDK
+        shell: pwsh
+        run: Copy-Item -LiteralPath eng/global.ci.json -Destination global.json
+
+      - name: Build Server
+        shell: pwsh
+        run: dotnet build src/Fleetory.Server/Fleetory.Server.csproj -c Release
+
+      - name: Verify Agent security on Windows
+        shell: pwsh
+        run: dotnet test tests/Fleetory.Core.Tests/Fleetory.Core.Tests.csproj -c Release --nologo --warnaserror
+
+      - name: Verify Server security on Windows
+        shell: pwsh
+        run: dotnet test tests/Fleetory.Server.Tests/Fleetory.Server.Tests.csproj -c Release --nologo --warnaserror
+
+      - name: Verify signed artifact anti-rollback on Windows
+        shell: pwsh
+        run: |
+          ./tests/Fleetory.Tools.Tests/SignedArtifactVerification.Tests.ps1
+          ./tests/Fleetory.Tools.Tests/SignedArtifactConcurrency.Tests.ps1
+
+      - name: Verify signer evidence snapshot on Windows
+        shell: pwsh
+        run: |
+          ./tests/Fleetory.Tools.Tests/SigningJournalSnapshot.Tests.ps1
+          ./tests/Fleetory.Tools.Tests/SigningJournalCheckpoint.Tests.ps1
+
+      - name: Verify dependency audit gate on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/DependencyAudit.Tests.ps1
+
+      - name: Verify quality command orchestration
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/QualityOrchestration.Tests.ps1
+
+      - name: Verify exact readiness response on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ReadinessResponse.Tests.ps1
+
+      - name: Verify portable audit archive checkpoints on Windows
+        shell: pwsh
+        run: python ./tests/Fleetory.Tools.Tests/audit_archive_tests.py --portable
+
+      - name: Verify pinned recovery files on Windows
+        shell: pwsh
+        run: |
+          python -B ./tests/Fleetory.Tools.Tests/recovery_files_tests.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -B ./tests/Fleetory.Tools.Tests/recovery_composition_tests.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python -B ./tests/Fleetory.Tools.Tests/server_data_inputs_tests.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify retained Server pair metadata on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/retained_pair_review_tests.py
+
+      - name: Verify retained native input selection on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/retained_input_selection_tests.py
+
+      - name: Verify PostgreSQL v2 transcript contract on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/pg_inventory_v2_tests.py
+
+      - name: Verify generated audit history capture on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/audit_history_inputs_tests.py
+
+      - name: Verify bounded audit observation on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/audit_observation_tests.py
+
+      - name: Verify historical audit observation scope on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/historical_audit_observation_tests.py
+
+      - name: Verify historical controller input bounds on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/historical_audit_restore_tests.py
+
+      - name: Verify historical controller refusal policy on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/HistoricalAuditControllerPolicy.Tests.ps1
+
+      - name: Verify audit resource ownership on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/AuditDataResourceOwnership.Tests.ps1
+
+      - name: Verify held audit control namespace identity on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/audit_control_identity_tests.py
+
+      - name: Verify owned process identity and lifetime fence on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/audit_process_fence_tests.py
+
+      - name: Verify pinned audit-use gate admission on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/audit_use_admission_tests.py
+
+      - name: Verify consumed audit-use transaction on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/audit_use_transaction_tests.py
+
+      - name: Verify independent recovery CI jobs on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/recovery_ci_layout_tests.py
+
+      - name: Verify audit-only pinned byte capture on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/audit_archive_input_tests.py
+
+      - name: Verify scoped PostgreSQL expectation source on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/audit_expectation_source_tests.py
+
+      - name: Verify sanitized expectation diagnostics on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/audit_expectation_diagnostic_tests.py
+
+      - name: Verify independent production audit expectations on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/AuditEventExpectations.Tests.ps1 -Python (Get-Command python).Source
+
+      - name: Verify audit observation refusal policy on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/AuditObservationPolicy.Tests.ps1
+
+      - name: Verify generated v2 Server composition inputs on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/v2_server_composition_tests.py
+
+      - name: Verify audit history typed refusal policy on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/AuditHistoryPolicy.Tests.ps1
+
+      - name: Verify recovery native exit gate on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/recovery_test_gate_tests.py
+
+      - name: Verify native PostgreSQL data roundtrip policy on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/PgDataRoundtripPolicy.Tests.ps1
+
+      - name: Verify native immudb data roundtrip policy on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ImmuDataRoundtripPolicy.Tests.ps1
+
+      - name: Verify fresh native Server pair admission on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/fresh_server_pair_tests.py
+
+      - name: Verify synthetic recovery isolation contract on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/recovery_isolation_tests.py
+
+      - name: Verify pinned release input inventory on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/release_inputs_tests.py
+
+      - name: Verify code-only recovery build contexts on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/recovery_build_tests.py
+
+      - name: Verify creation-only real-image target on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/recovery_target_tests.py
+
+      - name: Verify target LOGIN/SCRAM contract on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/recovery_login_tests.py
+
+      - name: Verify leaf TLS recovery scope on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/recovery_tls_tests.py
+
+      - name: Verify native PostgreSQL TCP TLS contract on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/recovery_postgres_tls_tests.py
+
+      - name: Verify closed recovery configuration contract on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/recovery_configuration_tests.py
+
+      - name: Verify Sonar issue gate on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/SonarIssueGate.Tests.ps1
+
+      - name: Verify provider target credential lease contract on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/OpenBaoTargetCredential.Tests.ps1
+
+      - name: Verify provider recovery transport bounds on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ProviderRecoveryTransport.Tests.ps1
+
+      - name: Verify provider recovery controller refusals on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ProviderRecoveryController.Tests.ps1
+
+      - name: Verify native signer worker boundary on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativeSignerBoundary.Tests.ps1
+
+      - name: Verify native journal PostgreSQL boundary on Windows
+        shell: pwsh
+        run: |
+          ./tests/Fleetory.Tools.Tests/NativeJournalBoundary.Tests.ps1
+          ./tests/Fleetory.Tools.Tests/NativeWorkerRuntime.Tests.ps1
+
+      - name: Verify native Server audit boundary on Windows
+        shell: pwsh
+        run: |
+          ./tests/Fleetory.Tools.Tests/NativeAuditBoundary.Tests.ps1
+          ./tests/Fleetory.Tools.Tests/NativeLiveHost.Tests.ps1
+
+      - name: Verify fresh client TLS fixture on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/DisposableClientTls.Tests.ps1
+
+      - name: Verify root-only Windows TLS chain
+        shell: pwsh
+        run: ./eng/verify-windows-tls-chain.ps1
+
+      - name: Verify immudb TLS probe on Windows PowerShell 5.1
+        shell: powershell
+        run: ./tests/Fleetory.Tools.Tests/ImmudbTlsProbe.Tests.ps1
+
+      - name: Verify PHASE 7 readiness on Windows PowerShell 5.1
+        shell: powershell
+        run: ./tests/Fleetory.Tools.Tests/Phase7Readiness.Tests.ps1
+
+      - name: Verify immudb authenticated TLS transport on Windows PowerShell 5.1
+        shell: powershell
+        run: ./tests/Fleetory.Tools.Tests/ImmudbHttpTransport.Tests.ps1
+
+      - name: Verify receipt export and anchor binding on Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          ./tests/Fleetory.Tools.Tests/ImmudbReceiptExport.Tests.ps1
+          ./tests/Fleetory.Tools.Tests/ImmudbReceiptExportVerification.Tests.ps1
+
+      - name: Verify receipt checkpoint rollback guard on Windows PowerShell 5.1
+        shell: powershell
+        run: ./tests/Fleetory.Tools.Tests/ImmudbReceiptCheckpoint.Tests.ps1
+
+      - name: Verify restore point and deferred anchor on Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          ./tests/Fleetory.Tools.Tests/ImmudbStateVerification.Tests.ps1
+          ./tests/Fleetory.Tools.Tests/ImmudbRestoreCheckpoint.Tests.ps1
+
   quality:
-    name: Strict build, tests, coverage and Sonar
-    runs-on: ubuntu-latest
+    name: Strict build, tests, coverage and Sonar execution
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
+    permissions:
+      contents: read
+      checks: read
 
     env:
       SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
@@ -36,17 +306,21 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6, Node.js 24
         with:
           fetch-depth: 0
 
       - name: Set up .NET 10
-        uses: actions/setup-dotnet@v6
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
         with:
-          dotnet-version: '10.0.x'
+          global-json-file: eng/global.ci.json
+
+      - name: Select the pinned CI SDK
+        shell: pwsh
+        run: Copy-Item -LiteralPath eng/global.ci.json -Destination global.json
 
       - name: Set up JDK 21
-        uses: actions/setup-java@c1e323688fd81a25caa38c78aa6df2d33d3e20d9
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5, Node.js 24
         with:
           java-version: '21'
           distribution: 'zulu'
@@ -58,10 +332,240 @@ jobs:
           java -version
           docker info --format '{{.ServerVersion}}'
 
-      - name: Run Fleetory quality verification
+      - name: Verify external pilot Compose profile
+        shell: pwsh
+        run: ./eng/pilot/Test-PilotProfile.ps1
+
+      - name: Verify lab certificate rotation and rollback
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/CertificateProvisioning.Tests.ps1
+
+      - name: Verify secret scan gate and committed history
         shell: pwsh
         run: |
-          ./eng/verify-quality.ps1
+          ./tests/Fleetory.Tools.Tests/SecretScan.Tests.ps1
+          ./eng/verify-secret-scan.ps1
+
+      - name: Verify Windows gateway PKI policy
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/WindowsPkiProvisioning.Tests.ps1
+
+      - name: Verify signed artifact anti-rollback
+        shell: pwsh
+        run: |
+          ./tests/Fleetory.Tools.Tests/SignedArtifactVerification.Tests.ps1
+          ./tests/Fleetory.Tools.Tests/SignedArtifactConcurrency.Tests.ps1
+
+      - name: Verify command trust reconciliation
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/CommandTrustReconciliation.Tests.ps1
+
+      - name: Verify immudb signed-state receipt anchor
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ImmudbStateVerification.Tests.ps1
+
+      - name: Verify immudb restore acceptance
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ImmudbRestoreAcceptance.Tests.ps1
+
+      - name: Verify restore point and deferred anchor
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ImmudbRestoreCheckpoint.Tests.ps1
+
+      - name: Verify immudb authenticated TLS transport
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ImmudbHttpTransport.Tests.ps1
+
+      - name: Verify immudb receipt export package
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ImmudbReceiptExport.Tests.ps1
+
+      - name: Verify immudb receipt export independently
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ImmudbReceiptExportVerification.Tests.ps1
+
+      - name: Verify receipt checkpoint rollback guard
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ImmudbReceiptCheckpoint.Tests.ps1
+
+      - name: Verify PHASE 7 readiness record
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/Phase7Readiness.Tests.ps1
+
+      - name: Verify immudb TLS probe over a real TLS connection
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ImmudbTlsProbe.Tests.ps1
+
+      - name: Verify retained signer evidence snapshot
+        shell: pwsh
+        run: |
+          ./tests/Fleetory.Tools.Tests/SigningJournalSnapshot.Tests.ps1
+          ./tests/Fleetory.Tools.Tests/SigningJournalCheckpoint.Tests.ps1
+
+      - name: Verify dependency audit gate
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/DependencyAudit.Tests.ps1
+
+      - name: Verify quality command orchestration
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/QualityOrchestration.Tests.ps1
+
+      - name: Verify exact readiness response
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ReadinessResponse.Tests.ps1
+
+      - name: Verify protected pilot audit archive
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/AuditArchive.Tests.ps1
+
+      - name: Verify pinned recovery files
+        shell: pwsh
+        run: |
+          python3 -B ./tests/Fleetory.Tools.Tests/recovery_files_tests.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python3 -B ./tests/Fleetory.Tools.Tests/recovery_composition_tests.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python3 -B ./tests/Fleetory.Tools.Tests/server_data_inputs_tests.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Verify retained Server pair metadata
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/retained_pair_review_tests.py
+
+      - name: Verify retained native input selection
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/retained_input_selection_tests.py
+
+      - name: Verify PostgreSQL v2 transcript contract
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/pg_inventory_v2_tests.py
+
+      - name: Verify generated audit history capture
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/audit_history_inputs_tests.py
+
+      - name: Verify bounded audit observation
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/audit_observation_tests.py
+
+      - name: Verify historical audit observation scope
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/historical_audit_observation_tests.py
+
+      - name: Verify historical controller input bounds
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/historical_audit_restore_tests.py
+
+      - name: Verify historical controller refusal policy
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/HistoricalAuditControllerPolicy.Tests.ps1
+
+      - name: Verify audit resource ownership
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/AuditDataResourceOwnership.Tests.ps1
+
+      - name: Verify held audit control namespace identity
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/audit_control_identity_tests.py
+
+      - name: Verify owned process identity and lifetime fence
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/audit_process_fence_tests.py
+
+      - name: Verify pinned audit-use gate admission
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/audit_use_admission_tests.py
+
+      - name: Verify consumed audit-use transaction
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/audit_use_transaction_tests.py
+
+      - name: Verify independent recovery CI jobs
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/recovery_ci_layout_tests.py
+
+      - name: Verify audit-only pinned byte capture
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/audit_archive_input_tests.py
+
+      - name: Verify scoped PostgreSQL expectation source
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/audit_expectation_source_tests.py
+
+      - name: Verify sanitized expectation diagnostics
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/audit_expectation_diagnostic_tests.py
+
+      - name: Verify independent production audit expectations
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/AuditEventExpectations.Tests.ps1 -Python (Get-Command python3).Source
+
+      - name: Verify audit observation refusal policy
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/AuditObservationPolicy.Tests.ps1
+
+      - name: Verify generated v2 Server composition inputs
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/v2_server_composition_tests.py
+
+      - name: Verify audit history typed refusal policy
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/AuditHistoryPolicy.Tests.ps1
+
+      - name: Verify recovery native exit gate
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/recovery_test_gate_tests.py
+
+      - name: Verify synthetic recovery network isolation
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/recovery_isolation_tests.py --docker
+
+      - name: Verify pinned release input inventory
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/release_inputs_tests.py
+
+      - name: Verify code-only recovery build contexts
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/recovery_build_tests.py
+
+      - name: Verify creation-only real-image target
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/recovery_target_tests.py
+
+      - name: Verify target LOGIN/SCRAM with isolated PostgreSQL
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/recovery_login_tests.py --docker
+
+      - name: Verify synthetic leaf TLS in network-none sandbox
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/recovery_tls_tests.py --docker
+
+      - name: Verify native PostgreSQL TCP TLS and downgrade refusals
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/recovery_postgres_tls_tests.py --docker
+
+      - name: Verify native unstarted recovery configuration and File provider
+        shell: pwsh
+        run: |
+          dotnet publish ./eng/RecoveryConfiguration/RecoveryConfiguration.csproj -c Release -o artifacts/recovery-configuration --disable-build-servers
+          if ($LASTEXITCODE -ne 0) { throw 'Recovery configuration probe publish failed.' }
+          docker pull mcr.microsoft.com/dotnet/aspnet:10.0@sha256:de0ee358cdd672f7017a003bed21e9ac9ed48a27c922a59b18175b6e82fa7fee
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned recovery runtime unavailable.' }
+          python3 -B ./tests/Fleetory.Tools.Tests/recovery_configuration_tests.py --native-publish artifacts/recovery-configuration
+
+      - name: Verify Sonar issue gate
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/SonarIssueGate.Tests.ps1
+
+      - name: Run Fleetory quality verification
+        shell: pwsh
+        run: ./eng/verify-quality.ps1
+
+      - name: Enforce zero Sonar issues
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./eng/verify-sonar-issues.ps1
 
       - name: Report Sonar percentages
         if: always()
@@ -70,3 +574,154 @@ jobs:
           SONAR_PULL_REQUEST: ${{ github.event.pull_request.number }}
         run: |
           ./eng/report-sonar-metrics.ps1
+
+  native-data-recovery:
+    name: Native database and audit recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6, Node.js 24
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: eng/global.ci.json
+
+      - name: Select the pinned CI SDK
+        shell: pwsh
+        run: Copy-Item -LiteralPath eng/global.ci.json -Destination global.json
+
+      - name: Build isolated native fixture prerequisites
+        shell: pwsh
+        run: |
+          dotnet tool restore
+          if ($LASTEXITCODE -ne 0) { throw 'Native fixture tool restore failed.' }
+          dotnet restore Fleetory.sln --force -warnaserror -p:FleetoryRequireDependencyAudit=true -p:NuGetAudit=true -p:NuGetAuditMode=all -p:NuGetAuditLevel=low -p:RestoreUseStaticGraphEvaluation=false
+          if ($LASTEXITCODE -ne 0) { throw 'Native fixture dependency audit failed.' }
+          dotnet build Fleetory.sln -c Release --no-restore --disable-build-servers --warnaserror
+          if ($LASTEXITCODE -ne 0) { throw 'Native fixture prerequisite build failed.' }
+
+      - name: Verify generated native Server database and audit components
+        shell: pwsh
+        run: |
+          dotnet restore ./eng/ServerBackendProbe/ServerBackendProbe.csproj --disable-parallel
+          if ($LASTEXITCODE -ne 0) { throw 'Server backend probe restore failed.' }
+          ./tests/Fleetory.Tools.Tests/NativeServerBackend.Tests.ps1
+
+      - name: Verify nonempty native PostgreSQL data roundtrip
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativePgDataRoundtrip.Tests.ps1 -Python (Get-Command python3).Source
+
+      - name: Verify native PostgreSQL v2 readback and role omissions
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativePgInventoryV2.Tests.ps1 -Python (Get-Command python3).Source
+
+      - name: Verify nonempty native immudb data roundtrip
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativeImmuDataRoundtrip.Tests.ps1 -Python (Get-Command python3).Source
+
+      - name: Verify generated five-transaction audit history and distinct signing keys
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativeAuditHistory.Tests.ps1 -Python (Get-Command python3).Source
+
+      - name: Verify bounded native audit observation and unknown entry kinds
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativeAuditHistory.Tests.ps1 -Profile observation -Python (Get-Command python3).Source
+
+      - name: Verify generated historical audit restore and observation scope
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativeAuditHistory.Tests.ps1 -Profile historical-observation -Python (Get-Command python3).Source
+
+      - name: Verify owned historical audit controller and cleanup
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativeAuditHistory.Tests.ps1 -Profile historical-controller -Python (Get-Command python3).Source
+
+      - name: Verify coherent native Server pair restore and lifecycle
+        shell: pwsh
+        run: |
+          python3 -B ./tests/Fleetory.Tools.Tests/fresh_server_pair_tests.py
+          if ($LASTEXITCODE -ne 0) { throw 'Fresh pair admission contract failed.' }
+          ./tests/Fleetory.Tools.Tests/NativeServerPair.Tests.ps1 -Python (Get-Command python3).Source
+
+      - name: Verify generated v2 Server composition and before-start refusals
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativeServerPair.Tests.ps1 -Profile v2 -Python (Get-Command python3).Source
+
+  native-provider-recovery:
+    name: Native provider and identity recovery
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6, Node.js 24
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: eng/global.ci.json
+
+      - name: Select the pinned CI SDK
+        shell: pwsh
+        run: Copy-Item -LiteralPath eng/global.ci.json -Destination global.json
+
+      - name: Build isolated native fixture prerequisites
+        shell: pwsh
+        run: |
+          dotnet tool restore
+          if ($LASTEXITCODE -ne 0) { throw 'Native fixture tool restore failed.' }
+          dotnet restore Fleetory.sln --force -warnaserror -p:FleetoryRequireDependencyAudit=true -p:NuGetAudit=true -p:NuGetAuditMode=all -p:NuGetAuditLevel=low -p:RestoreUseStaticGraphEvaluation=false
+          if ($LASTEXITCODE -ne 0) { throw 'Native fixture dependency audit failed.' }
+          dotnet build Fleetory.sln -c Release --no-restore --disable-build-servers --warnaserror
+          if ($LASTEXITCODE -ne 0) { throw 'Native fixture prerequisite build failed.' }
+
+      - name: Verify isolated pilot PKI and database provisioning
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/PilotProvisioning.Tests.ps1
+
+      - name: Verify Keycloak identity snapshot and isolated restore
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/IdentityBackup.Tests.ps1
+
+      - name: Verify isolated OpenBao Raft recovery
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/OpenBaoRaftRecovery.Tests.ps1
+
+      - name: Verify generated native signer backend authentication
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativeSignerBackend.Tests.ps1
+
+      - name: Verify generated native signer journal readiness
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativeJournalBackend.Tests.ps1
+
+  quality-gate:
+    name: Strict build, tests, coverage and Sonar
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    needs: [quality, windows-tls-chain, native-data-recovery, native-provider-recovery]
+    if: always()
+    permissions:
+      contents: read
+    steps:
+      - name: Require all execution jobs to succeed
+        shell: pwsh
+        env:
+          FLEETORY_GATE_RESULTS: ${{ toJSON(needs) }}
+        run: |
+          $ErrorActionPreference='Stop'
+          Set-StrictMode -Version Latest
+          if ([string]::IsNullOrWhiteSpace($env:FLEETORY_GATE_RESULTS) -or $env:FLEETORY_GATE_RESULTS.Length -gt 16384) { throw 'Missing or oversized job results.' }
+          $results=$env:FLEETORY_GATE_RESULTS | ConvertFrom-Json -AsHashtable -Depth 4
+          $required=@('quality','windows-tls-chain','native-data-recovery','native-provider-recovery')
+          if ($results -isnot [hashtable] -or $results.Count -ne $required.Count) { throw 'Unexpected job result set.' }
+          foreach ($name in $required) {
+            if (-not $results.ContainsKey($name) -or $results[$name].result -cne 'success') { throw 'A required execution job did not succeed.' }
+          }
+          Write-Output 'ALL JOBS GATE PASS:4/4 required execution jobs succeeded.'

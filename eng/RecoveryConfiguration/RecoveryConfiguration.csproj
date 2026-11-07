@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup><OutputType>Exe</OutputType></PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Fleetory.Server/Fleetory.Server.csproj" />
+    <ProjectReference Include="../../src/Fleetory.CommandSigner.Host/Fleetory.CommandSigner.Host.csproj" />
+  </ItemGroup>
+</Project>

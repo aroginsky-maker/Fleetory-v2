@@ -15,6 +15,7 @@ $CoverageDirectory = Split-Path -Parent $CoveragePath
 $Phase6PersistenceTestProject = Join-Path $RepoRoot 'tests/Fleetory.Persistence.Tests/Fleetory.Persistence.Tests.csproj'
 
 $StrictBuildStatus = 'NOT RUN'
+$DependencyAuditStatus = 'NOT RUN'
 $TestsStatus = 'NOT RUN'
 $ArchitectureTestsStatus = 'NOT RUN'
 $CoverageStatus = 'NOT RUN'
@@ -27,6 +28,7 @@ function Write-Summary {
     Write-Host 'Fleetory quality verification summary'
     Write-Host '-------------------------------------'
     Write-Host ("STRICT BUILD        {0}" -f $StrictBuildStatus)
+    Write-Host ("DEPENDENCY AUDIT    {0}" -f $DependencyAuditStatus)
     Write-Host ("TESTS               {0}" -f $TestsStatus)
     Write-Host ("ARCHITECTURE TESTS  {0}" -f $ArchitectureTestsStatus)
     Write-Host ("COVERAGE            {0} / {1}" -f $CoverageDisplay, $CoverageStatus)
@@ -72,6 +74,18 @@ function Get-ProductionLineCoverage([string] $Path) {
     return [math]::Round(($covered * 100.0) / $total, 2)
 }
 
+$SonarHostUrl = [Environment]::GetEnvironmentVariable('SONAR_HOST_URL')
+$SonarProjectKey = [Environment]::GetEnvironmentVariable('SONAR_PROJECT_KEY')
+$SonarToken = [Environment]::GetEnvironmentVariable('SONAR_TOKEN')
+$sonarValues = @($SonarHostUrl, $SonarProjectKey, $SonarToken)
+$setSonarValues = @($sonarValues | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count
+if ($setSonarValues -ne 0 -and $setSonarValues -ne 3) {
+    $SonarAnalysisStatus = 'FAIL (incomplete environment)'
+    $SonarQualityGateStatus = 'FAIL (incomplete environment)'
+    Write-Summary
+    exit 1
+}
+
 if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
     $StrictBuildStatus = 'FAIL (.NET SDK missing)'
     Write-Summary
@@ -81,23 +95,22 @@ if (-not (Get-Command dotnet -ErrorAction SilentlyContinue)) {
 if (Test-Path -LiteralPath $Phase6PersistenceTestProject -PathType Leaf) {
     $phase6ConnectionString = [Environment]::GetEnvironmentVariable('FLEETORY_TEST_CONNECTION_STRING')
 
-    if ([string]::IsNullOrWhiteSpace($phase6ConnectionString)) {
-        if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-            $TestsStatus = 'FAIL (Docker unavailable for PHASE 6 PostgreSQL tests)'
-            Write-Warning 'PHASE 6 PostgreSQL tests require Docker or an explicit FLEETORY_TEST_CONNECTION_STRING.'
-            Write-Summary
-            exit 1
-        }
-
-        & docker info --format '{{.ServerVersion}}' *> $null
-        if ($LASTEXITCODE -ne 0) {
-            $TestsStatus = 'FAIL (Docker unavailable for PHASE 6 PostgreSQL tests)'
-            Write-Warning 'PHASE 6 PostgreSQL tests require Docker or an explicit FLEETORY_TEST_CONNECTION_STRING.'
-            Write-Summary
-            exit 1
-        }
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        $TestsStatus = 'FAIL (Docker unavailable for signer process isolation)'
+        Write-Warning 'The full suite requires Docker for signer process isolation, including with an external PostgreSQL test database.'
+        Write-Summary
+        exit 1
     }
-    else {
+
+    & docker info --format '{{.ServerVersion}}' *> $null
+    if ($LASTEXITCODE -ne 0) {
+        $TestsStatus = 'FAIL (Docker unavailable for signer process isolation)'
+        Write-Warning 'The full suite requires a running Docker engine for signer process isolation.'
+        Write-Summary
+        exit 1
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($phase6ConnectionString)) {
         $builder = [System.Data.Common.DbConnectionStringBuilder]::new()
         try {
             $builder.ConnectionString = $phase6ConnectionString
@@ -121,11 +134,18 @@ if (Test-Path -LiteralPath $Phase6PersistenceTestProject -PathType Leaf) {
 
 Push-Location $RepoRoot
 try {
-    if ((Invoke-DotnetStep @('restore', 'Fleetory.sln')) -ne 0) {
-        $StrictBuildStatus = 'FAIL (restore)'
+    if ((Invoke-DotnetStep @(
+        'restore', 'Fleetory.sln', '--force', '-warnaserror',
+        '-p:FleetoryRequireDependencyAudit=true', '-p:NuGetAudit=true',
+        '-p:NuGetAuditMode=all', '-p:NuGetAuditLevel=low', '-p:RestoreUseStaticGraphEvaluation=false'
+    )) -ne 0) {
+        $StrictBuildStatus = 'FAIL (restore/dependency audit)'
+        $DependencyAuditStatus = 'FAIL'
         Write-Summary
         exit 1
     }
+
+    $DependencyAuditStatus = 'PASS'
 
     if ((Invoke-DotnetStep @('build', 'Fleetory.sln', '-c', 'Release', '--no-restore')) -ne 0) {
         $StrictBuildStatus = 'FAIL'
@@ -135,7 +155,32 @@ try {
 
     $StrictBuildStatus = 'PASS'
 
-    if ((Invoke-DotnetStep @('test', 'Fleetory.sln', '-c', 'Release', '--no-build', '--no-restore')) -ne 0) {
+    $testArguments = @('test', 'Fleetory.sln', '-c', 'Release', '--no-build', '--no-restore')
+    if ($setSonarValues -eq 0) {
+        if ((Invoke-DotnetStep @('tool', 'restore')) -ne 0) {
+            $CoverageStatus = 'FAIL (tool restore)'
+            Write-Summary
+            exit 1
+        }
+
+        # This path tests the strict build once, with coverage attached to that run.
+        # Delete only the generated report; an older successful report cannot satisfy this run.
+        if (Test-Path -LiteralPath $CoveragePath) {
+            if (-not (Test-Path -LiteralPath $CoveragePath -PathType Leaf) -or
+                ((Get-Item -LiteralPath $CoveragePath).Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+                throw 'Coverage output must be a regular generated file.'
+            }
+            Remove-Item -LiteralPath $CoveragePath -Force
+        }
+        New-Item -ItemType Directory -Path $CoverageDirectory -Force | Out-Null
+        $testArguments = @(
+            'tool', 'run', 'dotnet-coverage', '--allow-roll-forward', '--',
+            'collect', 'dotnet test Fleetory.sln -c Release --no-build --no-restore',
+            '-f', 'xml', '-o', $CoveragePath
+        )
+    }
+
+    if ((Invoke-DotnetStep $testArguments) -ne 0) {
         $TestsStatus = 'FAIL'
     }
     else {
@@ -157,12 +202,6 @@ try {
         exit 1
     }
 
-    $SonarHostUrl = [Environment]::GetEnvironmentVariable('SONAR_HOST_URL')
-    $SonarProjectKey = [Environment]::GetEnvironmentVariable('SONAR_PROJECT_KEY')
-    $SonarToken = [Environment]::GetEnvironmentVariable('SONAR_TOKEN')
-    $sonarValues = @($SonarHostUrl, $SonarProjectKey, $SonarToken)
-    $setSonarValues = @($sonarValues | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }).Count
-
     if ($setSonarValues -eq 3) {
         try {
             & (Join-Path $PSScriptRoot 'verify-sonar.ps1')
@@ -175,35 +214,6 @@ try {
             Write-Warning $_.Exception.Message
         }
     }
-    elseif ($setSonarValues -eq 0) {
-        if ((Invoke-DotnetStep @('tool', 'restore')) -ne 0) {
-            $CoverageStatus = 'FAIL (tool restore)'
-            Write-Summary
-            exit 1
-        }
-
-        Remove-Item -Recurse -Force $CoverageDirectory -ErrorAction SilentlyContinue
-        New-Item -ItemType Directory -Path $CoverageDirectory -Force | Out-Null
-
-        $testCommand = 'dotnet test Fleetory.sln -c Release --no-build --no-restore'
-        if ((Invoke-DotnetStep @(
-            'tool', 'run', 'dotnet-coverage', '--allow-roll-forward', '--',
-            'collect', $testCommand,
-            '-f', 'xml',
-            '-o', $CoveragePath
-        )) -ne 0) {
-            $CoverageStatus = 'FAIL'
-            Write-Summary
-            exit 1
-        }
-    }
-    else {
-        $SonarAnalysisStatus = 'FAIL (incomplete environment)'
-        $SonarQualityGateStatus = 'FAIL (incomplete environment)'
-        Write-Summary
-        exit 1
-    }
-
     try {
         $coveragePercent = Get-ProductionLineCoverage $CoveragePath
         $CoverageDisplay = ('{0:N2}%' -f $coveragePercent)

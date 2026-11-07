@@ -1,4 +1,6 @@
 using System.Net;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using Fleetory.Core.Contracts;
 using Fleetory.Core.Persistence;
 using Fleetory.Platform.Contracts;
@@ -48,7 +50,25 @@ public sealed class PostgreSqlPersistenceTests(PostgreSqlTestFixture fixture)
             "SELECT to_regclass('platform.person_projections') IS NOT NULL"));
         Assert.True(await DatabaseObjectExistsAsync(
             connection,
+            "SELECT to_regclass('platform.audit_events') IS NOT NULL"));
+        Assert.True(await DatabaseObjectExistsAsync(
+            connection,
+            "SELECT to_regclass('platform.audit_export_queue') IS NOT NULL"));
+        Assert.True(await DatabaseObjectExistsAsync(
+            connection,
+            "SELECT to_regclass('platform.authorization_scopes') IS NOT NULL"));
+        Assert.True(await DatabaseObjectExistsAsync(
+            connection,
+            "SELECT to_regclass('platform.authorization_roles') IS NOT NULL"));
+        Assert.True(await DatabaseObjectExistsAsync(
+            connection,
+            "SELECT to_regclass('platform.authorization_assignments') IS NOT NULL"));
+        Assert.True(await DatabaseObjectExistsAsync(
+            connection,
             "SELECT to_regclass('core.devices') IS NOT NULL"));
+        Assert.True(await DatabaseObjectExistsAsync(
+            connection,
+            "SELECT to_regclass('core.agent_certificates') IS NOT NULL"));
         Assert.True(await DatabaseObjectExistsAsync(
             connection,
             "SELECT to_regclass('platform.\"__EFMigrationsHistory\"') IS NOT NULL"));
@@ -66,8 +86,32 @@ public sealed class PostgreSqlPersistenceTests(PostgreSqlTestFixture fixture)
             1L,
             await ExecuteScalarInt64Async(
                 connection,
+                "SELECT COUNT(*) FROM platform.\"__EFMigrationsHistory\" " +
+                "WHERE \"MigrationId\" = '202610160001_AddPlatformAuditOutbox'"));
+        Assert.Equal(
+            1L,
+            await ExecuteScalarInt64Async(
+                connection,
+                "SELECT COUNT(*) FROM platform.\"__EFMigrationsHistory\" " +
+                "WHERE \"MigrationId\" = '202610160002_AddPlatformAuthorization'"));
+        Assert.Equal(
+            1L,
+            await ExecuteScalarInt64Async(
+                connection,
+                "SELECT COUNT(*) FROM platform.\"__EFMigrationsHistory\" " +
+                "WHERE \"MigrationId\" = '202610160003_AddAuditExportLease'"));
+        Assert.Equal(
+            1L,
+            await ExecuteScalarInt64Async(
+                connection,
                 "SELECT COUNT(*) FROM core.\"__EFMigrationsHistory\" " +
                 "WHERE \"MigrationId\" = '202609280002_InitialCorePersistence'"));
+        Assert.Equal(
+            1L,
+            await ExecuteScalarInt64Async(
+                connection,
+                "SELECT COUNT(*) FROM core.\"__EFMigrationsHistory\" " +
+                "WHERE \"MigrationId\" = '20261016212919_AddAgentCertificateBindings'"));
 
         const string crossContextForeignKeySql = """
             SELECT COUNT(*)
@@ -152,11 +196,47 @@ public sealed class PostgreSqlPersistenceTests(PostgreSqlTestFixture fixture)
     }
 
     [Fact]
+    public async Task Agent_certificate_bindings_support_rotation_and_immediate_revocation()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var deviceId = new DeviceId(Guid.NewGuid());
+        using var firstCertificate = CreateAgentCertificate(now);
+        using var rotatedCertificate = CreateAgentCertificate(now);
+        var firstFingerprint = Convert.ToHexString(SHA256.HashData(firstCertificate.RawData));
+        var rotatedFingerprint = Convert.ToHexString(SHA256.HashData(rotatedCertificate.RawData));
+
+        await using var scope = fixture.Services.CreateAsyncScope();
+        var database = scope.ServiceProvider.GetRequiredService<CoreDbContext>();
+        database.Devices.Add(DeviceRecord.Create(deviceId, "Certificate test device", now));
+        var firstBinding = AgentCertificateRecord.Create(
+            deviceId, firstFingerprint, now.AddDays(-1), now.AddDays(1));
+        database.AgentCertificates.Add(firstBinding);
+        database.AgentCertificates.Add(AgentCertificateRecord.Create(
+            deviceId, rotatedFingerprint, now.AddDays(-1), now.AddDays(1)));
+        await database.SaveChangesAsync();
+
+        var verifier = scope.ServiceProvider.GetRequiredService<IAgentCertificateBindingVerifier>();
+        Assert.Equal(AgentCertificateStatus.Accepted,
+            await verifier.VerifyAsync(deviceId, firstCertificate));
+        Assert.Equal(AgentCertificateStatus.Accepted,
+            await verifier.VerifyAsync(deviceId, rotatedCertificate));
+
+        firstBinding.Revoke(now);
+        await database.SaveChangesAsync();
+
+        Assert.Equal(AgentCertificateStatus.Revoked,
+            await verifier.VerifyAsync(deviceId, firstCertificate));
+        Assert.Equal(AgentCertificateStatus.Accepted,
+            await verifier.VerifyAsync(deviceId, rotatedCertificate));
+    }
+
+    [Fact]
     public async Task Readiness_is_healthy_when_postgresql_is_available()
     {
         var connectionString = RequireConnectionString();
         var arguments = new[]
         {
+            "--environment=Development",
             $"--ConnectionStrings:Fleetory={connectionString}"
         };
 
@@ -257,6 +337,7 @@ public sealed class PostgreSqlPersistenceTests(PostgreSqlTestFixture fixture)
     {
         var arguments = new[]
         {
+            "--environment=Development",
             $"--ConnectionStrings:Fleetory={connectionString}"
         };
 
@@ -288,4 +369,16 @@ public sealed class PostgreSqlPersistenceTests(PostgreSqlTestFixture fixture)
         new UriBuilder(Uri.UriSchemeHttp, IPAddress.Loopback.ToString(), 0)
             .Uri
             .GetLeftPart(UriPartial.Authority);
+
+    private static X509Certificate2 CreateAgentCertificate(DateTimeOffset now)
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var request = new CertificateRequest("CN=Fleetory Test Agent", key, HashAlgorithmName.SHA256);
+        request.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
+        request.CertificateExtensions.Add(new X509KeyUsageExtension(
+            X509KeyUsageFlags.DigitalSignature, true));
+        var purposes = new OidCollection { new Oid("1.3.6.1.5.5.7.3.2") };
+        request.CertificateExtensions.Add(new X509EnhancedKeyUsageExtension(purposes, true));
+        return request.CreateSelfSigned(now.AddDays(-1), now.AddDays(1));
+    }
 }
