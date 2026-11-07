@@ -29,7 +29,7 @@ function Invoke-GeneratedController($Plan,$Packet,[string]$ExpectedRefusal='',[i
         Assert-ImmuData ($r.ExitCode -eq 0 -and [string]::IsNullOrWhiteSpace($r.Stderr) -and $value.schema -ceq 'fleetory.historical-audit-owned-observation.v1' -and $value.verified -eq $true -and $value.cleanupVerified -eq $true) 'controller-positive'
     }
     Assert-ControllerResourcesAbsent $value.resources $Resources
-    Assert-ImmuData ($value.resources.payloadClaimed -eq ($ExpectedRefusal -cne 'controller-code-pin')) 'controller-payload-claim-evidence'
+    Assert-ImmuData ($value.resources.payloadClaimed -eq ($ExpectedRefusal -cnotin @('controller-code-pin','controller-code-revision'))) 'controller-payload-claim-evidence'
     return $value
 }
 function Invoke-NativeHistoricalControllerWorkflow($Source,$Foreign){
@@ -44,13 +44,14 @@ function Invoke-NativeHistoricalControllerWorkflow($Source,$Foreign){
         state=[Text.Encoding]::UTF8.GetBytes(($setup.state|ConvertTo-Json -Depth 8 -Compress));publicKey=[IO.File]::ReadAllBytes((Public-KeyPath 'source'))}
     $inputs=@{archiveBytes=$backup.Length};foreach($name in $parts.Keys){$inputs[$name+'Sha256']=Get-ImmuDataHash $parts[$name]}
     $scope=@{historicalComparisonOnly=$true};foreach($name in @('writerAdmissionVerified','stateMutationAuthorized','sourceOriginAuthenticated','sourceIndependenceAuthenticated','productionTokensIssued','originalPrivatePkiUsed','providerAdminSession','executionAuthorized','fullSystemRecoveryVerified','phase7Complete')){$scope[$name]=$false}
-    $plan=@{schema='fleetory.historical-audit-restore-plan.v1';purpose='historical-known-events-sandbox-observation.v1';nonce=$fixture;revision=((& git -C $repo rev-parse HEAD).Trim());
-        codeSha256=(Get-HistoricalAuditCodeHash);probeSha256=$context.ProbeHash;ciEvidenceSha256=('a'*64);localEvidenceSha256=('b'*64);
+    $probeBundle=Get-HistoricalProbeBundle $published
+    $plan=@{schema='fleetory.historical-audit-restore-plan.v2';purpose='historical-known-events-sandbox-observation.v1';nonce=$fixture;revision=((& git -C $repo rev-parse HEAD).Trim());
+        codeSha256=(Get-HistoricalAuditCodeHash);probeSha256=$context.ProbeHash;probeBundleSha256=$probeBundle.sha256;ciEvidenceSha256=('a'*64);localEvidenceSha256=('b'*64);
         inputs=$inputs;scope=$scope;limits=@{nativeSeconds=600;containerSeconds=660;maximumArchiveBytes=65536;maximumPacketBytes=131072}}
     $packet=@{schema='fleetory.historical-audit-restore-packet.v1';planBase64=''};foreach($name in $parts.Keys){$packet[$name+'Base64']=[Convert]::ToBase64String($parts[$name])}
     $parentPlan=ConvertTo-Json $plan -Depth 8 -Compress;$parentPacket=ConvertTo-Json $packet -Depth 8 -Compress
     $script:stage='controller-positive';$positive=Invoke-GeneratedController $plan $packet -Resources 1
-    foreach($name in @('sourceStateSignatureVerified','targetStateSignaturesVerified','codeAndProbePinsMatched','inputDigestsMatched','wrongPasswordRefused','readerWriteRefused','restartPreservedObservation','freshTargetCredentialsAndKeys')){Assert-ImmuData ($positive[$name] -eq $true) 'controller-positive-evidence'}
+    foreach($name in @('sourceStateSignatureVerified','targetStateSignaturesVerified','codeAndProbePinsMatched','inputDigestsMatched','wrongPasswordRefused','readerWriteRefused','restartPreservedObservation','freshTargetCredentialsAndKeys','codeInventoryV2Matched','publishedProbeBundleMatched','containerProbeBundleMatched')){Assert-ImmuData ($positive[$name] -eq $true) 'controller-positive-evidence'}
     foreach($name in @('dataOriginAuthenticated','externalGatesAuthenticated','exclusiveUseLedgerVerified','originalPrivatePkiUsed','executionAuthorized','writerAdmissionVerified','fullSystemRecoveryVerified','phase7Complete')){Assert-ImmuData ($positive[$name] -eq $false) 'controller-no-authority-promotion'}
     Assert-ImmuData ($positive.targetLifetimeSeconds -eq 660 -and $positive.nativeDeadlineSeconds -eq 600 -and $positive.nativeRestores -eq 1 -and
         $positive.observation.knownEvents -eq 4 -and $positive.observation.currentKvKeys -eq 4 -and $positive.observation.nativeTransactions -eq 5 -and
@@ -64,6 +65,12 @@ function Invoke-NativeHistoricalControllerWorkflow($Source,$Foreign){
     foreach($name in @('codeSha256','probeSha256')){
         $bad=($plan|ConvertTo-Json -Depth 8)|ConvertFrom-Json -AsHashtable;$bad[$name]='0'*64
         $category=if($name -ceq 'codeSha256'){'controller-code-pin'}else{'controller-probe-pin'}
+        $null=Invoke-GeneratedController $bad $packet $category
+    }
+    foreach($name in @('revision','probeBundleSha256')){
+        $bad=($plan|ConvertTo-Json -Depth 8)|ConvertFrom-Json -AsHashtable
+        $bad[$name]=if($name -ceq 'revision'){'0'*40}else{'0'*64}
+        $category=if($name -ceq 'revision'){'controller-code-revision'}else{'controller-probe-bundle-pin'}
         $null=Invoke-GeneratedController $bad $packet $category
     }
     $script:stage='controller-crypto-refusals'
@@ -88,12 +95,13 @@ function Invoke-NativeHistoricalControllerWorkflow($Source,$Foreign){
     Assert-ImmuData $denied 'controller-foreign-lifetime-refused';Read-AuditDataStore $context $Foreign
     $after=Read-HistoricalObservation $Source $expected
     Assert-ImmuData ($after.Parsed.observationSha256 -ceq $before.Parsed.observationSha256) 'controller-source-unchanged'
-    Assert-ImmuData ($script:controllerCaseNonces.Count -eq 8 -and -not $script:controllerCaseNonces.Contains($fixture) -and
+    Assert-ImmuData ($script:controllerCaseNonces.Count -eq 10 -and -not $script:controllerCaseNonces.Contains($fixture) -and
         (ConvertTo-Json $plan -Depth 8 -Compress) -ceq $parentPlan -and
         (ConvertTo-Json $packet -Depth 8 -Compress) -ceq $parentPacket) 'controller-distinct-cases'
     return @{schema='fleetory.generated-historical-audit-controller.v1';verified=$true;scope='generated-only';privateOwnerPipeVerified=$true;
-        knownEvents=4;nullMembersPreserved=1;nativeTransactions=5;controllerCases=8;faultCleanupCases=2;typedRefusals=5;nativeArchiveCorruptionRefused=$true;
-        distinctOperationNonces=8;operationNoncesDifferFromSource=$true;sourceIdentityPreserved=$true;parentInputsUnchanged=$true;
+        knownEvents=4;nullMembersPreserved=1;nativeTransactions=5;controllerCases=10;faultCleanupCases=2;typedRefusals=7;nativeArchiveCorruptionRefused=$true;
+        distinctOperationNonces=10;operationNoncesDifferFromSource=$true;sourceIdentityPreserved=$true;parentInputsUnchanged=$true;
+        codeInventoryV2Matched=$true;publishedProbeBundleMatched=$true;containerProbeBundleMatched=$true;revisionMismatchRefused=$true;probeBundleMismatchRefused=$true;
         foreignLifetimeRefused=$true;sourceUnchanged=$true;nativeOwnerCleanupVerified=$true;targetLifetimeSeconds=660;nativeDeadlineSeconds=600;
         originalInputsRead=$false;originalPrivatePkiUsed=$false;sourceVpsAccessed=$false;externalGatesAuthenticated=$false;exclusiveUseLedgerVerified=$false;
         historicalComparisonOnly=$true;writerAdmissionVerified=$false;executionAuthorized=$false;fullSystemRecoveryVerified=$false;phase7Complete=$false}

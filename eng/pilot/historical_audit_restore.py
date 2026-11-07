@@ -6,7 +6,7 @@ import json
 import historical_audit_observation as history
 import fresh_server_pair as packet
 
-SCHEMA = 'fleetory.historical-audit-restore-plan.v1'
+SCHEMA = 'fleetory.historical-audit-restore-plan.v2'
 PACKET = 'fleetory.historical-audit-restore-packet.v1'
 PURPOSE = 'historical-known-events-sandbox-observation.v1'
 MAX_ARCHIVE = 65536
@@ -20,11 +20,11 @@ def plan(data, pin):
     frozen = bytes(data)
     packet.require(packet.digest(frozen) == packet.hex_value(pin))
     value = packet.strict_json(frozen, 16384)
-    packet.keys(value, 'schema purpose nonce revision codeSha256 probeSha256 ciEvidenceSha256 localEvidenceSha256 inputs scope limits')
+    packet.keys(value, 'schema purpose nonce revision codeSha256 probeSha256 probeBundleSha256 ciEvidenceSha256 localEvidenceSha256 inputs scope limits')
     packet.require(value['schema'] == SCHEMA and value['purpose'] == PURPOSE)
     packet.identity(value['nonce'])
     packet.require(type(value['revision']) is str and re.fullmatch('[a-f0-9]{40}', value['revision']) is not None)
-    for name in ('codeSha256', 'probeSha256', 'ciEvidenceSha256', 'localEvidenceSha256'):
+    for name in ('codeSha256', 'probeSha256', 'probeBundleSha256', 'ciEvidenceSha256', 'localEvidenceSha256'):
         packet.hex_value(value[name])
     inputs = value['inputs']
     packet.keys(inputs, 'archiveBytes archiveSha256 valuesSha256 stateSha256 publicKeySha256')

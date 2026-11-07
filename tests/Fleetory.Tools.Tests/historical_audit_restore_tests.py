@@ -21,7 +21,7 @@ def fixture():
     parts = dict(archive=b'IMMUBACKUP' + b'a' * 54, values=C(vector.source), state=C(vector.observed['stateBefore']),
         publicKey=b'-----BEGIN PUBLIC KEY-----\nAQ==\n-----END PUBLIC KEY-----')
     declared = dict(schema=policy.SCHEMA, purpose=policy.PURPOSE, nonce=vectors.NONCE, revision='a' * 40,
-        codeSha256='b' * 64, probeSha256='c' * 64, ciEvidenceSha256='d' * 64, localEvidenceSha256='e' * 64,
+        codeSha256='b' * 64, probeSha256='c' * 64, probeBundleSha256='f' * 64, ciEvidenceSha256='d' * 64, localEvidenceSha256='e' * 64,
         inputs=dict(archiveBytes=len(parts['archive']), **{name + 'Sha256': H(value) for name, value in parts.items()}),
         scope=dict(historicalComparisonOnly=True, **{name: False for name in policy.FALSE_FLAGS}),
         limits=dict(nativeSeconds=600, containerSeconds=660, maximumArchiveBytes=65536, maximumPacketBytes=131072))
@@ -90,6 +90,17 @@ class HistoricalRestoreInputTests(unittest.TestCase):
         for name in self.parts:
             self.setUp()
             self.plan['inputs'][name + 'Sha256'] = '0' * 64
+            self.refused()
+
+    def test_v1_or_missing_or_malformed_probe_bundle_pin_is_refused(self):
+        for change in ('v1', 'missing', 'wrong-type', 'bad-hash'):
+            self.setUp()
+            if change == 'v1':
+                self.plan['schema'] = 'fleetory.historical-audit-restore-plan.v1'
+            elif change == 'missing':
+                self.plan.pop('probeBundleSha256')
+            else:
+                self.plan['probeBundleSha256'] = 42 if change == 'wrong-type' else 'z' * 64
             self.refused()
 
     def test_scope_authority_true_or_numeric_false_refused(self):

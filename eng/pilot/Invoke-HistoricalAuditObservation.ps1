@@ -64,11 +64,15 @@ try{
     $admission=$admitted.Stdout|ConvertFrom-Json -AsHashtable -Depth 8
     $body=([Text.UTF8Encoding]::new($false,$true).GetString($raw))|ConvertFrom-Json -AsHashtable -Depth 16
     $plan=([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($body.planBase64)))|ConvertFrom-Json -AsHashtable -Depth 8
-    $stage='code';Assert-ImmuData ((Get-HistoricalAuditCodeHash) -ceq $plan.codeSha256) 'controller-code-pin'
+    $stage='code';$codeSnapshot=Get-HistoricalAuditCodeSnapshot $repo
+    Assert-ImmuData ($codeSnapshot.revision -ceq $plan.revision) 'controller-code-revision'
+    Assert-ImmuData ($codeSnapshot.sha256 -ceq $plan.codeSha256) 'controller-code-pin'
     New-AuditDataPublicPayload $repo $context
     $published=Publish-NativeProbe $repo 'ServerBackendProbe' $root
     $context.ProbeHash=(Get-FileHash -LiteralPath (Join-Path $published 'ServerBackendProbe.dll') -Algorithm SHA256).Hash.ToLowerInvariant()
     Assert-ImmuData ($context.ProbeHash -ceq $plan.probeSha256) 'controller-probe-pin'
+    $context.ProbeBundle=Get-HistoricalProbeBundle $published
+    Assert-ImmuData ($context.ProbeBundle.sha256 -ceq $plan.probeBundleSha256) 'controller-probe-bundle-pin'
     [IO.File]::WriteAllBytes((Join-Path $root 'source-public.pem'),[Convert]::FromBase64String($body.publicKeyBase64))
     . (Join-Path $repo 'eng/verify-immudb-state.ps1') -Address 'https://127.0.0.1:8090' -PublicKeyPath (Join-Path $root 'source-public.pem') -AnchorPath (Join-Path $root 'unused-anchor') -BearerToken ''
     $stage='source-signature'
@@ -108,7 +112,8 @@ try{
     $proof=@{schema='fleetory.historical-audit-owned-observation.v1';verified=$true;historicalComparisonOnly=$true;observation=$again;
         nativeRestores=1;targetLifetimeSeconds=660;nativeDeadlineSeconds=600;sourceStateSignatureVerified=$true;targetStateSignaturesVerified=$true;
         codeAndProbePinsMatched=$true;inputDigestsMatched=$true;wrongPasswordRefused=$true;readerWriteRefused=$true;restartPreservedObservation=$true;
-        freshTargetCredentialsAndKeys=$true;dataOriginAuthenticated=$false;externalGatesAuthenticated=$false;exclusiveUseLedgerVerified=$false;
+        freshTargetCredentialsAndKeys=$true;codeInventoryV2Matched=$true;publishedProbeBundleMatched=$true;containerProbeBundleMatched=$true;
+        dataOriginAuthenticated=$false;externalGatesAuthenticated=$false;exclusiveUseLedgerVerified=$false;
         sourceFileOpened=$false;sourceVpsAccessed=$false;originalPrivatePkiUsed=$false;originalKeyContinuityVerified=$false;
         writerAdmissionVerified=$false;productionTokensIssued=$false;executionAuthorized=$false;fullSystemRecoveryVerified=$false;phase7Complete=$false}
 }catch{

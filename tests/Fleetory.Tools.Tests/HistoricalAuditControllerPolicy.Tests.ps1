@@ -19,7 +19,7 @@ Write-Output ('HISTORICAL CONTROLLER POLICY PASS:'+ $count +' operational refusa
 
 $parent='12345678-1234-4123-8123-123456789abc'
 $sourceBytes=[Text.Encoding]::UTF8.GetBytes((@{nonce=$parent;knownEvents=@('event-one','event-two')}|ConvertTo-Json -Compress))
-$plan=@{schema='fleetory.historical-audit-restore-plan.v1';nonce=$parent;inputs=@{valuesSha256=(Get-ImmuDataHash $sourceBytes)}}
+$plan=@{schema='fleetory.historical-audit-restore-plan.v2';nonce=$parent;inputs=@{valuesSha256=(Get-ImmuDataHash $sourceBytes)}}
 $packet=@{schema='fleetory.historical-audit-restore-packet.v1';planBase64='';valuesBase64=[Convert]::ToBase64String($sourceBytes)}
 $beforePlan=ConvertTo-Json $plan -Depth 8 -Compress;$beforePacket=ConvertTo-Json $packet -Depth 8 -Compress
 function New-CaseRegistry{return ,([Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal))}
@@ -33,7 +33,7 @@ function Refused-Case([scriptblock]$Action,[string]$Category){
     if(-not $seen){throw 'Generated controller case accepted invalid preparation.'}
 }
 $registry=New-CaseRegistry
-foreach($n in 1..8){
+foreach($n in 1..10){
     $case=New-HistoricalControllerCase $plan $packet (Case-Nonce $n) $registry
     $body=[Text.Encoding]::UTF8.GetString($case.bytes)|ConvertFrom-Json -AsHashtable
     $declared=[Convert]::FromBase64String($body.planBase64)
@@ -43,9 +43,9 @@ foreach($n in 1..8){
         $body.valuesBase64 -ceq $packet.valuesBase64 -and
         ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($body.valuesBase64))|ConvertFrom-Json).nonce -ceq $parent) 'case-roundtrip'
 }
-Assert-ImmuData ($registry.Count -eq 8 -and (ConvertTo-Json $plan -Depth 8 -Compress) -ceq $beforePlan -and
+Assert-ImmuData ($registry.Count -eq 10 -and (ConvertTo-Json $plan -Depth 8 -Compress) -ceq $beforePlan -and
     (ConvertTo-Json $packet -Depth 8 -Compress) -ceq $beforePacket) 'case-parent-unchanged'
-Refused-Case {New-HistoricalControllerCase $plan $packet (Case-Nonce 9) $registry} 'controller-case-registry'
+Refused-Case {New-HistoricalControllerCase $plan $packet (Case-Nonce 11) $registry} 'controller-case-registry'
 foreach($nonce in @($parent,[Guid]::Empty.ToString('D'),(Case-Nonce 1).ToUpperInvariant(),(Case-Nonce 1).Replace('-',''),'bad',$true,42)){
     Refused-Case {New-HistoricalControllerCase $plan $packet $nonce (New-CaseRegistry)} 'controller-case-nonce'
 }
@@ -69,4 +69,4 @@ foreach($nonce in @([Guid]::Empty.ToString('D'),'BAD')){
     $bad=$plan.Clone();$bad.nonce=$nonce
     Refused-Case {New-HistoricalControllerCase $bad $packet (Case-Nonce 5) (New-CaseRegistry)} 'controller-case-nonce'
 }
-Write-Output 'HISTORICAL CONTROLLER CASE PASS:8 distinct child nonces;source identity and parent bytes preserved;replay,changed-plan,preparation failure,bounds,canonical identities andregistry refusals verified. Generated-only in-memory consumption;no native launch orauthority.'
+Write-Output 'HISTORICAL CONTROLLER CASE PASS:10 distinct child nonces;source identity and parent bytes preserved;replay,changed-plan,preparation failure,bounds,canonical identities andregistry refusals verified. Generated-only in-memory consumption;no native launch orauthority.'

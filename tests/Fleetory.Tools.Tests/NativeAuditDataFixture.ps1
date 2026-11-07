@@ -45,6 +45,7 @@ function New-AuditDataStore($Context,[string]$Role){
         '--entrypoint','/bin/sh',$Context.ImageName,'-c',('exec /bin/sleep '+(Get-AuditDataLifetime $Context)))
     $s.Id=(Invoke-Docker $arguments).Stdout.Trim();Write-AuditDataLedger $Context;Read-AuditDataStore $Context $s
     Assert-ImmuData ((Invoke-Docker @('exec',$s.Id,'sha256sum','/tool/ServerBackendProbe.dll')).Stdout.Split(' ')[0] -ceq $Context.ProbeHash) 'probe-code-identity'
+    if($Context.ContainsKey('ProbeBundle')){Assert-HistoricalProbeContainerBundle $Context $s}
     $null=Invoke-Docker @('exec',$s.Id,'/bin/mkdir','-m','700','/tmp/empty-ca-dir')
     foreach($entry in @(@('/tmp/ca.pem',$Context.Tls.RootCertificatePem),@('/tmp/server.crt',$Context.Tls.ServerCertificatePem),@('/tmp/server.key',$Context.Tls.ServerPrivateKeyPem),
         @('/tmp/client.crt',$Context.Tls.ClientCertificatePem),@('/tmp/client.key',$Context.Tls.ClientPrivateKeyPem),@('/tmp/state.key',$Context.SigningPems[$Role]))){Write-AuditDataSlot $Context $s $entry[0] $entry[1]}

@@ -120,6 +120,10 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/HistoricalAuditControllerPolicy.Tests.ps1
 
+      - name: Verify historical application input snapshots on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/HistoricalAuditInputPins.Tests.ps1
+
       - name: Verify audit resource ownership on Windows
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/AuditDataResourceOwnership.Tests.ps1
@@ -463,6 +467,10 @@ jobs:
       - name: Verify historical controller refusal policy
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/HistoricalAuditControllerPolicy.Tests.ps1
+
+      - name: Verify historical application input snapshots
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/HistoricalAuditInputPins.Tests.ps1
 
       - name: Verify audit resource ownership
         shell: pwsh

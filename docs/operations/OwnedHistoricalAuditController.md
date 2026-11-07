@@ -9,10 +9,11 @@ Its output includes private comparison hashes; an owning operator must capture
 that output outside Git and public logs.
 
 The separately SHA-256-pinned plan uses schema
-`fleetory.historical-audit-restore-plan.v1`, purpose
+`fleetory.historical-audit-restore-plan.v2`, purpose
 `historical-known-events-sandbox-observation.v1` and a canonical nonzero nonce.
 It pins all four input byte strings, archive length, measured code bundle and
-probe digest. CI/local evidence digests are binding metadata; this component
+probe DLL and complete published application digest. The [input snapshots](LegacyAuditInputPins.md)
+also measure the active root build inputs and Git revision. CI/local evidence digests are binding metadata; this component
 does **not** authenticate those external evidence records or claim consent.
 The pure decoder rejects duplicate/extra fields, noncanonical Base64, stale
 pins, wrong types and scope promotion. Archive and packet bounds are 64 KiB and
@@ -65,16 +66,16 @@ binding, a fixed external launcher and independent process-death cleanup remain
 required before original dispatch or caller-selected namespaces are introduced.
 
 Normal and handled-failure cleanup verifies deletion of the owned container,
-image and public payload. The generated native contract exercises eight owner
+image and public payload. The generated native contract exercises ten owner
 invocations: success, failures after container creation and after restore,
-wrong code/probe pins, wrong source public pin, invalid source signature and a
+wrong revision/code/probe/bundle pins, wrong source public pin, invalid source signature and a
 native checksum refusal after independently repinning corrupted archive bytes.
 Operational failures cannot satisfy the typed refusal cases. It independently
 checks resource absence, rejects a foreign fixture's longer lifetime and checks
 that its generated source is unchanged. The public test proof includes no input
 values or private comparison hashes.
 
-Each of those eight invocations now receives a distinct canonical operation
+Each of those ten invocations now receives a distinct canonical operation
 nonce. The case builder copies the plan and packet, consumes that child nonce
 in a bounded, ordinal in-memory set before serialization, replaces only the
 plan nonce and repins the encoded plan. It rejects the parent/source nonce,

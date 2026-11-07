@@ -62,6 +62,14 @@ def validate(text):
             start = block.index(step)
             end = block.find('      - name:', start + len(step))
             assert block[start:end if end >= 0 else len(block)].strip() == step.strip()
+        step = ('      - name: Verify historical application input snapshots' + platform + '\n'
+            '        shell: pwsh\n'
+            '        run: ./tests/Fleetory.Tools.Tests/HistoricalAuditInputPins.Tests.ps1\n')
+        block = blocks[key]
+        assert block.count(step) == 1
+        start = block.index(step)
+        end = block.find('      - name:', start + len(step))
+        assert block[start:end if end >= 0 else len(block)].strip() == step.strip()
     for command in ('./eng/verify-quality.ps1', './eng/verify-sonar-issues.ps1', './eng/report-sonar-metrics.ps1'):
         assert text.count(command) == 1 and command in blocks['quality']
     assert '    timeout-minutes: 30\n' in blocks['quality']
@@ -125,6 +133,14 @@ class RecoveryCiLayoutTests(unittest.TestCase):
             self.refused(self.text.replace(command, 'omitted', 1))
             self.refused(self.text.replace(command, command + '\n          ' + command, 1))
             self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
+
+    def test_application_input_gate_is_required_on_both_platforms(self):
+        command = './tests/Fleetory.Tools.Tests/HistoricalAuditInputPins.Tests.ps1'
+        for offset in (0, self.text.index('  quality:')):
+            prefix, tail = self.text[:offset], self.text[offset:]
+            self.refused(prefix + tail.replace(command, 'omitted', 1))
+            self.refused(prefix + tail.replace(command, command + '\n          ' + command, 1))
+            self.refused(prefix + tail.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
 
     def test_actual_aggregate_rejects_failed_cancelled_skipped_or_missing_jobs(self):
         block = jobs(self.text)['quality-gate']
