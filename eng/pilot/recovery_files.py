@@ -45,9 +45,8 @@ def regular_single_file(info):
     return stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and not getattr(info, 'st_file_attributes', 0) & 0x400
 
 
-def _windows_descriptor(path, new_file=False):
-    """Checked final handle: existing read-only input or exclusive new ledger."""
-    import msvcrt
+def windows_file_api():
+    """Shared typed Win32 file-handle primitives; callers select their own access flags."""
     from ctypes import wintypes
     kernel = ctypes.WinDLL('kernel32', use_last_error=True)
     create = kernel.CreateFileW
@@ -60,6 +59,14 @@ def _windows_descriptor(path, new_file=False):
     close = kernel.CloseHandle
     close.argtypes = [wintypes.HANDLE]
     close.restype = wintypes.BOOL
+    return kernel
+
+
+def _windows_descriptor(path, new_file=False):
+    """Checked final handle: existing read-only input or exclusive new ledger."""
+    import msvcrt
+    kernel = windows_file_api()
+    create, final, close = kernel.CreateFileW, kernel.GetFinalPathNameByHandleW, kernel.CloseHandle
     access, sharing, disposition, flags = (0xC0000000, 0, 1, 0x80200080) if new_file else (0x80000000, 1, 3, 0x08200000)
     handle = create(str(path), access, sharing, None, disposition, flags, None)
     if handle == ctypes.c_void_p(-1).value:

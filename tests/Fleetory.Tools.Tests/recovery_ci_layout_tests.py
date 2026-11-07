@@ -50,6 +50,15 @@ def validate(text):
             matches = [line for line in commands if line == prefix or line.startswith(prefix + ' -Python ')]
             assert len(matches) == 1, (key, name, profile)
         assert len(commands) == len(cases)
+    for key, platform, executable in (('windows-tls-chain', ' on Windows', 'python'), ('quality', '', 'python3')):
+        step = ('      - name: Verify held audit control namespace identity' + platform + '\n'
+            '        shell: pwsh\n'
+            '        run: ' + executable + ' -B ./tests/Fleetory.Tools.Tests/audit_control_identity_tests.py\n')
+        block = blocks[key]
+        assert block.count(step) == 1
+        start = block.index(step)
+        end = block.find('      - name:', start + len(step))
+        assert block[start:end if end >= 0 else len(block)].strip() == step.strip()
     for command in ('./eng/verify-quality.ps1', './eng/verify-sonar-issues.ps1', './eng/report-sonar-metrics.ps1'):
         assert text.count(command) == 1 and command in blocks['quality']
     assert '    timeout-minutes: 30\n' in blocks['quality']
@@ -92,6 +101,13 @@ class RecoveryCiLayoutTests(unittest.TestCase):
         self.refused(self.text.replace('timeout-minutes: 30', 'timeout-minutes: 60'))
         self.refused(self.text.replace('./eng/verify-sonar-issues.ps1', './eng/omitted.ps1'))
         self.refused(self.text.replace('  native-data-recovery:\n', '  native-data-recovery:\n    env:\n      SONAR_TOKEN: copied\n'))
+
+    def test_control_identity_gate_is_required_once_and_cannot_be_softened(self):
+        for executable in ('python', 'python3'):
+            command = executable + ' -B ./tests/Fleetory.Tools.Tests/audit_control_identity_tests.py'
+            self.refused(self.text.replace(command, 'omitted', 1))
+            self.refused(self.text.replace(command, command + '\n          ' + command, 1))
+            self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
 
     def test_actual_aggregate_rejects_failed_cancelled_skipped_or_missing_jobs(self):
         block = jobs(self.text)['quality-gate']

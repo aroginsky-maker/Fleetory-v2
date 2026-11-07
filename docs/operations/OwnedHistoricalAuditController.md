@@ -99,3 +99,10 @@ unverified; a callback result is not a native acceptance receipt.
 Writer admission, execution permission, independent custody/WORM/signoff,
 unknown original state, original native observation and full-system RPO/RTO stay
 open. Phase 7 is incomplete and PR #2 remains draft and unmerged.
+
+The [held control identity](AuditControlIdentity.md) adds exclusive consumed
+control namespaces, retained directory identities and immutable reservation and
+child-assertion records. It neither exposes the owner's payload namespace nor
+authenticates a child process. Its two generated writer-death tests are not
+native backend cleanup acceptance; a fixed measured launcher and actual
+owner/resource supervision remain separate integration work.
