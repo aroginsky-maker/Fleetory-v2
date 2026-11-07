@@ -87,3 +87,5 @@ Legacy resource intent integration, approved toolchain continuity and owner
 death after container creation/restore remain open before original dispatch.
 No new original-data, private PKI, provider/root/issuer or production-token
 authority is granted. Full-system recovery and Phase 7 completion remain open.
+
+The separate [empty metadata reservation mode](NativeEmptyPayloadReservation.md) binds a fresh marker-only directory to this owner and control session. Private legacy payload and backend handoff remain open.

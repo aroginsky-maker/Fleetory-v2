@@ -192,7 +192,8 @@ class ControlIdentity:
         packet.require(name in ('reservation.json', 'binding.json', 'launch-attempt.json',
             'payload-binding.json', 'payload-release.json', 'backend-attempt.json', 'backend-intent.json',
             'backend-binding-attempt.json', 'backend-binding.json', 'image-attempt.json', 'image-intent.json',
-            'image-binding-attempt.json', 'image-binding.json', 'native-ready.json', 'native-close.json') and name not in self._records)
+            'image-binding-attempt.json', 'image-binding.json', 'native-ready.json', 'native-close.json',
+            'native-payload-intent.json') and name not in self._records)
         data = json.dumps(value, sort_keys=True, separators=(',', ':')).encode() + b'\n'
         packet.require(0 < len(data) <= MAX_RECORD)
         if os.name == 'nt':

@@ -57,7 +57,9 @@ def validate(text):
                 ('consumed generated container binding', 'audit_backend_binding_tests.py'),
                 ('consumed untagged image binding', 'audit_image_binding_tests.py'),
                 ('close-only native preparation contracts', 'audit_native_preparation_tests.py'),
-                ('actual historical owner readiness', 'native_audit_preparation.py')):
+                ('actual historical owner readiness', 'native_audit_preparation.py'),
+                ('native empty payload contracts', 'audit_native_payload_tests.py'),
+                ('actual native empty payload handoff', 'native_empty_payload.py')):
             step = ('      - name: Verify ' + title + platform + '\n'
                 '        shell: pwsh\n'
                 '        run: ' + executable + ' -B ./tests/Fleetory.Tools.Tests/' + filename + '\n')
@@ -200,6 +202,14 @@ class RecoveryCiLayoutTests(unittest.TestCase):
             self.refused(self.text.replace(command, 'omitted', 1))
             self.refused(self.text.replace(command, command + '\n          ' + command, 1))
             self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
+
+    def test_native_empty_payload_gates_cannot_be_omitted_duplicated_or_softened(self):
+        for filename in ('audit_native_payload_tests.py', 'native_empty_payload.py'):
+            for executable in ('python', 'python3'):
+                command = executable + ' -B ./tests/Fleetory.Tools.Tests/' + filename
+                self.refused(self.text.replace(command, 'omitted', 1))
+                self.refused(self.text.replace(command, command + '\n          ' + command, 1))
+                self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
 
     def test_actual_aggregate_rejects_failed_cancelled_skipped_or_missing_jobs(self):
         block = jobs(self.text)['quality-gate']

@@ -66,7 +66,10 @@ def _create_record(directory, data):
 
 class OwnedPayload:
     """Child claims its own fresh directory. Failures preserve the unknown outcome."""
-    def __init__(self, repository, value):
+    def __init__(self, repository, value, native_owner_pid=None):
+        owner = os.getpid() if native_owner_pid is None else native_owner_pid
+        packet.require(type(owner) is int and 0 < owner <= 0xffffffff and
+            (native_owner_pid is None or owner == os.getppid()))
         self.value, self._held = value, ExitStack()
         self.parent, self.directory, self.pin = None, None, None
         try:
@@ -80,7 +83,7 @@ class OwnedPayload:
             self.parent.check()
             self.directory = self._held.enter_context(control.DirectoryLease(self.path))
             self.directory_sha = directory_hash(self.directory)
-            self.record = bundle.canonical(marker(value, os.getpid(), self.directory_sha))
+            self.record = bundle.canonical(marker(value, owner, self.directory_sha))
             self.record_sha = packet.digest(self.record)
             _create_record(self.directory, self.record)
             self.pin = self._held.enter_context(process.PinnedFile(self.path / MARKER, self.record_sha))

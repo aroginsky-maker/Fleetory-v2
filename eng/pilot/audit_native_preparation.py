@@ -86,9 +86,13 @@ def close_frame(data, info, ready_pin):
 
 def measure_sources(repository):
     """Trusted-host measurement only; this inventory does not authenticate its origin."""
+    return _measure_sources(repository, SOURCES)
+
+
+def _measure_sources(repository, names):
     result = {}
     root = Path(repository).resolve(strict=True)
-    for name in SOURCES:
+    for name in names:
         path = root / name
         with control.DirectoryLease(path.parent) as parent:
             if path.name == '.editorconfig':
@@ -103,20 +107,31 @@ def measure_sources(repository):
 
 
 class _PreparationPumps(process._Pumps):
+    source_names = SOURCES
+    profile, switch = 'native-preparation', '-PreparationOnly'
+    max_frames = 2
+    refusal_schema = 'fleetory.native-preparation-refused.v1'
+    decode_header = staticmethod(header)
+
+    @classmethod
+    def make_header(cls, native_plan, report, session, source_pins, git_pin):
+        return dict(schema=SCHEMA, nonce=report['nonce'], controlSha256=report['reservationSha256'],
+            planBase64=base64.b64encode(native_plan).decode('ascii'), gitSha256=git_pin)
+
     def __init__(self, child, data, command, session, fence, start, seconds):
         super().__init__(child, data)
         self.command, self.session, self.fence = command, session, fence
         self.start_time, self.seconds = start, seconds
-        self.info = header(data[:-1], session._plan['nativePlanSha256'])
+        self.info = self.decode_header(data[:-1], session._plan['nativePlanSha256'])
         self.ready = threading.Event()
         self.frames, self.pending = [], bytearray()
         self.ready_pin = None
         self.refusal_stage = None
 
     def component_pin(self):
-        values = {name: source.digest for name in SOURCES for source in self.command.sources
+        values = {name: source.digest for name in self.source_names for source in self.command.sources
             if isinstance(source, process.PinnedFile) and source.path == self.command.directory / name}
-        packet.require(set(values) == set(SOURCES))
+        packet.require(set(values) == set(self.source_names))
         return packet.digest(canonical(values))
 
     def _on_output(self, category, data):
@@ -128,18 +143,24 @@ class _PreparationPumps(process._Pumps):
             raw, _, rest = self.pending.partition(b'\n')
             self.pending[:] = rest
             value = packet.strict_json(bytes(raw), MAX_FRAME)
-            packet.require(len(self.frames) < 2)
-            if value.get('schema') == 'fleetory.native-preparation-refused.v1':
-                packet.keys(value, 'schema stage privateInputsAccepted payloadCreated backendCreated')
-                packet.require(value['stage'] in ('header', 'git', 'code', 'close') and
-                    all(value[n] is False for n in ('privateInputsAccepted', 'payloadCreated', 'backendCreated')))
-                self.refusal_stage = value['stage']
-                self.errors.append('native-preparation-refused')
+            packet.require(len(self.frames) < self.max_frames)
+            if value.get('schema') == self.refusal_schema:
+                self._accept_refusal(value)
                 return
-            if not self.frames:
-                self._bind_ready(value, bytes(raw))
-            else:
-                self.frames.append(value)
+            self._accept_frame(value, bytes(raw))
+
+    def _accept_refusal(self, value):
+        packet.keys(value, 'schema stage privateInputsAccepted payloadCreated backendCreated')
+        packet.require(value['stage'] in ('header', 'git', 'code', 'close') and
+            all(value[n] is False for n in ('privateInputsAccepted', 'payloadCreated', 'backendCreated')))
+        self.refusal_stage = value['stage']
+        self.errors.append('native-preparation-refused')
+
+    def _accept_frame(self, value, raw):
+        if not self.frames:
+            self._bind_ready(value, raw)
+        else:
+            self.frames.append(value)
 
     def _bind_ready(self, value, raw):
         packet.keys(value, 'schema nonce revision controlSha256 nativePlanSha256 codeSha256 headerSha256 gitSha256 pid privateInputsAccepted payloadCreated backendCreated')
@@ -155,7 +176,7 @@ class _PreparationPumps(process._Pumps):
         self.ready_pin = packet.digest(raw)
         self.session._write_once('native-ready.json', dict(schema='fleetory.native-preparation-bound.v1',
             nonce=self.info['nonce'], reservationSha256=self.info['controlSha256'], headerSha256=self.info['headerSha256'],
-            readySha256=self.ready_pin, selectedSourcesSha256=self.component_pin(), selectedSourceFiles=len(SOURCES),
+            readySha256=self.ready_pin, selectedSourcesSha256=self.component_pin(), selectedSourceFiles=len(self.source_names),
             actualOwnedProcess=observed, gitExecutableSha256=self.info['gitSha256'], gitExecutablePinned=True,
             privateInputsAccepted=False, backendNamespaceBound=False))
         process._check_deadline(self.start_time, self.seconds)
@@ -206,28 +227,33 @@ class _PreparationPumps(process._Pumps):
 
 def prepare_owner(repository, powershell_path, python_path, git_path, native_plan, source_pins, session, *, git_sha256):
     """Fixed trusted-host close-only launcher. No archive, key, endpoint, command or root wire input."""
+    return _prepare_owner(repository, powershell_path, python_path, git_path, native_plan, source_pins, session,
+        git_sha256, _PreparationPumps)
+
+
+def _prepare_owner(repository, powershell_path, python_path, git_path, native_plan, source_pins, session, git_sha256, factory):
+    """Private fixed-profile construction; callers/wire data cannot choose commands."""
     root = Path(repository).resolve(strict=True)
-    packet.require(type(source_pins) is dict and set(source_pins) == set(SOURCES))
+    packet.require(type(source_pins) is dict and set(source_pins) == set(factory.source_names))
     native_pin = session._plan['nativePlanSha256']
     declared = restore.plan(native_plan, native_pin)
     report = session.report()
     packet.require(declared['nonce'] == report['nonce'] and declared['revision'] == session._plan['revision'] and
         declared['codeSha256'] == session._plan['codeSha256'] and declared['probeSha256'] == session._plan['probeSha256'])
-    value = dict(schema=SCHEMA, nonce=report['nonce'], controlSha256=report['reservationSha256'],
-        planBase64=base64.b64encode(native_plan).decode('ascii'), gitSha256=git_sha256)
+    value = factory.make_header(native_plan, report, session, source_pins, git_sha256)
     data = canonical(value)
-    header(data, native_pin)
+    factory.decode_header(data, native_pin)
     with ExitStack() as held:
         directory = held.enter_context(control.DirectoryLease(root))
         git = _pin_git(held, git_path, git_sha256)
         powershell = held.enter_context(process.PinnedFile(powershell_path, session._plan['runtimes']['powershell'], True))
         python = held.enter_context(process.PinnedFile(python_path, session._plan['runtimes']['python'], True))
-        sources = tuple(held.enter_context(_RootInputPin(root / name, source_pins[name])) for name in SOURCES)
+        sources = tuple(held.enter_context(_RootInputPin(root / name, source_pins[name])) for name in factory.source_names)
         entry = root / 'eng/pilot/Invoke-HistoricalAuditObservation.ps1'
-        arguments = ('-NoLogo', '-NoProfile', '-NonInteractive', '-File', str(entry), '-PreparationOnly',
+        arguments = ('-NoLogo', '-NoProfile', '-NonInteractive', '-File', str(entry), factory.switch,
             '-ExpectedPlanSha256', native_pin, '-Python', str(python.path), '-PreparationGitPath', str(git.path))
         command = process._Command(powershell, (python, git, *sources, directory), arguments, root,
-            process.environment(powershell, (python,)), 'native-preparation', _PreparationPumps)
+            process.environment(powershell, (python,)), factory.profile, factory)
         result = process._run_owned(command, session, data + b'\n', 30)
     packet.require(result.exit_code == 0 and result.stderr == b'')
     return result

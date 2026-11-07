@@ -115,10 +115,11 @@ class _Command:
     transport_factory: object = None
 
     def check(self):
-        packet.require(self.profile in ('generated-worker', 'native-admission-refusal', 'payload-reservation', 'native-preparation'))
-        if self.profile == 'native-preparation':
-            packet.require(getattr(self.transport_factory, '__module__', '') == 'audit_native_preparation' and
-                           getattr(self.transport_factory, '__name__', '') == '_PreparationPumps')
+        packet.require(self.profile in ('generated-worker', 'native-admission-refusal', 'payload-reservation', 'native-preparation', 'native-empty-payload'))
+        factories = {'native-preparation': ('audit_native_preparation', '_PreparationPumps'),
+            'native-empty-payload': ('audit_native_payload', '_NativePayloadPumps')}
+        if self.profile in factories:
+            packet.require((getattr(self.transport_factory, '__module__', ''), getattr(self.transport_factory, '__name__', '')) == factories[self.profile])
         else:
             packet.require(self.transport_factory is None)
         packet.require(type(self.arguments) is tuple and all(type(x) is str for x in self.arguments))
@@ -287,7 +288,7 @@ def _process_evidence(command, observed, ended, pumps, pins_rechecked):
 
 
 def _make_pumps(command, session, child, fence, data, start, seconds):
-    if command.profile == 'native-preparation':
+    if command.profile in ('native-preparation', 'native-empty-payload'):
         return command.transport_factory(child, data, command, session, fence, start, seconds)
     if command.profile == 'payload-reservation':
         from audit_payload_launch import _ReservationPumps
@@ -296,7 +297,7 @@ def _make_pumps(command, session, child, fence, data, start, seconds):
 
 
 def _finish_binding(command, pumps, child, ended, failure):
-    if command.profile not in ('payload-reservation', 'native-preparation') or pumps is None:
+    if command.profile not in ('payload-reservation', 'native-preparation', 'native-empty-payload') or pumps is None:
         return failure
     try:
         pumps.finalize_binding(child, ended, failure or pumps.errors)

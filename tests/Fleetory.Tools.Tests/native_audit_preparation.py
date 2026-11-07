@@ -21,6 +21,15 @@ def sha(path):
     return prep.packet.digest(Path(path).read_bytes())
 
 
+def claim_plan(root, plan, powershell, python):
+    raw = prep.canonical(plan)
+    value = dict(schema=prep.control.SCHEMA, purpose=prep.control.PURPOSE, nonce=plan['nonce'],
+        revision=plan['revision'], nativePlanSha256=prep.packet.digest(raw), codeSha256=plan['codeSha256'],
+        probeSha256=plan['probeSha256'], runtimes={'powershell': sha(powershell), 'python': sha(python)})
+    encoded = prep.canonical(value)
+    return raw, prep.control.claim(root, encoded, prep.packet.digest(encoded))
+
+
 @contextmanager
 def active_sdk_input():
     path = REPO / 'global.json'
@@ -44,12 +53,12 @@ def namespaces():
     return {p.name: (p.lstat().st_dev, p.lstat().st_ino) for p in root.glob('native-audit-controller-*')}
 
 
-def snapshot(powershell, directory):
+def snapshot(powershell, directory, repository=REPO):
     helper = directory / 'measure.ps1'
     helper.write_text("param([string]$Repository)\n$ErrorActionPreference='Stop'\n"
         "foreach($n in @('PilotNativeProcess.ps1','ProviderRecoveryPolicy.ps1','ImmuDataRoundtripPolicy.ps1','HistoricalAuditInputPins.ps1')){. (Join-Path $Repository ('eng/pilot/'+$n))}\n"
         "Get-HistoricalAuditCodeSnapshot $Repository | ConvertTo-Json -Compress\n", encoding='utf-8')
-    result = subprocess.run([str(powershell), '-NoLogo', '-NoProfile', '-File', str(helper), str(REPO)], capture_output=True, timeout=30)
+    result = subprocess.run([str(powershell), '-NoLogo', '-NoProfile', '-File', str(helper), str(repository)], capture_output=True, timeout=30)
     prep.packet.require(result.returncode == 0 and result.stderr == b'')
     return prep.packet.strict_json(result.stdout, 4096)
 
@@ -79,12 +88,7 @@ def run():
             plan.update(nonce=str(uuid.uuid4()), revision=measured['revision'], codeSha256=measured['sha256'])
             if kind == 'wrong-code':
                 plan['codeSha256'] = '0' * 64
-            raw = prep.canonical(plan)
-            control_plan = dict(schema=prep.control.SCHEMA, purpose=prep.control.PURPOSE, nonce=plan['nonce'],
-                revision=plan['revision'], nativePlanSha256=prep.packet.digest(raw), codeSha256=plan['codeSha256'],
-                probeSha256=plan['probeSha256'], runtimes={'powershell': sha(powershell), 'python': sha(python)})
-            encoded = prep.canonical(control_plan)
-            return raw, prep.control.claim(root, encoded, prep.packet.digest(encoded))
+            return claim_plan(root, plan, powershell, python)
 
         raw, claimed = case('wrong-git-preflight')
         with claimed as session, patch.object(prep.process, '_spawn') as spawn:
@@ -110,7 +114,7 @@ def run():
                 with patch.object(prep.process, 'environment', side_effect=shadow_environment):
                     result = prep.prepare_owner(REPO, powershell, python, git, raw, pins, session, git_sha256=git_pin)
             except prep.process.LaunchError as error:
-                stage = json.loads(error.evidence).get('payload', {}).get('refusalStage')
+                stage = (json.loads(error.evidence).get('payload') or {}).get('refusalStage')
                 if stage in ('header', 'git', 'code', 'close'):
                     print('Native readiness refusal stage=' + stage, file=sys.stderr)
                 raise

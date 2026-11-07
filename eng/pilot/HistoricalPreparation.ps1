@@ -16,6 +16,21 @@ function Send-PreparationFrame($Value){
     $stream=[Console]::OpenStandardOutput();$stream.Write($bytes,0,$bytes.Length);$stream.WriteByte(10);$stream.Flush()
     return ,$bytes
 }
+function Assert-PreparationGit([string]$Git,[string]$Expected){
+    Assert-ImmuData ([IO.Path]::IsPathFullyQualified($Git) -and [IO.Path]::GetFileName($Git) -in @('git','git.exe')) 'preparation-git-path'
+    Assert-ImmuData ((Get-HistoricalInputFileHash $Git 67108864).sha256 -ceq $Expected) 'preparation-git-pin'
+}
+function Assert-PreparationSnapshot([string]$Repository,[string]$Git,$Info){
+    $snapshot=Get-HistoricalAuditCodeSnapshot $Repository $Git
+    Assert-ImmuData ($snapshot.revision -ceq $Info.revision -and $snapshot.sha256 -ceq $Info.codeSha256) 'preparation-code'
+    Assert-ImmuData ((Get-HistoricalInputFileHash $Git 67108864).sha256 -ceq $Info.gitSha256) 'preparation-git-changed'
+}
+function Send-PreparationReady($Info){
+    return ,(Send-PreparationFrame @{schema='fleetory.native-preparation-ready.v1';nonce=$Info.nonce;revision=$Info.revision;
+        controlSha256=$Info.controlSha256;nativePlanSha256=$Info.nativePlanSha256;codeSha256=$Info.codeSha256;
+        headerSha256=$Info.headerSha256;gitSha256=$Info.gitSha256;pid=$PID;
+        privateInputsAccepted=$false;payloadCreated=$false;backendCreated=$false})
+}
 function Invoke-HistoricalPreparation([string]$ExpectedPin,[string]$Python,[string]$Repository,[string]$Git){
     $stage='header';$inputStream=[Console]::OpenStandardInput()
     try{
@@ -24,16 +39,9 @@ function Invoke-HistoricalPreparation([string]$ExpectedPin,[string]$Python,[stri
         $checked=Invoke-NativeBytes $Python @('-B',(Join-Path $PSScriptRoot 'audit_native_preparation.py'),'header',$ExpectedPin) $raw 10
         Assert-ImmuData ($checked.ExitCode -eq 0 -and [string]::IsNullOrWhiteSpace($checked.Stderr)) 'preparation-header'
         $info=$checked.Stdout|ConvertFrom-Json -AsHashtable
-        $stage='git'
-        Assert-ImmuData ([IO.Path]::IsPathFullyQualified($Git) -and [IO.Path]::GetFileName($Git) -in @('git','git.exe')) 'preparation-git-path'
-        Assert-ImmuData ((Get-HistoricalInputFileHash $Git 67108864).sha256 -ceq $info.gitSha256) 'preparation-git-pin'
-        $stage='code';$snapshot=Get-HistoricalAuditCodeSnapshot $Repository $Git
-        Assert-ImmuData ($snapshot.revision -ceq $info.revision -and $snapshot.sha256 -ceq $info.codeSha256) 'preparation-code'
-        Assert-ImmuData ((Get-HistoricalInputFileHash $Git 67108864).sha256 -ceq $info.gitSha256) 'preparation-git-changed'
-        $ready=@{schema='fleetory.native-preparation-ready.v1';nonce=$info.nonce;revision=$info.revision;controlSha256=$info.controlSha256;
-            nativePlanSha256=$info.nativePlanSha256;codeSha256=$info.codeSha256;headerSha256=$info.headerSha256;gitSha256=$info.gitSha256;pid=$PID;
-            privateInputsAccepted=$false;payloadCreated=$false;backendCreated=$false}
-        $readyBytes=Send-PreparationFrame $ready;$readyPin=Get-ImmuDataHash $readyBytes
+        $stage='git';Assert-PreparationGit $Git $info.gitSha256
+        $stage='code';Assert-PreparationSnapshot $Repository $Git $info
+        $readyBytes=Send-PreparationReady $info;$readyPin=Get-ImmuDataHash $readyBytes
         $stage='close';$close=Read-PreparationFrame $inputStream 2048
         $checked=Invoke-NativeBytes $Python @('-B',(Join-Path $PSScriptRoot 'audit_native_preparation.py'),'close',
             $info.nonce,$info.controlSha256,$info.headerSha256,$readyPin) $close 10
