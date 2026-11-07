@@ -32,7 +32,7 @@ class PinnedFile:
         self.parent, self.fd = None, None
         try:
             self.parent = control.DirectoryLease(self.path.parent)
-            self.fd = files.relative_open(self.parent.path, self.parent.fd, self.path.name)
+            self.fd = self._open()
             os.set_inheritable(self.fd, False)
             self.state = files.file_state(os.fstat(self.fd))
             packet.require(0 < self.state[2] <= 64 * 1024 * 1024)
@@ -44,6 +44,9 @@ class PinnedFile:
         except BaseException:
             self.close()
             raise
+
+    def _open(self):
+        return files.relative_open(self.parent.path, self.parent.fd, self.path.name)
 
     def _hash(self):
         digest = hashlib.sha256()
@@ -109,9 +112,15 @@ class _Command:
     directory: Path
     env: object
     profile: str
+    transport_factory: object = None
 
     def check(self):
-        packet.require(self.profile in ('generated-worker', 'native-admission-refusal', 'payload-reservation'))
+        packet.require(self.profile in ('generated-worker', 'native-admission-refusal', 'payload-reservation', 'native-preparation'))
+        if self.profile == 'native-preparation':
+            packet.require(getattr(self.transport_factory, '__module__', '') == 'audit_native_preparation' and
+                           getattr(self.transport_factory, '__name__', '') == '_PreparationPumps')
+        else:
+            packet.require(self.transport_factory is None)
         packet.require(type(self.arguments) is tuple and all(type(x) is str for x in self.arguments))
         self.executable.check()
         for source in self.sources:
@@ -278,6 +287,8 @@ def _process_evidence(command, observed, ended, pumps, pins_rechecked):
 
 
 def _make_pumps(command, session, child, fence, data, start, seconds):
+    if command.profile == 'native-preparation':
+        return command.transport_factory(child, data, command, session, fence, start, seconds)
     if command.profile == 'payload-reservation':
         from audit_payload_launch import _ReservationPumps
         return _ReservationPumps(child, data, command, session, fence, start, seconds)
@@ -285,12 +296,12 @@ def _make_pumps(command, session, child, fence, data, start, seconds):
 
 
 def _finish_binding(command, pumps, child, ended, failure):
-    if command.profile != 'payload-reservation' or pumps is None:
+    if command.profile not in ('payload-reservation', 'native-preparation') or pumps is None:
         return failure
     try:
         pumps.finalize_binding(child, ended, failure or pumps.errors)
     except Exception:
-        return failure or 'payload-binding-unverified'
+        return failure or ('preparation-binding-unverified' if command.profile == 'native-preparation' else 'payload-binding-unverified')
     return failure
 
 

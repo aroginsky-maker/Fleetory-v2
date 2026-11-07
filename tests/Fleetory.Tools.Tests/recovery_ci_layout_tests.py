@@ -55,7 +55,9 @@ def validate(text):
                 ('owned process identity and lifetime fence', 'audit_process_fence_tests.py'),
                 ('pinned payload reservation and controller binding', 'audit_payload_launch_tests.py'),
                 ('consumed generated container binding', 'audit_backend_binding_tests.py'),
-                ('consumed untagged image binding', 'audit_image_binding_tests.py')):
+                ('consumed untagged image binding', 'audit_image_binding_tests.py'),
+                ('close-only native preparation contracts', 'audit_native_preparation_tests.py'),
+                ('actual historical owner readiness', 'native_audit_preparation.py')):
             step = ('      - name: Verify ' + title + platform + '\n'
                 '        shell: pwsh\n'
                 '        run: ' + executable + ' -B ./tests/Fleetory.Tools.Tests/' + filename + '\n')
@@ -184,6 +186,20 @@ class RecoveryCiLayoutTests(unittest.TestCase):
         self.refused(self.text.replace(command, 'omitted', 1))
         self.refused(self.text.replace(command, command + '\n          ' + command, 1))
         self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
+
+    def test_native_preparation_contracts_are_required_on_both_platforms(self):
+        for executable in ('python', 'python3'):
+            command = executable + ' -B ./tests/Fleetory.Tools.Tests/audit_native_preparation_tests.py'
+            self.refused(self.text.replace(command, 'omitted', 1))
+            self.refused(self.text.replace(command, command + '\n          ' + command, 1))
+            self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
+
+    def test_actual_native_readiness_cannot_be_omitted_or_softened(self):
+        for executable in ('python', 'python3'):
+            command = executable + ' -B ./tests/Fleetory.Tools.Tests/native_audit_preparation.py'
+            self.refused(self.text.replace(command, 'omitted', 1))
+            self.refused(self.text.replace(command, command + '\n          ' + command, 1))
+            self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
 
     def test_actual_aggregate_rejects_failed_cancelled_skipped_or_missing_jobs(self):
         block = jobs(self.text)['quality-gate']
