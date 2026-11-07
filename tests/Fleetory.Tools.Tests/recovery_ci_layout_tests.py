@@ -53,7 +53,8 @@ def validate(text):
     for key, platform, executable in (('windows-tls-chain', ' on Windows', 'python'), ('quality', '', 'python3')):
         for title, filename in (('held audit control namespace identity', 'audit_control_identity_tests.py'),
                 ('owned process identity and lifetime fence', 'audit_process_fence_tests.py'),
-                ('pinned payload reservation and controller binding', 'audit_payload_launch_tests.py')):
+                ('pinned payload reservation and controller binding', 'audit_payload_launch_tests.py'),
+                ('consumed generated container binding', 'audit_backend_binding_tests.py')):
             step = ('      - name: Verify ' + title + platform + '\n'
                 '        shell: pwsh\n'
                 '        run: ' + executable + ' -B ./tests/Fleetory.Tools.Tests/' + filename + '\n')
@@ -70,6 +71,14 @@ def validate(text):
         start = block.index(step)
         end = block.find('      - name:', start + len(step))
         assert block[start:end if end >= 0 else len(block)].strip() == step.strip()
+    native_step = ('      - name: Verify actual generated Docker control binding\n'
+        '        shell: pwsh\n'
+        '        run: python3 -B ./tests/Fleetory.Tools.Tests/native_audit_resource_binding.py\n')
+    block = blocks['quality']
+    assert block.count(native_step) == 1
+    start = block.index(native_step)
+    end = block.find('      - name:', start + len(native_step))
+    assert block[start:end if end >= 0 else len(block)].strip() == native_step.strip()
     for command in ('./eng/verify-quality.ps1', './eng/verify-sonar-issues.ps1', './eng/report-sonar-metrics.ps1'):
         assert text.count(command) == 1 and command in blocks['quality']
     assert '    timeout-minutes: 30\n' in blocks['quality']
@@ -141,6 +150,19 @@ class RecoveryCiLayoutTests(unittest.TestCase):
             self.refused(prefix + tail.replace(command, 'omitted', 1))
             self.refused(prefix + tail.replace(command, command + '\n          ' + command, 1))
             self.refused(prefix + tail.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
+
+    def test_container_binding_gate_is_required_on_both_platforms(self):
+        for executable in ('python', 'python3'):
+            command = executable + ' -B ./tests/Fleetory.Tools.Tests/audit_backend_binding_tests.py'
+            self.refused(self.text.replace(command, 'omitted', 1))
+            self.refused(self.text.replace(command, command + '\n          ' + command, 1))
+            self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
+
+    def test_actual_docker_binding_gate_cannot_be_omitted_or_softened(self):
+        command = 'python3 -B ./tests/Fleetory.Tools.Tests/native_audit_resource_binding.py'
+        self.refused(self.text.replace(command, 'omitted', 1))
+        self.refused(self.text.replace(command, command + '\n          ' + command, 1))
+        self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
 
     def test_actual_aggregate_rejects_failed_cancelled_skipped_or_missing_jobs(self):
         block = jobs(self.text)['quality-gate']

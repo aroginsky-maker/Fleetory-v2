@@ -156,6 +156,7 @@ class ControlIdentity:
         self._records = {}
         self._binding_attempted = False
         self._launch_attempted = False
+        self._backend_attempted = False
         self._closed = False
         self._created = time.time_ns()
 
@@ -189,7 +190,8 @@ class ControlIdentity:
     def _write_once(self, name, value):
         self.check()
         packet.require(name in ('reservation.json', 'binding.json', 'launch-attempt.json',
-            'payload-binding.json', 'payload-release.json') and name not in self._records)
+            'payload-binding.json', 'payload-release.json', 'backend-attempt.json', 'backend-intent.json',
+            'backend-binding-attempt.json', 'backend-binding.json') and name not in self._records)
         data = json.dumps(value, sort_keys=True, separators=(',', ':')).encode() + b'\n'
         packet.require(0 < len(data) <= MAX_RECORD)
         if os.name == 'nt':
@@ -217,6 +219,14 @@ class ControlIdentity:
             nonce=self._plan['nonce'], reservationSha256=packet.digest(self._records['reservation.json'][1]),
             status='ATTEMPT_CONSUMED', launchAuthorized=False))
         return self.report()
+
+    def consume_backend_attempt(self):
+        self.check()
+        packet.require(not self._backend_attempted)
+        self._backend_attempted = True
+        self._write_once('backend-attempt.json', dict(schema='fleetory.audit-backend-attempt.v1',
+            nonce=self._plan['nonce'], reservationSha256=packet.digest(self._records['reservation.json'][1]),
+            status='ATTEMPT_CONSUMED', backendCreationAuthorized=False, cleanupAuthorized=False))
 
     def bind_assertion(self, pid, started_ns, runtime_pin):
         self.check()
