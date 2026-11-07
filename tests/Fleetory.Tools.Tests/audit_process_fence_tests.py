@@ -11,6 +11,7 @@ import tempfile
 import time
 import unittest
 from unittest.mock import patch
+from private_runtime_fixture import private_powershell
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'eng/pilot'))
 import audit_control_identity as identity
@@ -302,16 +303,7 @@ class ProcessFenceTests(unittest.TestCase):
     def test_real_native_owner_refusal_uses_fixed_arguments_and_actual_runtime_identity(self):
         repo = Path(__file__).resolve().parents[2]
         owner = repo / 'eng/pilot/Invoke-HistoricalAuditObservation.ps1'
-        powershell = self.pwsh
-        if os.name == 'posix':
-            # Hosted installations may have writable ancestors. Do not relax the
-            # pin boundary or change shared host modes: use a private fixture copy.
-            distribution = self.root / 'powershell'
-            shutil.copytree(powershell.parent, distribution, symlinks=True)
-            for directory, _, _ in os.walk(distribution, followlinks=False):
-                Path(directory).chmod(0o700)
-            powershell = distribution / powershell.name
-            self.assertEqual(sha(powershell), sha(self.pwsh))
+        powershell = private_powershell(self.pwsh, self.root)
         plan = {**self.plan, 'runtimes': dict(python=sha(self.python), powershell=sha(powershell))}
         with self.session(plan) as session:
             result = policy.native_refusal_probe(repo, powershell, self.python, sha(owner), session)

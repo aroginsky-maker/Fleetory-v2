@@ -46,6 +46,13 @@ payload namespaces. A temporarily supplied local SDK metadata file is removed
 only when this fixture created it and its exact bytes remain unchanged; no SDK
 is installed or executed by the preparation fixture.
 
+Hosted Linux PowerShell installations can have group-writable ancestors. The
+native fixture uses the same private distribution-copy helper as the existing
+process-fence suite: copied directories are mode 0700 and executable bytes must
+match the selected source. Shared host modes and the writable-directory refusal
+are unchanged. This copy is test setup and does not authenticate all runtime
+dependencies or production release provenance.
+
 This accepts close-only readiness of the actual owner, not private-input
 release, legacy payload/image/container namespace handoff or backend cleanup.
 The transport callback is a fixed trusted-host implementation selected by the

@@ -12,6 +12,7 @@ from unittest.mock import patch
 
 from audit_native_preparation_tests import prep
 from historical_audit_restore_tests import fixture
+from private_runtime_fixture import private_powershell
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -60,6 +61,7 @@ def run():
     before = namespaces()
     with tempfile.TemporaryDirectory(prefix='fleetory-native-preparation-') as temp, active_sdk_input():
         root = Path(temp).resolve()
+        powershell = private_powershell(powershell, root)
         measured = snapshot(powershell, root)
         pins = prep.measure_sources(REPO)
 
