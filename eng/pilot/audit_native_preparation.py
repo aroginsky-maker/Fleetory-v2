@@ -6,7 +6,6 @@ import os
 from pathlib import Path
 import sys
 import threading
-from types import SimpleNamespace
 
 import audit_control_identity as control
 import audit_process_fence as process
@@ -15,7 +14,7 @@ import historical_audit_restore as restore
 import recovery_files as files
 
 MAX_HEADER, MAX_FRAME = 24576, 2048
-SCHEMA = 'fleetory.native-preparation-header.v1'
+SCHEMA = 'fleetory.native-preparation-header.v2'
 PYTHON_SOURCES = ('audit_archive audit_control_identity audit_launch_bundle audit_native_preparation audit_observation '
     'audit_payload_binding audit_payload_launch audit_payload_owner audit_process_fence audit_process_posix '
     'audit_process_windows fresh_server_pair historical_audit_observation historical_audit_restore recovery_files').split()
@@ -57,14 +56,22 @@ def canonical(value):
 
 def header(data, native_pin):
     value = packet.strict_json(data, MAX_HEADER)
-    packet.keys(value, 'schema nonce controlSha256 planBase64')
+    packet.keys(value, 'schema nonce controlSha256 planBase64 gitSha256')
     packet.require(value['schema'] == SCHEMA)
     packet.identity(value['nonce'])
     packet.hex_value(value['controlSha256'])
+    packet.hex_value(value['gitSha256'])
     native = restore.plan(packet.decode(value['planBase64'], 16384), native_pin)
     packet.require(native['nonce'] == value['nonce'])
     return dict(nonce=value['nonce'], revision=native['revision'], controlSha256=value['controlSha256'],
-        nativePlanSha256=native_pin, codeSha256=native['codeSha256'], headerSha256=packet.digest(data))
+        nativePlanSha256=native_pin, codeSha256=native['codeSha256'], headerSha256=packet.digest(data), gitSha256=value['gitSha256'])
+
+
+def _pin_git(held, trusted_path, expected):
+    path = Path(trusted_path)
+    packet.require(path.is_absolute() and path.name.lower() in ('git', 'git.exe'))
+    packet.require(files.regular_single_file(path.lstat()))
+    return held.enter_context(process.PinnedFile(path, expected, True))
 
 
 def close_frame(data, info, ready_pin):
@@ -124,7 +131,7 @@ class _PreparationPumps(process._Pumps):
             packet.require(len(self.frames) < 2)
             if value.get('schema') == 'fleetory.native-preparation-refused.v1':
                 packet.keys(value, 'schema stage privateInputsAccepted payloadCreated backendCreated')
-                packet.require(value['stage'] in ('header', 'code', 'close') and
+                packet.require(value['stage'] in ('header', 'git', 'code', 'close') and
                     all(value[n] is False for n in ('privateInputsAccepted', 'payloadCreated', 'backendCreated')))
                 self.refusal_stage = value['stage']
                 self.errors.append('native-preparation-refused')
@@ -135,7 +142,7 @@ class _PreparationPumps(process._Pumps):
                 self.frames.append(value)
 
     def _bind_ready(self, value, raw):
-        packet.keys(value, 'schema nonce revision controlSha256 nativePlanSha256 codeSha256 headerSha256 pid privateInputsAccepted payloadCreated backendCreated')
+        packet.keys(value, 'schema nonce revision controlSha256 nativePlanSha256 codeSha256 headerSha256 gitSha256 pid privateInputsAccepted payloadCreated backendCreated')
         packet.require(value['schema'] == 'fleetory.native-preparation-ready.v1')
         for name, expected in self.info.items():
             packet.require(value[name] == expected)
@@ -149,7 +156,8 @@ class _PreparationPumps(process._Pumps):
         self.session._write_once('native-ready.json', dict(schema='fleetory.native-preparation-bound.v1',
             nonce=self.info['nonce'], reservationSha256=self.info['controlSha256'], headerSha256=self.info['headerSha256'],
             readySha256=self.ready_pin, selectedSourcesSha256=self.component_pin(), selectedSourceFiles=len(SOURCES),
-            actualOwnedProcess=observed, privateInputsAccepted=False, backendNamespaceBound=False))
+            actualOwnedProcess=observed, gitExecutableSha256=self.info['gitSha256'], gitExecutablePinned=True,
+            privateInputsAccepted=False, backendNamespaceBound=False))
         process._check_deadline(self.start_time, self.seconds)
         self.frames.append(value)
         self.ready.set()
@@ -181,7 +189,8 @@ class _PreparationPumps(process._Pumps):
     def finalize_binding(self, child, ended, failed):
         self.resource_metadata = dict(schema='fleetory.native-preparation-result.v1', nativeReadinessBound=False,
             closeOnlyVerified=False, privateInputsAccepted=False, payloadCreated=False, backendCreated=False,
-            backendNamespaceBound=False, selectedSourceFilesPinned=len(SOURCES), transitiveLegacyContinuityVerified=False, gitRuntimeAuthenticated=False,
+            backendNamespaceBound=False, selectedSourceFilesPinned=len(SOURCES), gitExecutablePinned=False,
+            gitProcessIdentityAuthenticated=False, transitiveLegacyContinuityVerified=False, gitRuntimeAuthenticated=False,
             originalInputsRead=False, refusalStage=self.refusal_stage, cleanupAuthorized=False, fullSystemRecoveryVerified=False, phase7Complete=False)
         packet.require(not failed and child.returncode == 0 and ended['noRunningMembersVerified'])
         packet.require(not self.pending and len(self.frames) == 2)
@@ -192,10 +201,10 @@ class _PreparationPumps(process._Pumps):
             all(final[n] is False for n in ('privateInputsAccepted', 'payloadCreated', 'backendCreated')))
         self.command.check()
         self.session.check()
-        self.resource_metadata.update(nativeReadinessBound=True, closeOnlyVerified=True)
+        self.resource_metadata.update(nativeReadinessBound=True, closeOnlyVerified=True, gitExecutablePinned=True)
 
 
-def prepare_owner(repository, powershell_path, python_path, git_path, native_plan, source_pins, session):
+def prepare_owner(repository, powershell_path, python_path, git_path, native_plan, source_pins, session, *, git_sha256):
     """Fixed trusted-host close-only launcher. No archive, key, endpoint, command or root wire input."""
     root = Path(repository).resolve(strict=True)
     packet.require(type(source_pins) is dict and set(source_pins) == set(SOURCES))
@@ -205,22 +214,20 @@ def prepare_owner(repository, powershell_path, python_path, git_path, native_pla
     packet.require(declared['nonce'] == report['nonce'] and declared['revision'] == session._plan['revision'] and
         declared['codeSha256'] == session._plan['codeSha256'] and declared['probeSha256'] == session._plan['probeSha256'])
     value = dict(schema=SCHEMA, nonce=report['nonce'], controlSha256=report['reservationSha256'],
-        planBase64=base64.b64encode(native_plan).decode('ascii'))
+        planBase64=base64.b64encode(native_plan).decode('ascii'), gitSha256=git_sha256)
     data = canonical(value)
     header(data, native_pin)
-    git = Path(git_path).resolve(strict=True)
-    packet.require(git.name.lower() in ('git', 'git.exe') and git.is_file())
     with ExitStack() as held:
         directory = held.enter_context(control.DirectoryLease(root))
-        held.enter_context(control.DirectoryLease(git.parent))
+        git = _pin_git(held, git_path, git_sha256)
         powershell = held.enter_context(process.PinnedFile(powershell_path, session._plan['runtimes']['powershell'], True))
         python = held.enter_context(process.PinnedFile(python_path, session._plan['runtimes']['python'], True))
         sources = tuple(held.enter_context(_RootInputPin(root / name, source_pins[name])) for name in SOURCES)
         entry = root / 'eng/pilot/Invoke-HistoricalAuditObservation.ps1'
         arguments = ('-NoLogo', '-NoProfile', '-NonInteractive', '-File', str(entry), '-PreparationOnly',
-            '-ExpectedPlanSha256', native_pin, '-Python', str(python.path))
-        command = process._Command(powershell, (python, *sources, directory), arguments, root,
-            process.environment(powershell, (python, SimpleNamespace(path=git))), 'native-preparation', _PreparationPumps)
+            '-ExpectedPlanSha256', native_pin, '-Python', str(python.path), '-PreparationGitPath', str(git.path))
+        command = process._Command(powershell, (python, git, *sources, directory), arguments, root,
+            process.environment(powershell, (python,)), 'native-preparation', _PreparationPumps)
         result = process._run_owned(command, session, data + b'\n', 30)
     packet.require(result.exit_code == 0 and result.stderr == b'')
     return result

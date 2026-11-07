@@ -18,3 +18,19 @@ def private_powershell(executable, root):
     if hashlib.sha256(copied.read_bytes()).digest() != expected:
         raise ValueError('Private runtime copy differs from selected executable.')
     return copied
+
+
+def private_git(executable, root):
+    executable = Path(executable).resolve(strict=True)
+    target = Path(root).resolve(strict=True) / 'git-runtime'
+    expected = hashlib.sha256(executable.read_bytes()).digest()
+    if os.name == 'nt':
+        # The selected Git-for-Windows core entrypoint needs its adjacent public DLLs.
+        shutil.copytree(executable.parent, target, symlinks=True)
+    else:
+        target.mkdir(mode=0o700)
+        shutil.copy2(executable, target / executable.name)
+    copied = target / executable.name
+    if hashlib.sha256(copied.read_bytes()).digest() != expected or copied.stat().st_nlink != 1:
+        raise ValueError('Private Git copy differs from selected executable or has aliases.')
+    return copied

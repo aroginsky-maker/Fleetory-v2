@@ -1,14 +1,14 @@
 #requires -Version 7.3
 # Private stdin/stdout pipe. Receives frozen bytes, never an operator file path or address.
 param([Parameter(Mandatory)][string]$ExpectedPlanSha256,[string]$Python='',
-    [ValidateSet('none','after-container','after-restore')][string]$FailurePoint='none',[switch]$PreparationOnly)
+    [ValidateSet('none','after-container','after-restore')][string]$FailurePoint='none',[switch]$PreparationOnly,[string]$PreparationGitPath='')
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $repo=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $testRoot=Join-Path $repo 'tests/Fleetory.Tools.Tests'
 if($PreparationOnly){
     foreach($helper in @('PilotNativeProcess.ps1','ProviderRecoveryPolicy.ps1','ImmuDataRoundtripPolicy.ps1','HistoricalAuditControllerPolicy.ps1','HistoricalPreparation.ps1')){. (Join-Path $PSScriptRoot $helper)}
-    exit (Invoke-HistoricalPreparation $ExpectedPlanSha256 $Python $repo)
+    exit (Invoke-HistoricalPreparation $ExpectedPlanSha256 $Python $repo $PreparationGitPath)
 }
 foreach($helper in @('PilotNativeProcess.ps1','ProviderRecoveryTransport.ps1','ProviderRecoveryPolicy.ps1','ImmuDataRoundtripPolicy.ps1','AuditObservationPolicy.ps1','HistoricalAuditControllerPolicy.ps1')){. (Join-Path $PSScriptRoot $helper)}
 foreach($helper in @('PilotDisposableTls.ps1','NativeSignerFixture.ps1','NativeAuditFixture.ps1','NativeWorkerRuntime.ps1','NativeAuditDataFixture.ps1')){. (Join-Path $testRoot $helper)}

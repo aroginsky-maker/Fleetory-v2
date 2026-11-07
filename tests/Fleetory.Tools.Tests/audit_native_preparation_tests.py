@@ -3,6 +3,7 @@ import ast
 import base64
 import io
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -23,7 +24,7 @@ def vector():
     plan, _ = fixture()
     native = prep.canonical(plan)
     value = dict(schema=prep.SCHEMA, nonce=plan['nonce'], controlSha256='a' * 64,
-        planBase64=base64.b64encode(native).decode('ascii'))
+        planBase64=base64.b64encode(native).decode('ascii'), gitSha256='c' * 64)
     return value, native
 
 
@@ -43,7 +44,48 @@ class PreparationTests(unittest.TestCase):
         self.assertEqual(self.info['nativePlanSha256'], self.pin)
         self.assertEqual(self.info['headerSha256'], prep.packet.digest(self.data))
         self.assertEqual(self.info['nonce'], self.value['nonce'])
-        self.assertEqual(set(self.value), {'schema', 'nonce', 'controlSha256', 'planBase64'})
+        self.assertEqual(self.info['gitSha256'], self.value['gitSha256'])
+        self.assertEqual(set(self.value), {'schema', 'nonce', 'controlSha256', 'planBase64', 'gitSha256'})
+
+    def test_old_header_or_missing_git_pin_is_refused(self):
+        old = {**self.value, 'schema': 'fleetory.native-preparation-header.v1'}
+        missing = {k: v for k, v in self.value.items() if k != 'gitSha256'}
+        for value in (old, missing):
+            with self.subTest(fields=value.keys()), self.assertRaises(ValueError):
+                prep.header(prep.canonical(value), self.pin)
+
+    def test_git_descriptor_is_held_and_changed_bytes_are_refused(self):
+        with tempfile.TemporaryDirectory(prefix='fleetory-git-held-') as temp:
+            path = Path(temp).resolve() / ('git.exe' if os.name == 'nt' else 'git')
+            path.write_bytes(b'generated executable canary')
+            path.chmod(0o700)
+            expected = prep.packet.digest(path.read_bytes())
+            with prep.ExitStack() as held:
+                pinned = prep._pin_git(held, path, expected)
+                self.assertEqual(pinned.digest, expected)
+                self.assertFalse(os.get_inheritable(pinned.fd))
+                try:
+                    path.write_bytes(b'changed executable canary')
+                except OSError:
+                    pinned.check()  # Windows must deny the write while held.
+                else:
+                    with self.assertRaises(ValueError):
+                        pinned.check()
+
+    def test_git_wrong_hash_relative_name_and_hardlink_are_refused(self):
+        with tempfile.TemporaryDirectory(prefix='fleetory-git-refusals-') as temp:
+            root = Path(temp).resolve()
+            path = root / ('git.exe' if os.name == 'nt' else 'git')
+            path.write_bytes(b'generated executable canary')
+            path.chmod(0o700)
+            expected = prep.packet.digest(path.read_bytes())
+            for selected, pin in ((path, '0' * 64), (Path(path.name), expected), (root / 'other.exe', expected)):
+                with self.subTest(selected=selected), prep.ExitStack() as held, self.assertRaises(ValueError):
+                    prep._pin_git(held, selected, pin)
+            alias = root / 'alias'
+            os.link(path, alias)
+            with prep.ExitStack() as held, self.assertRaises(ValueError):
+                prep._pin_git(held, path, expected)
 
     def test_archive_key_endpoint_and_root_fields_are_not_admitted(self):
         for name in ('archiveBase64', 'privateKey', 'endpoint', 'root', 'command'):
@@ -52,7 +94,7 @@ class PreparationTests(unittest.TestCase):
 
     def test_wrong_control_types_schema_nonce_and_plan_pin_refused(self):
         for field, value in (('schema', 'full-restore'), ('nonce', 'ABCDEFAB-1234-4123-8123-123456789ABC'),
-                ('nonce', True), ('controlSha256', 'A' * 64), ('planBase64', True)):
+                ('nonce', True), ('controlSha256', 'A' * 64), ('planBase64', True), ('gitSha256', 'C' * 64), ('gitSha256', True)):
             changed = {**self.value, field: value}
             with self.subTest(field=field), self.assertRaises((ValueError, TypeError)):
                 prep.header(prep.canonical(changed), self.pin)
@@ -129,7 +171,7 @@ class PreparationTests(unittest.TestCase):
 
     def test_forged_child_pid_or_backend_claim_is_refused_before_record(self):
         for field, value in (('pid', 12346), ('pid', True), ('privateInputsAccepted', True),
-                ('backendCreated', True), ('payloadCreated', True), ('headerSha256', 'f' * 64)):
+                ('backendCreated', True), ('payloadCreated', True), ('headerSha256', 'f' * 64), ('gitSha256', 'f' * 64)):
             pump = self.pumps()
             changed = {**self.ready(), field: value}
             with self.subTest(field=field), self.assertRaises(ValueError):

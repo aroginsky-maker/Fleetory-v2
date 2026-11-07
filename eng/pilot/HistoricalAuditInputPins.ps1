@@ -1,7 +1,7 @@
 #requires -Version 7.3
 # Public build/application snapshots only; not runtime/origin or retained execution continuity.
-function Get-HistoricalAuditRevision([string]$Repository){
-    $r=Invoke-NativeBytes 'git' @('-C',$Repository,'rev-parse','--verify','HEAD') -TimeoutSeconds 10
+function Get-HistoricalAuditRevision([string]$Repository,[string]$Git='git'){
+    $r=Invoke-NativeBytes $Git @('-C',$Repository,'rev-parse','--verify','HEAD') -TimeoutSeconds 10
     Assert-ImmuData ($r.ExitCode -eq 0 -and [string]::IsNullOrWhiteSpace($r.Stderr) -and
         $r.Stdout.Trim() -cmatch '^[a-f0-9]{40}\z') 'controller-code-revision'
     return $r.Stdout.Trim()
@@ -24,11 +24,11 @@ function Get-HistoricalInputFileHash([string]$Path,[long]$Limit){
         return @{bytes=$count;sha256=[Convert]::ToHexString($hash.GetHashAndReset()).ToLowerInvariant()}
     }finally{if($null -ne $hash){$hash.Dispose()};if($null -ne $stream){$stream.Dispose()}}
 }
-function Get-HistoricalAuditCodeSnapshot([string]$Repository){
+function Get-HistoricalAuditCodeSnapshot([string]$Repository,[string]$Git='git'){
     $root=Get-ProviderOrdinaryItem $Repository
     Assert-ImmuData ($root.PSIsContainer -and $root.FullName -ceq $Repository) 'controller-code-root'
-    $revision=Get-HistoricalAuditRevision $Repository
-    $listed=Invoke-NativeBytes 'git' @('-C',$Repository,'ls-files','--','eng','src','tests/Fleetory.Tools.Tests') -TimeoutSeconds 10
+    $revision=Get-HistoricalAuditRevision $Repository $Git
+    $listed=Invoke-NativeBytes $Git @('-C',$Repository,'ls-files','--','eng','src','tests/Fleetory.Tools.Tests') -TimeoutSeconds 10
     Assert-ImmuData ($listed.ExitCode -eq 0 -and [string]::IsNullOrWhiteSpace($listed.Stderr)) 'controller-code-list'
     $names=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
     foreach($name in ($listed.Stdout -split '\r?\n')){
@@ -50,7 +50,7 @@ function Get-HistoricalAuditCodeSnapshot([string]$Repository){
         $total+=$file.bytes;Assert-ImmuData ($total -le 67108864) 'controller-code-total'
         $null=$lines.Append($name).Append("`n").Append($file.bytes.ToString([Globalization.CultureInfo]::InvariantCulture)).Append("`n").Append($file.sha256).Append("`n")
     }
-    Assert-ImmuData ((Get-HistoricalAuditRevision $Repository) -ceq $revision) 'controller-code-revision-changed'
+    Assert-ImmuData ((Get-HistoricalAuditRevision $Repository $Git) -ceq $revision) 'controller-code-revision-changed'
     return @{schema='fleetory.historical-code-snapshot.v2';revision=$revision;sha256=(Get-ImmuDataHash ([Text.Encoding]::UTF8.GetBytes($lines.ToString())));
         files=$ordered.Length;rootBuildInputs=$roots.Count;bytes=$total;activeSdkInputMeasured=$true;repositoryCleanClaimed=$false;
         softwareOriginAuthenticated=$false;executionContinuityVerified=$false}
