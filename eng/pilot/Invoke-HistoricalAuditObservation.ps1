@@ -11,7 +11,7 @@ foreach($helper in @('PilotDisposableTls.ps1','NativeSignerFixture.ps1','NativeA
 if(-not $Python){$Python=(Get-Command $(if($IsLinux){'python3'}else{'python'})).Source}
 $fixture=[Guid]::NewGuid().ToString('D');$root=Join-Path $repo ('artifacts/native-audit-controller-'+$fixture)
 $context=@{Fixture=$fixture;Root=$root;ImageName=(Get-ImmuDataImageName $fixture);ImageId=$null;ImageClaimed=$false;ProbeHash=$null;
-    LifetimeSeconds=660;Stores=[Collections.Generic.List[object]]::new();Tls=$null;SigningPems=@{};Secrets=@{}}
+    PayloadClaimed=$false;PayloadRemoved=$false;LifetimeSeconds=660;Stores=[Collections.Generic.List[object]]::new();Tls=$null;SigningPems=@{};Secrets=@{}}
 $canaries=[Collections.Generic.List[string]]::new();$watch=[Diagnostics.Stopwatch]::StartNew();$cleaning=$false
 $stage='input';$refusal='operational';$failure=$false;$cleanup=$false;$proof=$null;$store=$null;$body=$null;$archive=$null;$raw=$null
 $oldBuildKit=$env:DOCKER_BUILDKIT;$env:DOCKER_BUILDKIT='0'
@@ -65,7 +65,7 @@ try{
     $body=([Text.UTF8Encoding]::new($false,$true).GetString($raw))|ConvertFrom-Json -AsHashtable -Depth 16
     $plan=([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($body.planBase64)))|ConvertFrom-Json -AsHashtable -Depth 8
     $stage='code';Assert-ImmuData ((Get-HistoricalAuditCodeHash) -ceq $plan.codeSha256) 'controller-code-pin'
-    $null=New-Item -ItemType Directory -Path $root
+    New-AuditDataPublicPayload $repo $context
     $published=Publish-NativeProbe $repo 'ServerBackendProbe' $root
     $context.ProbeHash=(Get-FileHash -LiteralPath (Join-Path $published 'ServerBackendProbe.dll') -Algorithm SHA256).Hash.ToLowerInvariant()
     Assert-ImmuData ($context.ProbeHash -ceq $plan.probeSha256) 'controller-probe-pin'
@@ -121,9 +121,10 @@ try{
     $cleaning=$true;$failures=@()
     foreach($item in $context.Stores){try{Remove-AuditDataStore $context $item}catch{$failures+='store'}}
     if(-not $failures.Count){try{Remove-AuditDataImage $context}catch{$failures+='image'}}
-    if(-not $failures.Count){try{Remove-NativePublicPayload $repo $root}catch{$failures+='payload'}}
+    if(-not $failures.Count){try{Remove-AuditDataPublicPayload $repo $context}catch{$failures+='payload'}}
     $cleanup=$failures.Count -eq 0
-    $resources=@{fixture=$fixture;ids=@($context.Stores|ForEach-Object {$_.Id});image=$context.ImageName;payloadRemoved=$cleanup}
+    $resources=@{fixture=$fixture;ids=@($context.Stores|ForEach-Object {$_.Id});image=$context.ImageName;payloadClaimed=($context.PayloadClaimed -or $context.PayloadRemoved);payloadRemoved=$context.PayloadRemoved;
+        payloadAbsent=(-not (Test-Path -LiteralPath $root))}
     $context.Secrets.Clear();$context.SigningPems.Clear();$context.Tls=$null;$canaries.Clear();$archive=$body=$raw=$sourceState=$null
     $watch.Stop();$env:DOCKER_BUILDKIT=$oldBuildKit
 }

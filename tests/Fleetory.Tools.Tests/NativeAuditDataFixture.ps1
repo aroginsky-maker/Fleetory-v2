@@ -1,13 +1,10 @@
 #requires -Version 7.3
 # Shared fresh owned audit resources; caller owns bounded Invoke-Docker and health probe.
+. (Join-Path $PSScriptRoot '../../eng/pilot/AuditDataResourceOwnership.ps1')
 function Get-AuditDataLifetime($Context){
     $value=if($Context.ContainsKey('LifetimeSeconds')){$Context.LifetimeSeconds}else{3300}
     Assert-ImmuData ($value -is [int] -and $value -cin @(3300,660)) 'store-lifetime'
     return $value
-}
-function Write-AuditDataLedger($Context){
-    $items=@($Context.Stores|ForEach-Object {@{Id=$_.Id;Session=$_.Session;Name=$_.Name;Started=$_.Started;Role=$_.Role}})
-    [IO.File]::WriteAllText((Join-Path $Context.Root 'owned-stores.json'),(@{fixture=$Context.Fixture;image=$Context.ImageName;imageId=$Context.ImageId;stores=$items}|ConvertTo-Json -Depth 7),[Text.UTF8Encoding]::new($false))
 }
 function Read-AuditDataStore($Context,$Store,[switch]$Cleanup){
     $items=@((Invoke-Docker @('inspect',$Store.Id)).Stdout|ConvertFrom-Json -AsHashtable -Depth 32)

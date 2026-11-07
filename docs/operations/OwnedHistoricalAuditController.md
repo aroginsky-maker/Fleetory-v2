@@ -43,6 +43,27 @@ observation. Source and target private signing keys are never interchanged;
 original private-key continuity is not asserted. Unknown entries remain
 unreviewed and the logical whole keyspace is not certified.
 
+Public payload ownership is acquired only after native exclusive directory
+creation succeeds. An existing file, directory or link cannot be adopted, even
+when two owners race to create the same name. A failed claim never authorizes
+payload cleanup. Successful cleanup consumes the in-process claim, so a repeat
+cleanup cannot remove a later occupant. The private receipt distinguishes
+`payloadClaimed`, `payloadRemoved` and `payloadAbsent`; skipping an unclaimed
+path is not a claim that the path was removed.
+
+Resource ledgers are written to exclusively created same-directory temporary
+files, flushed to storage and atomically renamed over the previous record. An
+invalid resource descriptor or a failure before publication preserves the last
+published record; only the writer's own temporary file is cleaned up. Completed
+reads contain a whole JSON record. Windows may temporarily refuse an open during
+replacement; that is not evidence of an empty ledger or absent resources. A
+publication error has an unverified outcome and must fail closed. This does not establish
+directory durability across power loss or authenticate ownership after process
+death. These helpers assume the existing trusted repository working directory;
+the controller still chooses its namespace internally. Identity-held namespace
+binding, a fixed external launcher and independent process-death cleanup remain
+required before original dispatch or caller-selected namespaces are introduced.
+
 Normal and handled-failure cleanup verifies deletion of the owned container,
 image and public payload. The generated native contract exercises eight owner
 invocations: success, failures after container creation and after restore,
@@ -54,6 +75,7 @@ that its generated source is unchanged. The public test proof includes no input
 values or private comparison hashes.
 
 ```powershell
+./tests/Fleetory.Tools.Tests/AuditDataResourceOwnership.Tests.ps1
 python -B tests/Fleetory.Tools.Tests/historical_audit_restore_tests.py
 ./tests/Fleetory.Tools.Tests/NativeAuditHistory.Tests.ps1 -Profile historical-controller -Python python3
 ```

@@ -2,7 +2,8 @@
 # Generated source only; the actual owner receives frozen input through a private pipe.
 . (Join-Path $repo 'eng/pilot/HistoricalAuditControllerPolicy.ps1')
 function Assert-ControllerResourcesAbsent($Resources,[int]$Count){
-    Assert-ImmuData (@($Resources.ids).Count -eq $Count -and $Resources.payloadRemoved -eq $true) 'controller-resource-count'
+    Assert-ImmuData (@($Resources.ids).Count -eq $Count -and $Resources.payloadAbsent -eq $true -and
+        $Resources.payloadClaimed -is [bool] -and $Resources.payloadRemoved -eq $Resources.payloadClaimed) 'controller-resource-count'
     foreach($id in @($Resources.ids)){
         Assert-ImmuData ($id -cmatch '^[a-f0-9]{64}\z' -and $id -cne $script:controllerSourceId -and $id -cne $script:controllerForeignId) 'controller-resource-ownership'
         $r=Invoke-Docker @('inspect',$id) -AllowFailure
@@ -30,6 +31,7 @@ function Invoke-GeneratedController($Plan,$Packet,[string]$ExpectedRefusal='',[i
         Assert-ImmuData ($r.ExitCode -eq 0 -and [string]::IsNullOrWhiteSpace($r.Stderr) -and $value.schema -ceq 'fleetory.historical-audit-owned-observation.v1' -and $value.verified -eq $true -and $value.cleanupVerified -eq $true) 'controller-positive'
     }
     Assert-ControllerResourcesAbsent $value.resources $Resources
+    Assert-ImmuData ($value.resources.payloadClaimed -eq ($ExpectedRefusal -cne 'controller-code-pin')) 'controller-payload-claim-evidence'
     return $value
 }
 function Invoke-NativeHistoricalControllerWorkflow($Source,$Foreign){

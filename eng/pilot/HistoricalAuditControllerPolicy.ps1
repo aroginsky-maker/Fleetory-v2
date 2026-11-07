@@ -12,7 +12,7 @@ function Get-HistoricalAuditCodeHash {
     Assert-ImmuData ($listed.ExitCode -eq 0 -and [string]::IsNullOrWhiteSpace($listed.Stderr)) 'controller-code-list'
     $files=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     foreach($name in ($listed.Stdout -split '\r?\n')){if($name){$null=$files.Add($name)}}
-    foreach($name in @('eng/pilot/HistoricalAuditControllerPolicy.ps1','eng/pilot/Invoke-HistoricalAuditObservation.ps1','eng/pilot/historical_audit_restore.py')){$null=$files.Add($name)}
+    foreach($name in @('eng/pilot/HistoricalAuditControllerPolicy.ps1','eng/pilot/Invoke-HistoricalAuditObservation.ps1','eng/pilot/historical_audit_restore.py','eng/pilot/AuditDataResourceOwnership.ps1')){$null=$files.Add($name)}
     Assert-ImmuData ($files.Count -gt 0 -and $files.Count -le 768) 'controller-code-count'
     $ordered=[string[]]@($files);[Array]::Sort($ordered,[StringComparer]::Ordinal)
     $lines=[Text.StringBuilder]::new("fleetory.historical.native-controller-code.v1`n")

@@ -120,6 +120,10 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/HistoricalAuditControllerPolicy.Tests.ps1
 
+      - name: Verify audit resource ownership on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/AuditDataResourceOwnership.Tests.ps1
+
       - name: Verify pinned audit-use gate admission on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/audit_use_admission_tests.py
@@ -447,6 +451,10 @@ jobs:
       - name: Verify historical controller refusal policy
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/HistoricalAuditControllerPolicy.Tests.ps1
+
+      - name: Verify audit resource ownership
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/AuditDataResourceOwnership.Tests.ps1
 
       - name: Verify pinned audit-use gate admission
         shell: pwsh
