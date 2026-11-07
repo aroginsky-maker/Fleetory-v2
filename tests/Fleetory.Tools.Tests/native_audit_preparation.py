@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 from audit_native_preparation_tests import prep
 from historical_audit_restore_tests import fixture
-from private_runtime_fixture import private_git, private_powershell
+from private_runtime_fixture import private_git, private_powershell, windows_git_core
 
 REPO = Path(__file__).resolve().parents[2]
 
@@ -58,10 +58,8 @@ def run():
     powershell = Path(shutil.which('pwsh') or '').resolve(strict=True)
     python = Path(sys.executable).resolve(strict=True)
     git = Path(shutil.which('git') or '').resolve(strict=True)
-    if os.name == 'nt' and git.parent.name.lower() in ('cmd', 'bin'):
-        core = git.parent.parent / 'mingw64/bin/git.exe'
-        if core.is_file():
-            git = core
+    if os.name == 'nt':
+        git = windows_git_core(git)
     before = namespaces()
     with tempfile.TemporaryDirectory(prefix='fleetory-native-preparation-') as temp, active_sdk_input():
         root = Path(temp).resolve()

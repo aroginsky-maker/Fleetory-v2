@@ -5,6 +5,22 @@ from pathlib import Path
 import shutil
 
 
+def windows_git_core(executable):
+    path = Path(executable).resolve(strict=True)
+    if path.name.lower() != 'git.exe':
+        raise ValueError('Unexpected Windows Git fixture entrypoint.')
+    if path.parent.name.lower() == 'bin' and path.parent.parent.name.lower() in ('ucrt64', 'mingw64'):
+        return path
+    if path.parent.name.lower() not in ('cmd', 'bin'):
+        raise ValueError('Unsupported Windows Git fixture layout.')
+    root = path.parent.parent
+    candidates = [root / name / 'bin/git.exe' for name in ('ucrt64', 'mingw64')]
+    present = [p for p in candidates if p.is_file()]
+    if len(present) != 1:
+        raise ValueError('Windows Git core fixture layout is missing or ambiguous.')
+    return present[0]
+
+
 def private_powershell(executable, root):
     executable = Path(executable).resolve(strict=True)
     if os.name != 'posix':

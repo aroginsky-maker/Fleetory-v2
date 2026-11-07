@@ -74,6 +74,10 @@ and removes the copy with its own temporary directory. On Windows it selects
 the installed core entrypoint and copies its adjacent public DLL directory;
 on Linux it copies the selected entrypoint. Original installations and the
 hardlink refusal are unchanged. Copied DLL/helper origin is not authenticated.
+The Windows fixture recognizes exactly one installed core layout, `ucrt64` or
+`mingw64`, from either `cmd` or `bin`; missing or ambiguous layouts are refused
+before launch. Both layouts have portable regression cases. The directory
+transition is described in the [upstream release notes](https://github.com/git-for-windows/build-extra/blob/main/ReleaseNotes.md).
 
 This accepts close-only readiness of the actual owner, not private-input
 release, legacy payload/image/container namespace handoff or backend cleanup.

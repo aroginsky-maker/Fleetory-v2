@@ -18,6 +18,7 @@ import audit_native_preparation as prep
 import audit_launch_bundle as bundle
 from historical_audit_restore_tests import fixture
 from audit_backend_binding_tests import control_plan
+from private_runtime_fixture import windows_git_core
 
 
 def vector():
@@ -39,6 +40,40 @@ class PreparationTests(unittest.TestCase):
         return dict(schema='fleetory.native-preparation-close.v1', nonce=self.info['nonce'],
             controlSha256=self.info['controlSha256'], headerSha256=self.info['headerSha256'],
             readySha256='b' * 64, decision='close-without-input')
+
+    def test_windows_git_cmd_bin_and_core_support_both_packaged_layouts(self):
+        with tempfile.TemporaryDirectory(prefix='fleetory-git-layouts-') as temp:
+            for layout in ('ucrt64', 'mingw64'):
+                root = Path(temp).resolve() / ('installed-' + layout)
+                core = root / layout / 'bin/git.exe'
+                core.parent.mkdir(parents=True)
+                core.write_bytes(b'public core canary')
+                for wrapper in ('cmd', 'bin'):
+                    entry = root / wrapper / 'git.exe'
+                    entry.parent.mkdir()
+                    entry.write_bytes(b'public launcher canary')
+                    self.assertEqual(windows_git_core(entry), core)
+                self.assertEqual(windows_git_core(core), core)
+
+    def test_windows_git_missing_ambiguous_or_foreign_layout_is_refused(self):
+        with tempfile.TemporaryDirectory(prefix='fleetory-git-layout-refusals-') as temp:
+            root = Path(temp).resolve()
+            entry = root / 'cmd/git.exe'
+            entry.parent.mkdir()
+            entry.write_bytes(b'public launcher canary')
+            with self.assertRaises(ValueError):
+                windows_git_core(entry)
+            for layout in ('ucrt64', 'mingw64'):
+                core = root / layout / 'bin/git.exe'
+                core.parent.mkdir(parents=True)
+                core.write_bytes(b'public core canary')
+            with self.assertRaises(ValueError):
+                windows_git_core(entry)
+            foreign = root / 'other/git.exe'
+            foreign.parent.mkdir()
+            foreign.write_bytes(b'public foreign canary')
+            with self.assertRaises(ValueError):
+                windows_git_core(foreign)
 
     def test_header_pins_plan_and_control_metadata_without_private_body(self):
         self.assertEqual(self.info['nativePlanSha256'], self.pin)
