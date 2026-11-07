@@ -115,7 +115,7 @@ try{
     $store=@{Id=$null;Session=$session;Name=('fleetory-immu-store-'+$session.Replace('-',''));Started=[DateTimeOffset]::UtcNow;Role='target'}
     $ledger.Stores.Add($store);Write-AuditDataLedger $ledger
     $path=Join-Path $ledger.Root 'owned-stores.json';$old=[IO.File]::ReadAllText($path)
-    Check (($old|ConvertFrom-Json -AsHashtable).stores[0].Id -eq $null) 'intent-before-container-id'
+    Check ($null -eq ($old|ConvertFrom-Json -AsHashtable).stores[0].Id) 'intent-before-container-id'
     $store.Id='a'*64;$ledger.ImageId='sha256:'+('b'*64);Write-AuditDataLedger $ledger
     $old=[IO.File]::ReadAllText($path)
     Check (($old|ConvertFrom-Json -AsHashtable).stores[0].Id -ceq $store.Id) 'published-container-id'
