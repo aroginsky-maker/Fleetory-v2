@@ -58,8 +58,10 @@ def run():
     powershell = Path(shutil.which('pwsh') or '').resolve(strict=True)
     python = Path(sys.executable).resolve(strict=True)
     git = Path(shutil.which('git') or '').resolve(strict=True)
-    if os.name == 'nt' and git.parent.name.lower() == 'cmd':
-        git = git.parent.parent / 'mingw64/bin/git.exe'
+    if os.name == 'nt' and git.parent.name.lower() in ('cmd', 'bin'):
+        core = git.parent.parent / 'mingw64/bin/git.exe'
+        if core.is_file():
+            git = core
     before = namespaces()
     with tempfile.TemporaryDirectory(prefix='fleetory-native-preparation-') as temp, active_sdk_input():
         root = Path(temp).resolve()
