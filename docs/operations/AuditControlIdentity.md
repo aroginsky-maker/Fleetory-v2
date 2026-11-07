@@ -44,7 +44,8 @@ exclusive creation and held, non-inheritable descriptors. Every check compares
 directory identities, file identities, link counts, record size and frozen bytes;
 POSIX additionally checks the private file mode. A lost response, partial write,
 flush error or writer death leaves the nonce consumed. Handles close on normal
-exit and failure; no namespace or record is removed by this API.
+exit and failure, including release of the remaining handles after one close
+operation raises; no namespace or record is removed by this API.
 
 The returned report keeps `processIdentityAuthenticated`,
 `runtimeContinuityVerified`, `launchAuthorized`, `backendNamespaceBound`,
@@ -57,7 +58,7 @@ recursive cleanup API or operator-path CLI.
 python -B tests/Fleetory.Tools.Tests/audit_control_identity_tests.py
 ```
 
-CI requires 31 generated filesystem contracts on Windows and Linux. They cover
+CI requires 32 generated filesystem contracts on Windows and Linux. They cover
 an eight-thread one-winner race, replay and changed-plan reuse, preexisting and
 corrupt namespaces, directory/record substitution or explicit Windows sharing
 refusal, junctions/symlinks, hard links, inherited-handle mutation, allocation

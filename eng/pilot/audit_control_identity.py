@@ -1,5 +1,5 @@
 """Held control-directory identity and consumed immutable metadata, not a launcher."""
-from contextlib import contextmanager
+from contextlib import ExitStack, contextmanager
 import ctypes
 import json
 import os
@@ -80,8 +80,8 @@ class WindowsDirectory:
 
     def close(self):
         if self._handle is not None:
-            self._close(self._handle)
-            self._handle = None
+            handle, self._handle = self._handle, None
+            self._close(handle)
 
 
 class DirectoryLease:
@@ -134,8 +134,8 @@ class DirectoryLease:
             self.windows.close()
             self.windows = None
         if self.fd is not None:
-            os.close(self.fd)
-            self.fd = None
+            fd, self.fd = self.fd, None
+            os.close(fd)
 
 
 def namespace_name(nonce):
@@ -227,18 +227,20 @@ class ControlIdentity:
 
     def close(self):
         self._closed = True
-        for fd, _ in self._records.values():
-            os.close(fd)
+        records = tuple(self._records.values())
         self._records.clear()
-        self._directory.close()
-        self._parent.close()
+        with ExitStack() as closing:
+            closing.callback(self._parent.close)
+            closing.callback(self._directory.close)
+            for fd, _ in records:
+                closing.callback(os.close, fd)
 
 
 @contextmanager
 def claim(trusted_control_root, plan_bytes, expected_pin):
     plan, frozen = admit(plan_bytes, expected_pin)
     parent = DirectoryLease(trusted_control_root)
-    directory, session = None, None
+    directory = None
     try:
         name = namespace_name(plan['nonce'])
         parent.check()

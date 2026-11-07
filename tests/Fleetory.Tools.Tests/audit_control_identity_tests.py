@@ -359,6 +359,26 @@ class ControlIdentityTests(unittest.TestCase):
             with self.assertRaises(OSError):
                 os.fstat(fd)
 
+    def test_one_close_error_still_releases_remaining_records_and_directory_handles(self):
+        with self.claim() as session:
+            session.bind_assertion(12345, time.time_ns(), self.plan['runtimes']['powershell'])
+            descriptors = [fd for fd, _ in session._records.values()]
+            actual = os.close
+            def close(fd):
+                actual(fd)
+                if fd == descriptors[-1]:
+                    raise OSError('Generated close fault')
+            with patch.object(policy.os, 'close', side_effect=close):
+                with self.assertRaises(OSError):
+                    session.close()
+            for fd in descriptors:
+                with self.assertRaises(OSError):
+                    os.fstat(fd)
+            self.assertIsNone(session._parent.fd)
+            self.assertIsNone(session._directory.fd)
+            self.assertIsNone(session._parent.windows)
+            self.assertIsNone(session._directory.windows)
+
     def test_forced_writer_death_leaves_nonce_consumed_and_reservation_intact(self):
         self.writer_death('reservation', b'RESERVATION_READY')
 
@@ -378,6 +398,7 @@ class ControlIdentityTests(unittest.TestCase):
             self.assertEqual(process.stdout.readline().strip(), ready)
             process.kill()
             process.wait(timeout=5)
+            self.assertNotEqual(process.returncode, 0, 'Generated writer did not terminate abnormally.')
             self.assertEqual(process.stderr.read(), b'')
         finally:
             if process.poll() is None:
