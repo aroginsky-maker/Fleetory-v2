@@ -48,6 +48,7 @@ class _ReservationPumps(process._Pumps):
             process._check_deadline(self.start_time, self.seconds)
             release = dict(schema='fleetory.audit-payload-finish.v1', nonce=self.value['nonce'],
                 ownerSha256=self.frames[0]['ownerSha256'], releaseSha256=self.bound.release())
+            process._check_deadline(self.start_time, self.seconds)
             data = bundle.canonical(release) + b'\n'
             self.expected_input_bytes += len(data)
             self._send(data)

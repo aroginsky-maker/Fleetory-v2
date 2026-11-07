@@ -40,7 +40,7 @@ control namespace. A duplicate, corrupt, partial or unavailable record is a
 refusal, never an empty resource set or permission to remove anything.
 
 Only after those checks does the parent flush `payload-release.json`, close its
-marker pin and send a fixed finish frame. The child rechecks its own directory,
+marker pin and recheck the deadline after that flush before sending a fixed finish frame. If the budget expired during publication, no finish is sent; the release record and unresolved payload remain. The child rechecks its own directory,
 marker and exact one-file layout, then removes only that marker and empty
 directory. Cleanup is nonrecursive. The parent requires the original retained
 directory to be deleted (POSIX link count zero or Windows delete-pending),

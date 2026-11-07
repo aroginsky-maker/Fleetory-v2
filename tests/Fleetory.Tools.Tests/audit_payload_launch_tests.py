@@ -275,6 +275,33 @@ class PayloadLaunchTests(unittest.TestCase):
             self.refused(session)
             self.assertEqual((self.repo / 'artifacts' / binding.payload_name(NONCE) / 'foreign').read_bytes(), b'foreign')
 
+    def test_deadline_expiring_during_release_flush_never_sends_finish(self):
+        released = threading.Event()
+        after_flush, finish_frames = [], []
+        actual_release, actual_check, actual_send = binding.BoundPayload.release, process._check_deadline, process._Pumps._send
+        def flush(owned):
+            value = actual_release(owned)
+            released.set()
+            return value
+        def deadline(start, seconds):
+            if released.is_set() and '(_write)' in threading.current_thread().name:
+                after_flush.append(True)
+                raise process.LaunchError('deadline')
+            return actual_check(start, seconds)
+        def sent(pumps, data):
+            if b'audit-payload-finish.v1' in data:
+                finish_frames.append(True)
+            return actual_send(pumps, data)
+        with self.session() as session, ExitStack() as held:
+            held.enter_context(patch.object(binding.BoundPayload, 'release', autospec=True, side_effect=flush))
+            held.enter_context(patch.object(process, '_check_deadline', side_effect=deadline))
+            held.enter_context(patch.object(process._Pumps, '_send', autospec=True, side_effect=sent))
+            self.refused(session)
+            self.assertEqual(after_flush, [True])
+            self.assertEqual(finish_frames, [])
+            self.assertIn('payload-release.json', session._records)
+            self.assertTrue((self.repo / 'artifacts' / binding.payload_name(NONCE)).is_dir())
+
     def test_forged_closed_frame_without_deletion_is_refused(self):
         self.mutate_owner('owned.remove()', 'owned.check()')
         with self.session() as session:
