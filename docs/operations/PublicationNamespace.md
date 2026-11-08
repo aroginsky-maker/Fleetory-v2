@@ -27,7 +27,8 @@ synthetic cases run on both operating systems: positive handoff, explicit typed
 manifest-pin refusal and live owner exit before ACK. Startup failures/timeouts do
 not count as a typed refusal. Replay is refused before spawn. Parent fixture cleanup
 is disposal of its separate whole temporary repository after all handles and owned
-process members are closed; the library has no cleanup or publisher CLI.
+process members are closed; the library has no cleanup or publisher CLI. On POSIX,
+exit is observed without reaping; group birth/ID checks and cleanup precede wait.
 
 The real-public variant first publishes the current public ServerBackendProbe with
 the pinned SDK through the existing trusted parent fixture. It holds that full

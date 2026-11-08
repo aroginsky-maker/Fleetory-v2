@@ -186,5 +186,15 @@ class PublicationNamespaceContracts(unittest.TestCase):
                 with self.subTest(name=name),self.assertRaises(ValueError):ns.empty._create_named_record(directory,name,b'public bytes')
             self.assertEqual(list(directory.path.iterdir()),[])
 
+    def test_posix_exit_observation_does_not_reap_before_group_cleanup(self):
+        import native_publication_namespace as fixture
+        from unittest.mock import Mock,patch
+        child=Mock();fence=Mock();fence.exited.return_value=True
+        with patch.object(fixture.os,'name','posix'):
+            self.assertTrue(fixture.owner_exited(child,fence))
+            fixture.wait_owner_exit(child,fence,ns.bundle.prep.process.time.monotonic_ns())
+        child.poll.assert_not_called();child.wait.assert_not_called()
+        self.assertEqual(fence.exited.call_count,2)
+
 
 if __name__=='__main__':unittest.main()

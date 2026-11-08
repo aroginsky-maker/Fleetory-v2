@@ -66,9 +66,19 @@ def worker(expected):
         sys.stdout.buffer.flush()
 
 
+def owner_exited(child,fence):
+    # POSIX must keep the leader unreaped until group-ID/birth-checked cleanup.
+    return child.poll() is not None if os.name=='nt' else fence.exited()
+
+
+def wait_owner_exit(child,fence,start):
+    while not owner_exited(child,fence):
+        process._check_deadline(start,30);time.sleep(0.01)
+
+
 class Frames(process._Pumps):
-    def __init__(self,child):
-        super().__init__(child,b'');self.pending=bytearray();self.frames=[];self.received=queue.Queue()
+    def __init__(self,child,fence):
+        super().__init__(child,b'');self.fence=fence;self.pending=bytearray();self.frames=[];self.received=queue.Queue()
 
     def _on_output(self,category,data):
         if category!='stdout-bound':return
@@ -88,7 +98,10 @@ class Frames(process._Pumps):
         while True:
             packet.require(not self.errors);process._check_deadline(start,30)
             try:return self.received.get(timeout=0.01)
-            except queue.Empty:packet.require(self.process.poll() is None)
+            except queue.Empty:
+                if owner_exited(self.process,self.fence):
+                    self.finish()
+                    return self.received.get_nowait()
 
 
 def copy_public(held,output):
@@ -134,13 +147,13 @@ def handoff(root,held,case='positive'):
         try:
             fence=process._create_fence(child);identity=fence.identity(child,executable);check()
             session.bind_assertion(child.pid,started_wall,executable.digest)
-            pumps=Frames(child);pumps.start_readers();pumps._send(frame(json.loads(intent)))
+            pumps=Frames(child,fence);pumps.start_readers();pumps._send(frame(json.loads(intent)))
             ready=pumps.receive(start)
             bound=stack.enter_context(ns.BoundPublication(command,session,child,fence,intent,intent_pin,ready))
             copy_public(held,bound.output)
             expected=bound.seal(held.raw)
             if case=='owner-exit':
-                packet.require(child.poll() is None and fence.identity(child,executable)==identity)
+                packet.require(not owner_exited(child,fence) and fence.identity(child,executable)==identity)
                 injected=True;live_kill=True;child.kill()
             else:
                 manifest=held.raw if case=='positive' else held.raw+b' '
@@ -158,17 +171,19 @@ def handoff(root,held,case='positive'):
                     packet.require(response==dict(schema='fleetory.publication-fixture-refused.v1',nonce=plan['nonce'],stage='manifest-pin',
                         expectedManifestSha256=held.pin,observedManifestSha256=packet.digest(manifest),pid=child.pid,
                         privateInputsAccepted=False,actualNativePublicationVerified=False) and type(response['pid']) is int)
-            child.wait(timeout=max(0.01,30-(time.monotonic_ns()-start)/1e9));pumps.finish()
+            wait_owner_exit(child,fence,start);pumps.finish()
             packet.require(not pumps.errors and not pumps.pending)
-            packet.require(child.returncode==0 if case=='positive' else child.returncode!=0)
             if case=='positive':packet.require(pumps.stderr==b'' and len(pumps.frames)==3)
             else:packet.require(injected and not accepted and len(pumps.frames)==(2 if case=='bad-manifest' else 1) and 'publication-release.json' not in session._records)
         finally:
-            if child.poll() is None:child.kill();child.wait(timeout=3)
-            ended=fence.terminate() if fence else None
+            if fence is not None:ended=fence.terminate()
+            else:
+                child.kill();ended=None
+            child.wait(timeout=3)
             if pumps:pumps.finish()
             process._close_transport(child,fence)
         packet.require(ended is not None and ended['noRunningMembersVerified'] is True)
+        packet.require(child.returncode==0 if case=='positive' else child.returncode!=0)
         if not accepted:bound._check_tree()
         path=replica/'artifacts'/ns.name(plan['nonce'])
         packet.require(path.is_dir() and (path/ns.MARKER).is_file() and ns.bundle.tree(path/ns.OUTPUT)=={n:v['kind'] for n,v in held.entries.items()})
