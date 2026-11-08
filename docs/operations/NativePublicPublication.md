@@ -41,7 +41,7 @@ Run native_publication_tests.py for generated contracts and
 native_publication.py for the actual public publisher. The latter checks a
 positive full manifest handoff, wrong code, wrong dotnet header pin, a private
 continuation refusal, a wrong output manifest and consumed launch replay.
-CI requires both scripts on Windows and Linux without soft failures. No
+On a cold package cache, the fixture restores from the explicit public nuget.org\npackage source while retaining the repository audit settings and strict failures.\nCI requires both scripts on Windows and Linux without soft failures. No
 original backups, credentials, private PKI, provider material or VPS access
 are required.
 

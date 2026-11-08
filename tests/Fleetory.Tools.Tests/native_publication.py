@@ -44,6 +44,18 @@ def dispose_namespace(nonce,ready,owner_pid):
     policy.packet.require(not path.exists());return True
 
 
+def restore_public(dotnet):
+    # The repository config defines auditSources, not packageSources. Name the public package feed explicitly.
+    restored=subprocess.run([str(dotnet),'restore',str(REPO/'eng/ServerBackendProbe/ServerBackendProbe.csproj'),
+        '--disable-parallel','--configfile',str(REPO/'NuGet.Config'),'--source','https://api.nuget.org/v3/index.json',
+        '--verbosity','quiet'],cwd=REPO,capture_output=True,timeout=180)
+    policy.packet.require(len(restored.stdout)<=262144 and len(restored.stderr)<=4096)
+    if restored.returncode!=0:
+        import re
+        codes=sorted(set(re.findall(rb'\b(?:NU|MSB|NETSDK)[0-9]+\b',restored.stdout+restored.stderr)))
+        raise RuntimeError('Public restore refused; exit='+str(restored.returncode)+'; codes='+','.join(c.decode('ascii') for c in codes))
+
+
 def run():
     powershell=Path(shutil.which('pwsh') or '').resolve(strict=True)
     python=Path(sys.executable).resolve(strict=True);git=Path(shutil.which('git') or '').resolve(strict=True)
@@ -52,10 +64,8 @@ def run():
     with tempfile.TemporaryDirectory(prefix='fleetory-native-publication-') as temp,active_sdk_input():
         root=Path(temp).resolve();powershell=private_powershell(powershell,root);git=private_git(git,root)
         public=root/'reference';public.mkdir()
-        assets=REPO/'eng/ServerBackendProbe/obj/project.assets.json'
-        if not assets.exists():
-            restored=subprocess.run([str(dotnet),'restore',str(REPO/'eng/ServerBackendProbe/ServerBackendProbe.csproj'),'--disable-parallel','--configfile',str(REPO/'NuGet.Config'),'--verbosity','quiet'],cwd=REPO,capture_output=True,timeout=180)
-            policy.packet.require(restored.returncode==0 and len(restored.stdout)<=262144 and len(restored.stderr)<=4096)
+        if not (REPO/'eng/ServerBackendProbe/obj/project.assets.json').exists():
+            restore_public(dotnet)
         published=publication(public)
         policy.packet.require(published['sdkVersion']==policy.SDK and published['dotnetSha256']==sha(dotnet))
         (REPO/'artifacts').mkdir(exist_ok=True)

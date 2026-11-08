@@ -115,4 +115,23 @@ class NativePublicationContracts(unittest.TestCase):
         self.assertNotIn('Start-Process',source);self.assertNotIn('docker',source.lower())
 
 
+    def test_public_restore_names_the_package_feed_without_disabling_audit(self):
+        import native_publication as fixture
+        from types import SimpleNamespace
+        with patch.object(fixture.subprocess,'run',return_value=SimpleNamespace(returncode=0,stdout=b'',stderr=b'')) as run:
+            fixture.restore_public(Path(sys.executable))
+        args=run.call_args.args[0]
+        self.assertEqual(args[args.index('--source')+1],'https://api.nuget.org/v3/index.json')
+        self.assertEqual(args[args.index('--configfile')+1],str(fixture.REPO/'NuGet.Config'))
+        self.assertFalse(any('Audit=false' in a or 'ignore-failed' in a for a in args))
+
+    def test_public_restore_failure_is_not_accepted_and_has_bounded_error_codes(self):
+        import native_publication as fixture
+        from types import SimpleNamespace
+        for result in (SimpleNamespace(returncode=1,stdout=b'error NU1100: public package missing',stderr=b''),
+                SimpleNamespace(returncode=0,stdout=b'',stderr=b'x'*4097)):
+            with self.subTest(code=result.returncode),patch.object(fixture.subprocess,'run',return_value=result):
+                with self.assertRaises((ValueError,RuntimeError)):fixture.restore_public(Path(sys.executable))
+
+
 if __name__=='__main__':unittest.main()
