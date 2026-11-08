@@ -160,6 +160,10 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/audit_probe_runtime_tests.py
 
+      - name: Verify native probe create contracts on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/audit_native_create_tests.py
+
       - name: Verify native probe receipt contracts on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/audit_native_probe_tests.py
@@ -564,6 +568,10 @@ jobs:
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/audit_probe_runtime_tests.py
 
+      - name: Verify native probe create contracts
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/audit_native_create_tests.py
+
       - name: Verify native probe receipt contracts
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/audit_native_probe_tests.py
@@ -675,6 +683,10 @@ jobs:
       - name: Verify actual public probe native receipt handoff
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/native_public_probe_receipt.py
+
+      - name: Verify actual public native probe creation
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/native_public_probe_create.py
 
       - name: Verify actual public probe owner fault cleanup
         shell: pwsh

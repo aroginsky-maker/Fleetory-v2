@@ -110,6 +110,7 @@ class _PreparationPumps(process._Pumps):
     source_names = SOURCES
     profile, switch = 'native-preparation', '-PreparationOnly'
     max_frames = 2
+    max_frame = MAX_FRAME
     refusal_schema = 'fleetory.native-preparation-refused.v1'
     decode_header = staticmethod(header)
 
@@ -138,11 +139,11 @@ class _PreparationPumps(process._Pumps):
         if category != 'stdout-bound':
             return
         self.pending.extend(data)
-        packet.require(len(self.pending) <= MAX_FRAME)
+        packet.require(len(self.pending) <= self.max_frame)
         while b'\n' in self.pending:
             raw, _, rest = self.pending.partition(b'\n')
             self.pending[:] = rest
-            value = packet.strict_json(bytes(raw), MAX_FRAME)
+            value = packet.strict_json(bytes(raw), self.max_frame)
             packet.require(len(self.frames) < self.max_frames)
             if value.get('schema') == self.refusal_schema:
                 self._accept_refusal(value)
@@ -231,7 +232,7 @@ def prepare_owner(repository, powershell_path, python_path, git_path, native_pla
         git_sha256, _PreparationPumps)
 
 
-def _prepare_owner(repository, powershell_path, python_path, git_path, native_plan, source_pins, session, git_sha256, factory, *, linked_pair=None):
+def _prepare_owner(repository, powershell_path, python_path, git_path, native_plan, source_pins, session, git_sha256, factory, *, linked_pair=None, creation=None):
     """Private fixed-profile construction; callers/wire data cannot choose commands."""
     root = Path(repository).resolve(strict=True)
     packet.require(type(source_pins) is dict and set(source_pins) == set(factory.source_names))
@@ -240,7 +241,9 @@ def _prepare_owner(repository, powershell_path, python_path, git_path, native_pl
     report = session.report()
     packet.require(declared['nonce'] == report['nonce'] and declared['revision'] == session._plan['revision'] and
         declared['codeSha256'] == session._plan['codeSha256'] and declared['probeSha256'] == session._plan['probeSha256'])
-    value = factory.make_header(native_plan, report, session, source_pins, git_sha256)
+    packet.require(creation is None or factory.profile == "native-probe-create")
+    extra = {} if creation is None else dict(docker_sha256=creation[1], runtime_intent_sha256=creation[2])
+    value = factory.make_header(native_plan, report, session, source_pins, git_sha256, **extra)
     data = canonical(value)
     factory.decode_header(data, native_pin)
     with ExitStack() as held:
@@ -252,8 +255,10 @@ def _prepare_owner(repository, powershell_path, python_path, git_path, native_pl
         entry = root / 'eng/pilot/Invoke-HistoricalAuditObservation.ps1'
         arguments = ('-NoLogo', '-NoProfile', '-NonInteractive', '-File', str(entry), factory.switch,
             '-ExpectedPlanSha256', native_pin, '-Python', str(python.path), '-PreparationGitPath', str(git.path))
-        command = process._Command(powershell, (python, git, *sources, directory), arguments, root,
-            process.environment(powershell, (python,)), factory.profile, factory, linked_pair)
+        docker = held.enter_context(process.PinnedFile(creation[0], creation[1], True)) if creation else None
+        runtimes = (python, docker) if docker else (python,)
+        command = process._Command(powershell, (git, *runtimes, *sources, directory), arguments, root,
+            process.environment(powershell, runtimes), factory.profile, factory, linked_pair, docker)
         result = process._run_owned(command, session, data + b'\n', 30)
     packet.require(result.exit_code == 0 and result.stderr == b'')
     return result

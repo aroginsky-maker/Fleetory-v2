@@ -51,3 +51,7 @@ cleanup. Coordinated full-service recovery and Baseline Phase 7 remain open.
 
 Actual public receipt-fixture failures are covered by
 [PublicProbeOwnerFaults.md](PublicProbeOwnerFaults.md).
+
+The separate [native public container creation](NativeProbeCreation.md) profile now
+produces its own sleep-container receipt; this earlier acknowledgement profile
+continues to cover fixture-precreated resources only.

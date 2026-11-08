@@ -49,7 +49,7 @@ def closing(info, ready_pin, owner_pin, intent_pin, release_pin):
         releaseSha256=release_pin, decision='remove-empty-metadata')
 
 
-def _action(data, native_pin, ready_pin, mode):
+def _action(data, native_pin, ready_pin, mode, decode_header=header, decode_reservation=reservation):
     value = packet.strict_json(data, MAX_ACTION)
     fields = 'schema headerBase64 frameBase64'
     if mode == 'remove':
@@ -57,7 +57,7 @@ def _action(data, native_pin, ready_pin, mode):
     packet.keys(value, fields)
     packet.require(value['schema'] == 'fleetory.native-empty-payload-action.v1')
     raw = packet.decode(value['headerBase64'], prep.MAX_HEADER)
-    info = header(raw, native_pin)
+    info = decode_header(raw, native_pin)
     body = packet.strict_json(packet.decode(value['frameBase64'], prep.MAX_FRAME), prep.MAX_FRAME)
     if mode == 'reserve':
         packet.require(body == authorize(info, ready_pin, body.get('intentSha256')))
@@ -65,7 +65,7 @@ def _action(data, native_pin, ready_pin, mode):
         for key in ('ownerSha256', 'payloadDirectorySha256', 'intentSha256'):
             packet.hex_value(value[key])
         packet.require(body == closing(info, ready_pin, value['ownerSha256'], value['intentSha256'], body.get('releaseSha256')))
-    return value, info, reservation(raw, native_pin), body
+    return value, info, decode_reservation(raw, native_pin), body
 
 
 class _RecordedEmpty(binding.OwnedPayload):
@@ -89,9 +89,9 @@ class _RecordedEmpty(binding.OwnedPayload):
             raise
 
 
-def native_action(data, native_pin, ready_pin, native_pid, mode):
+def _native_action(data, native_pin, ready_pin, native_pid, mode, decode_header, decode_reservation):
     packet.require(mode in ('reserve', 'remove') and type(native_pid) is int and 0 < native_pid <= 0xffffffff and native_pid == os.getppid())
-    value, info, declared, body = _action(data, native_pin, ready_pin, mode)
+    value, info, declared, body = _action(data, native_pin, ready_pin, mode, decode_header, decode_reservation)
     repository = Path(__file__).resolve().parents[2]
     if mode == 'reserve':
         with binding.OwnedPayload(repository, declared, native_pid) as owned:
@@ -107,12 +107,17 @@ def native_action(data, native_pin, ready_pin, native_pid, mode):
         privateInputsAccepted=False, backendCreated=False)
 
 
+def native_action(data, native_pin, ready_pin, native_pid, mode):
+    return _native_action(data, native_pin, ready_pin, native_pid, mode, header, reservation)
+
+
 class _NativePayloadPumps(prep._PreparationPumps):
     source_names = SOURCES
     profile, switch = 'native-empty-payload', '-PayloadReservationOnly'
     max_frames = 3
     refusal_schema = 'fleetory.native-empty-payload-refused.v1'
     decode_header = staticmethod(header)
+    decode_reservation = staticmethod(reservation)
 
     @classmethod
     def make_header(cls, native_plan, report, session, source_pins, git_pin):
@@ -123,7 +128,7 @@ class _NativePayloadPumps(prep._PreparationPumps):
 
     def __init__(self, *args):
         super().__init__(*args)
-        self.value = reservation(self.data[:-1], self.session._plan['nativePlanSha256'])
+        self.value = self.decode_reservation(self.data[:-1], self.session._plan['nativePlanSha256'])
         self.payload_ready = threading.Event()
         self.bound, self.intent_pin = None, None
 

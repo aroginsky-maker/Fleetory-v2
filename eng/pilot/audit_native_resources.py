@@ -84,18 +84,19 @@ def acknowledgement(info, ready_pin, ready, value, intent_pin, native_pid):
     return _acknowledgement(info, ready_pin, ready, value, intent_pin, native_pid, ACK_SCHEMA)
 
 
-def _native_acknowledge(data, native_pin, ready_pin, native_pid, action_schema, make_offer, make_ack, validate):
+def _native_acknowledge(data, native_pin, ready_pin, native_pid, action_schema, make_offer, make_ack, validate,
+        decode_header=payload.header, decode_reservation=payload.reservation):
     packet.require(type(native_pid) is int and native_pid == payload.os.getppid())
     wrapped = packet.strict_json(data, payload.MAX_ACTION)
     packet.keys(wrapped, 'schema headerBase64 frameBase64 ownerSha256 payloadDirectorySha256 intentSha256')
     packet.require(wrapped['schema'] == action_schema)
     raw = packet.decode(wrapped['headerBase64'], prep.MAX_HEADER)
-    info = payload.header(raw, native_pin)
+    info = decode_header(raw, native_pin)
     value = packet.strict_json(packet.decode(wrapped['frameBase64'], prep.MAX_FRAME), prep.MAX_FRAME)
     packet.keys(value, 'schema nonce headerSha256 readySha256 ownerSha256 payloadDirectorySha256 payloadIntentSha256 receipt intentSha256 decision')
     packet.require(value == make_offer(info, ready_pin, wrapped, value['receipt'], value['intentSha256']))
     repository = payload.Path(__file__).resolve().parents[2]
-    with payload._RecordedEmpty(repository, payload.reservation(raw, native_pin), wrapped, native_pid) as owned:
+    with payload._RecordedEmpty(repository, decode_reservation(raw, native_pin), wrapped, native_pid) as owned:
         owned.check()
         result = make_ack(info, ready_pin, wrapped, value['receipt'], value['intentSha256'], native_pid)
         validate(value['receipt'], info['nonce'], info['controlSha256'])
@@ -116,6 +117,7 @@ class _NativeResourcePumps(payload._NativePayloadPumps):
     _ack_schema = ACK_SCHEMA
     profile, switch = 'native-resource-ack', '-ResourceAcknowledgementOnly'
     max_frames = 4
+    _ack_index = 2
     refusal_schema = 'fleetory.native-linked-resource-refused.v1'
 
     def __init__(self, *args):
@@ -154,7 +156,7 @@ class _NativeResourcePumps(payload._NativePayloadPumps):
         self._check_pair()
 
     def _accept_frame(self, value, raw):
-        if len(self.frames) != 2:
+        if len(self.frames) != self._ack_index:
             packet.require(value.get('schema') != self._ack_schema)
             return super()._accept_frame(value, raw)
         self._check_pair()
