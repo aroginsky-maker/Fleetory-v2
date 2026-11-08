@@ -48,3 +48,6 @@ Original archives, service credentials, private PKI, VPS, provider/root/issuer a
 production tokens are unused. Next: native-owned public build/create production,
 a separate bounded operation lease and generated kill-after-build/create/restore
 cleanup. Coordinated full-service recovery and Baseline Phase 7 remain open.
+
+Actual public receipt-fixture failures are covered by
+[PublicProbeOwnerFaults.md](PublicProbeOwnerFaults.md).

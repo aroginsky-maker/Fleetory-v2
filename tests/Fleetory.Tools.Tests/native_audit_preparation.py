@@ -31,10 +31,10 @@ def claim_plan(root, plan, powershell, python):
 
 
 @contextmanager
-def active_sdk_input():
-    path = REPO / 'global.json'
+def active_sdk_input(repository=REPO):
+    path = repository / 'global.json'
     created = not path.exists()
-    data = (REPO / 'eng/global.ci.json').read_bytes()
+    data = (repository / 'eng/global.ci.json').read_bytes()
     if created:
         with path.open('xb') as stream:
             stream.write(data)
@@ -42,7 +42,7 @@ def active_sdk_input():
         yield
     finally:
         if created:
-            prep.packet.require(path.parent == REPO and path.name == 'global.json' and path.read_bytes() == data)
+            prep.packet.require(path.parent == repository and path.name == 'global.json' and path.read_bytes() == data)
             path.unlink()
 
 

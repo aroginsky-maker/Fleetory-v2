@@ -16,10 +16,11 @@ from private_runtime_fixture import private_git, private_powershell, windows_git
 
 
 class NativeReceiptFixture(RuntimeFixture):
-    def __init__(self, powershell, python, git):
+    def __init__(self, powershell, python, git, repository=REPO):
         super().__init__()
         self.powershell, self.python, self.git = powershell, python, git
         self.plans = {}
+        self.repository = Path(repository).resolve(strict=True)
 
     def control(self, value):
         plan,_ = fixture()
@@ -29,13 +30,19 @@ class NativeReceiptFixture(RuntimeFixture):
         return dict(value, nativePlanSha256=policy.packet.digest(raw),
             runtimes=dict(powershell=sha(self.powershell), python=sha(self.python)))
 
-    def on_bound(self, session, source, target):
-        pins = policy.measure_sources(REPO)
+    def exchange(self, session, source, target):
+        pins = policy.measure_sources(self.repository)
         before = {n:session._records[n][1] for n in ('image-binding.json','backend-binding.json')}
         raw = self.plans[session._plan['nonce']]
         try:
-            result = policy.acknowledge_owner(REPO,self.powershell,self.python,self.git,raw,pins,session,
+            return policy.acknowledge_owner(self.repository,self.powershell,self.python,self.git,raw,pins,session,
                 (source,target),git_sha256=sha(self.git))
+        finally:
+            policy.packet.require(all(session._records[n][1]==data for n,data in before.items()) and policy.measure_sources(self.repository)==pins)
+
+    def on_bound(self, session, source, target):
+        try:
+            result=self.exchange(session,source,target)
         except policy.process.LaunchError as error:
             evidence=json.loads(error.evidence)
             print('Public probe native receipt refusal: '+str(evidence.get('payload')),file=sys.stderr)
@@ -53,11 +60,10 @@ class NativeReceiptFixture(RuntimeFixture):
             intent['receipt']==policy.pair_receipt(session,(source,target)) and
             bound['actualOwnedProcess']['pid']==bound['acknowledgement']['pid']==evidence['osIdentity']['pid'] and
             bound['resourceIntentSha256']==policy.packet.digest(session._records['native-resource-intent.json'][1]))
-        policy.packet.require(all(session._records[n][1]==data for n,data in before.items()) and policy.measure_sources(REPO)==pins)
-        path=REPO/'artifacts'/policy.payload.binding.payload_name(session._plan['nonce'])
+        path=self.repository/'artifacts'/policy.payload.binding.payload_name(session._plan['nonce'])
         policy.packet.require(not path.exists())
         refused=False
-        try:policy.acknowledge_owner(REPO,self.powershell,self.python,self.git,raw,pins,session,(source,target),git_sha256=sha(self.git))
+        try:self.exchange(session,source,target)
         except ValueError:refused=True
         policy.packet.require(refused)
         return dict(schema='fleetory.public-probe-native-receipt-proof.v1',verified=True,sourceFilesHeld=45,

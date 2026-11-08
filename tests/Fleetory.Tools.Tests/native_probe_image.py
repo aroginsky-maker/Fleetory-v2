@@ -57,7 +57,7 @@ def bounded_docker(args, data=None, limit=262144, timeout=60):
             pumps.finish()
 
 
-def publication(root):
+def publication(root, repository=REPO):
     powershell = shutil.which('pwsh')
     packet.require(powershell is not None)
     helper = root / 'publish.ps1'
@@ -75,7 +75,7 @@ $bundle=Get-HistoricalProbeBundle $published
 $sdkVersion=(& $dotnet --version).Trim();Assert-ImmuData ($LASTEXITCODE -eq 0 -and $sdkVersion -ceq (Get-Content -LiteralPath (Join-Path $Repository 'global.json') -Raw|ConvertFrom-Json).sdk.version) 'publisher-sdk-version'
 @{source=$second;bundle=$bundle;dotnetSha256=$pin;sdkVersion=$sdkVersion}|ConvertTo-Json -Depth 12 -Compress
 """, encoding='utf-8')
-    result = subprocess.run([powershell, '-NoLogo', '-NoProfile', '-NonInteractive', '-File', str(helper), str(REPO), str(root)],
+    result = subprocess.run([powershell, '-NoLogo', '-NoProfile', '-NonInteractive', '-File', str(helper), str(repository), str(root)],
         capture_output=True, timeout=180)
     packet.require(result.returncode == 0 and result.stderr == b'')
     value = packet.strict_json(result.stdout, bundle.MAX_MANIFEST + 4096)
@@ -140,7 +140,7 @@ class ProbeBuild:
             packet.require(identifier not in found)
 
 
-def run(runtime_check=None, control_factory=None):
+def run(runtime_check=None, control_factory=None, repository=REPO):
     client = ProbeBuild();version = client.metadata.preflight()
     bases = []
     for reference in policy.BASES:
@@ -151,9 +151,9 @@ def run(runtime_check=None, control_factory=None):
             value = client.base(reference)
         bases.append(value)
     policy.bases(bases)
-    with tempfile.TemporaryDirectory(prefix='fleetory-public-probe-image-') as temp, active_sdk_input(), ExitStack() as stack:
+    with tempfile.TemporaryDirectory(prefix='fleetory-public-probe-image-') as temp, active_sdk_input(repository), ExitStack() as stack:
         root = Path(temp).resolve()
-        published = publication(root)
+        published = publication(root, repository)
         encoded = image.canonical(published['bundle'])
         held = stack.enter_context(bundle.HeldProbeBundle(root / 'publish', encoded, packet.digest(encoded)))
         directory = root / 'control';directory.mkdir(mode=0o700)
