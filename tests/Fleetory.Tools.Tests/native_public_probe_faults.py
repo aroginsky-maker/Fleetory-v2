@@ -116,6 +116,7 @@ class ExpectedPublicFault(RuntimeError):
 
 
 class FaultFixture(NativeReceiptFixture):
+    expected_sleep_workers=1
     def __init__(self,powershell,python,git,repository,case):
         super().__init__(powershell,python,git,repository)
         packet.require(case in CASES);self.case=case;self.injected=False;self.live_kill=False;self.outcome=None;self.image_id=None;self.reservation=None
@@ -174,13 +175,14 @@ def operator_state(git):
     return packet.digest(b'\0'.join(values))
 
 
-def run():
+def run(callback_factory=FaultFixture,cases=CASES):
+    packet.require(type(cases) is tuple and len(cases)==2 and len(set(cases))==2)
     powershell=Path(shutil.which('pwsh') or '').resolve(strict=True);python=Path(sys.executable).resolve(strict=True)
     git=Path(shutil.which('git') or '').resolve(strict=True)
     if os.name=='nt':git=windows_git_core(git)
     copy_git=git
     original=operator_state(git);global_path=REPO/'global.json';global_before=global_path.read_bytes() if global_path.exists() else None
-    outcomes=[];sentinel=StoppedSentinel();version=sentinel.preflight()
+    outcomes=[];workers=0;sentinel=StoppedSentinel();version=sentinel.preflight()
     with tempfile.TemporaryDirectory(prefix='fleetory-public-probe-native-faults-') as temp,ExitStack() as held:
         root=Path(temp).resolve();held.enter_context(policy.prep.control.DirectoryLease(root))
         powershell=private_powershell(powershell,root);git=private_git(git,root)
@@ -191,12 +193,15 @@ def run():
         base_id=sentinel.call(['image','inspect','--format','{{.Id}}',binding.IMAGE]).decode().strip();binding.image_id(base_id)
         intent=json.loads(binding.prepare(session,base_id));foreign=sentinel.create(intent);before=sentinel.observed(foreign)
         try:
-            for case in CASES:
-                callback=FaultFixture(powershell,python,git,copied.directory,case)
+            for case in cases:
+                callback=callback_factory(powershell,python,git,copied.directory,case)
                 try:build_probe(runtime_check=callback,control_factory=callback.control,repository=copied.directory)
                 except ExpectedPublicFault as error:packet.require(str(error)==case)
                 else:raise AssertionError('Expected public native fault was not reached.')
-                packet.require(callback.outcome is not None and len(callback.receipts)==1 and callback.listed_id(callback.receipts[0][0])==[])
+                count=callback.expected_sleep_workers
+                packet.require(type(count) is int and count in (0,1) and callback.outcome is not None and len(callback.receipts)==count)
+                packet.require(all(callback.listed_id(identifier)==[] for identifier,_ in callback.receipts))
+                workers+=count
                 selected=sentinel.call(['image','ls','-a','--no-trunc','--filter','label=fleetory.audit.control.reservation='+callback.reservation,'--format','{{.ID}}']).decode().split()
                 packet.require(callback.image_id not in selected and sentinel.observed(foreign)==before)
                 copied.check()
@@ -211,7 +216,7 @@ def run():
     packet.require((global_path.read_bytes() if global_path.exists() else None)==global_before)
     return dict(schema='fleetory.generated-public-probe-owner-faults.v1',verified=True,dockerVersion=version,cases=outcomes,
         publicCopy=public_facts,actualNativeOwnerCases=2,actualNativeOwnerKills=sum(v['nativeOwnerObservedAliveBeforeKill'] for v in outcomes),typedOfferRefusals=1,
-        publicProbeImagesBuilt=2,ownStoppedReadbackContainers=2,ownSleepWorkers=2,foreignStoppedSentinels=1,
+        publicProbeImagesBuilt=2,ownStoppedReadbackContainers=2,ownSleepWorkers=workers,foreignStoppedSentinels=1,
         ownPublicFixtureDisposed=True,operatorCheckoutAndRefUnchanged=True,operatorSdkInputUnchanged=True,
         publicReceiptFixtureOwnerFaultCleanupVerified=True,cleanupActor='trusted-fixture-parent',
         backendServicesStarted=0,actualProbeNativeBuildCreateVerified=False,operationalLeaseAuthorized=False,

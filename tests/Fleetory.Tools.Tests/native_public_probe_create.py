@@ -13,6 +13,33 @@ from native_audit_preparation import sha, REPO
 from private_runtime_fixture import private_git, private_powershell, windows_git_core
 
 
+def native_create_receipt(session, target):
+    """Receipt-only fixture ownership transfer; cleanup remains possible after admission expires."""
+    session.check()
+    saved=json.loads(session._records['native-probe-create-binding.json'][1])
+    intent_raw=session._records['native-probe-create-intent.json'][1]
+    intent=json.loads(intent_raw);receipt=saved['receipt'];owner=saved['actualOwnedProcess']
+    packet.keys(saved,'schema nonce actualOwnedProcess createIntentSha256 receipt receiptSha256 backendBindingSha256')
+    packet.keys(intent,'schema nonce headerSha256 actualOwnedProcess runtimeIntentSha256 dockerSha256 privateInputsAccepted')
+    packet.keys(receipt,'schema nonce headerSha256 readySha256 ownerSha256 payloadDirectorySha256 runtimeIntentSha256 containerId pid privateInputsAccepted backendServiceStarted')
+    packet.require(intent['schema']=='fleetory.native-probe-create-intent.v1' and intent['actualOwnedProcess']==owner and
+        intent['privateInputsAccepted'] is receipt['privateInputsAccepted'] is receipt['backendServiceStarted'] is False and
+        owner['imageSha256']==session._plan['runtimes']['powershell'])
+    packet.require(saved['schema']=='fleetory.native-probe-create-binding.v1' and
+        saved['nonce']==receipt['nonce']==intent['nonce']==session._plan['nonce'] and
+        receipt['schema']==policy.CREATED_SCHEMA and receipt['containerId']==target._bound and
+        receipt['headerSha256']==intent['headerSha256'] and receipt['pid']==owner['pid'] and type(owner['pid']) is int and
+        owner['actualImageMatched'] is True and
+        receipt['runtimeIntentSha256']==intent['runtimeIntentSha256']==packet.digest(target._intent_bytes) and
+        saved['createIntentSha256']==packet.digest(intent_raw) and
+        saved['backendBindingSha256']==packet.digest(session._records['backend-binding.json'][1]))
+    packet.require(type(receipt['containerId']) is str and policy.re.fullmatch('[a-f0-9]{64}',receipt['containerId']))
+    packet.hex_value(saved['receiptSha256']);packet.hex_value(owner['imageSha256'])
+    packet.require(owner['birthKind'] in ('windows-filetime','linux-proc-start-ticks') and
+        type(owner['birthToken']) is str and owner['birthToken'].isdigit())
+    return saved
+
+
 class NativeCreateFixture(NativeReceiptFixture):
     def __call__(self, session, source, fresh_session):
         raw = runtime.prepare(session,source)
@@ -56,11 +83,8 @@ class NativeCreateFixture(NativeReceiptFixture):
         finally:
             # Only the durable, live-fenced native create receipt conveys ownership to this fixture.
             if 'native-probe-create-binding.json' in session._records:
-                saved=json.loads(session._records['native-probe-create-binding.json'][1])
-                receipt=saved['receipt'];packet.require(saved['schema']=='fleetory.native-probe-create-binding.v1' and
-                    receipt['containerId']==target._bound and receipt['pid']==saved['actualOwnedProcess']['pid'] and
-                    receipt['runtimeIntentSha256']==packet.digest(raw))
-                self.receipts.append((receipt['containerId'],target.intent))
+                saved=native_create_receipt(session,target)
+                self.receipts.append((saved['receipt']['containerId'],target.intent))
             self.cleanup()
         packet.require(len(self.receipts)==1 and self.listed_id(identifier)==[])
         source.report()

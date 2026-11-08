@@ -45,3 +45,7 @@ full compiler/package input continuity, native image build, pre-receipt crash ga
 backend lifecycle, coordinated RPO/RTO and full Phase 7 recovery remain open.
 Original data, credentials, private PKI, VPS, provider/root/issuer and production
 tokens are unused. New sensitive scope still needs a concrete approved plan.
+
+Actual generated refusal and post-create owner-death checks are described in
+[NativeProbeCreationFaults.md](NativeProbeCreationFaults.md). They retain the
+pre-receipt and controller-death limitations above.
