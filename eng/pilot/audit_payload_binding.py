@@ -48,9 +48,10 @@ def marker(value, pid, directory):
         ownerPid=pid, payloadDirectorySha256=directory)
 
 
-def _create_record(directory, data):
-    fd = files.windows_create_new(directory.path / MARKER) if os.name == 'nt' else os.open(
-        MARKER, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory.fd)
+def _create_named_record(directory, name, data):
+    packet.require(name in (MARKER, 'publication-owner.json'))
+    fd = files.windows_create_new(directory.path / name) if os.name == 'nt' else os.open(
+        name, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory.fd)
     try:
         view = memoryview(data)
         while view:
@@ -63,6 +64,9 @@ def _create_record(directory, data):
     if os.name == 'posix':
         os.fsync(directory.fd)
 
+
+def _create_record(directory, data):
+    _create_named_record(directory, MARKER, data)
 
 class OwnedPayload:
     """Child claims its own fresh directory. Failures preserve the unknown outcome."""

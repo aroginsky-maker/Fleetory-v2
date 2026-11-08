@@ -49,18 +49,6 @@ def _mkdir(parent,leaf):
     parent.check()
 
 
-def _record(directory,data):
-    fd=files.windows_create_new(directory.path/MARKER) if os.name=='nt' else os.open(
-        MARKER,os.O_RDWR|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600,dir_fd=directory.fd)
-    try:
-        view=memoryview(data)
-        while view:
-            count=os.write(fd,view);packet.require(0<count<=len(view));view=view[count:]
-        os.fsync(fd)
-    finally:os.close(fd)
-    if os.name=='posix':os.fsync(directory.fd)
-
-
 class _HeldNamespace:
     def _check_tree(self):
         self.parent.check();self.directory.check();self.output.check();self.pin.check()
@@ -86,7 +74,7 @@ class OwnedPublication(_HeldNamespace):
             self.output=self._held.enter_context(control.DirectoryLease(self.directory.path/OUTPUT))
             self.root_pin,self.output_pin=empty.directory_hash(self.directory),empty.directory_hash(self.output)
             raw=bundle.prep.canonical(marker(self.value,os.getpid(),self.root_pin,self.output_pin))
-            self.owner_pin=packet.digest(raw);_record(self.directory,raw)
+            self.owner_pin=packet.digest(raw);empty._create_named_record(self.directory,MARKER,raw)
             self.pin=self._held.enter_context(process.PinnedFile(self.directory.path/MARKER,self.owner_pin))
             self.check()
         except BaseException:self.close();raise
