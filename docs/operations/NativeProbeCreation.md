@@ -14,7 +14,9 @@ image and binding pins, runtime profile, name, labels and original 60-second ima
 admission expiry. No packet field selects a host path, command, endpoint, context,
 mount, port, environment file or cleanup target. The Docker CLI uses only the fixed
 local default Unix socket or Docker Desktop Linux named pipe; Linux engine 28+ is
-required. Each CLI exchange has bounded pipes and an eight-second timeout.
+required. Each CLI exchange has bounded pipes and an eight-second timeout. The
+admission window is rechecked after the name lookup RPC, immediately before
+dispatching create; an expired or clock-regressed window cannot start that RPC.
 
 Creation uses the immutable image ID, `--pull=never`, UID/GID 3322, network none,
 read-only root, two bounded noexec/nosuid/nodev tmpfs mounts, all capabilities

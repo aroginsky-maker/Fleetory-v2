@@ -184,5 +184,15 @@ class NativeCreateTests(unittest.TestCase):
                 self.assertEqual(client.create(pair[1].intent),'b'*64)
                 self.assertEqual(calls.call_args.args[0],policy._arguments(pair[1].intent))
 
+    def test_name_lookup_expiring_admission_never_dispatches_create(self):
+        with self.session() as session,unbound_pair(session,self.root) as pair:
+            client=object.__new__(policy._Docker)
+            for now in (pair[1].intent['expiresNs'],pair[1].intent['expiresNs']+1,
+                    pair[1].intent['expiresNs']-runtime.container.WINDOW_NS-1):
+                with self.subTest(now=now),patch.object(client,'_call',return_value=b'') as calls,patch.object(policy.time,'time_ns',return_value=now):
+                    with self.assertRaises(ValueError):client.create(pair[1].intent)
+                    self.assertEqual(calls.call_count,1)
+                    self.assertEqual(calls.call_args.args[0][0:2],['container','ls'])
+
 
 if __name__=='__main__':unittest.main()

@@ -135,6 +135,8 @@ class _Docker:
     def create(self, value):
         existing = self._call(['container', 'ls', '-a', '--no-trunc', '--filter', 'name=^/'+value['name']+'$', '--format', '{{.ID}}'])
         packet.require(not existing.strip())
+        # Name lookup is a separate bounded RPC; admission may expire while it waits.
+        packet.require(0 < value['expiresNs'] - time.time_ns() <= runtime.container.WINDOW_NS)
         identifier = self._call(_arguments(value)).decode('ascii').strip()
         packet.require(re.fullmatch('[a-f0-9]{64}', identifier))
         return identifier
