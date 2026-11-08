@@ -51,3 +51,6 @@ compiler/package provenance, controller-death recovery, a live runtime/service
 lease, deployed image/configuration lineage and full recovery remain open.
 No production cleanup, original secret/PKI, provider, root, issuer or token grant
 is added. Phase 7 and PR #2 remain open.
+
+The separate [retained sleep runtime](RetainedPublicationRuntime.md) adds a
+typed controller/image/readback binding without widening the old runtime profile.

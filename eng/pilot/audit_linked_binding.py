@@ -75,10 +75,13 @@ class LinkedContainerBinding(container.ContainerBinding):
         packet.require(value['image'] == source['imageId'] and value['name'] == self._name(report['nonce']) and
             value['labels'] == self._labels(session, source))
         packet.require(type(value['openedNs']) is int and type(value['expiresNs']) is int and
-            value['expiresNs'] == self._source.intent['expiresNs'] and
+            value['expiresNs'] == self._source_expiry() and
             0 < value['expiresNs'] - value['openedNs'] <= container.WINDOW_NS and
             session._created <= value['openedNs'] <= time.time_ns() < value['expiresNs'])
         return value, frozen
+
+    def _source_expiry(self):
+        return self._source.intent['expiresNs']
 
     def _check(self):
         source = self._source_anchor(self.session, self._source)

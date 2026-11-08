@@ -34,6 +34,10 @@ SOURCE_FIELDS = ('imageId', 'imageBindingSha256', 'imageIntentSha256', 'bundleMa
 def anchor(session, source):
     packet.require(runtime_profile() == PROFILE)
     packet.require(type(source) is probe.ProbeImageBinding and source.session is session)
+    return _image_pins(session, source)
+
+
+def _image_pins(session, source):
     report = source.report()
     packet.require(report['generatedProbeImageRecipeBound'] is True)
     raw = session._records['image-binding.json'][1]
@@ -66,6 +70,19 @@ def prepare(session, source):
         labels=labels(source, pins), openedNs=time.time_ns(), expiresNs=source.intent['expiresNs']))
 
 
+def _observe_runtime(data, intent, returned_id, now, schema):
+    value, created = container._container_identity(data, intent, returned_id, now, schema,
+        container.OBSERVATION_FIELDS + ' environment ulimits')
+    packet.require(value['configImage'] == intent['imageId'] and value['user'] == PROFILE['user'] and
+        value['entrypoint'] == PROFILE['entrypoint'] and value['command'] == COMMAND and value['environment'] == ENVIRONMENT)
+    container._container_sandbox(value)
+    packet.require(all(type(value[n]) is int and value[n] == limit for n, limit in
+        (('memory', PROFILE['memoryBytes']), ('nanoCpus', PROFILE['nanoCpus']), ('pidsLimit', PROFILE['pidsLimit']))))
+    packet.require(value['tmpfs'] == TMPFS and value['ulimits'] == PROFILE['ulimits'])
+    packet.require(all(type(value['ulimits'][0][key]) is int for key in ('Soft', 'Hard')))
+    return value, created
+
+
 class ProbeRuntimeBinding(linked.LinkedContainerBinding):
     """A distinct fixed profile; source expiry remains the 60-second image admission lease."""
     _intent_schema, _purpose = SCHEMA, PURPOSE
@@ -78,16 +95,7 @@ class ProbeRuntimeBinding(linked.LinkedContainerBinding):
 
     @staticmethod
     def _observe(data, intent, returned_id, now):
-        value, created = container._container_identity(data, intent, returned_id, now, OBSERVATION_SCHEMA,
-            container.OBSERVATION_FIELDS + ' environment ulimits')
-        packet.require(value['configImage'] == intent['imageId'] and value['user'] == PROFILE['user'] and
-            value['entrypoint'] == PROFILE['entrypoint'] and value['command'] == COMMAND and value['environment'] == ENVIRONMENT)
-        container._container_sandbox(value)
-        packet.require(all(type(value[n]) is int and value[n] == limit for n, limit in
-            (('memory', PROFILE['memoryBytes']), ('nanoCpus', PROFILE['nanoCpus']), ('pidsLimit', PROFILE['pidsLimit']))))
-        packet.require(value['tmpfs'] == TMPFS and value['ulimits'] == PROFILE['ulimits'])
-        packet.require(all(type(value['ulimits'][0][key]) is int for key in ('Soft', 'Hard')))
-        return value, created
+        return _observe_runtime(data, intent, returned_id, now, OBSERVATION_SCHEMA)
 
     def report(self):
         result = super().report()

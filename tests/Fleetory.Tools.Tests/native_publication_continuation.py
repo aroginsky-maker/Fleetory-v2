@@ -29,7 +29,7 @@ def exercise(repository, root, powershell, python, git, dotnet, published, *, wi
         probeBundleSha256=published['bundle']['sha256'],
         probeSha256=next(e['sha256'] for e in published['bundle']['entries'] if e['path']=='ServerBackendProbe.dll'))
     raw, claimed = claim_plan(root, plan, powershell, python)
-    pins = policy.measure_sources(repository);resource = None;readback = None
+    pins = policy.measure_sources(repository);resource = None;readback = None;runtime_proof = None
     try:
         with claimed as session:
             with policy.retain_owner(repository,powershell,python,git,dotnet,raw,pins,session,
@@ -50,6 +50,8 @@ def exercise(repository, root, powershell, python, git, dotnet, published, *, wi
                     copied = bounded_docker(['cp',stored+':/tool/.','-'],limit=policy.ns.bundle.MAX_CONTEXT)
                     readback = retained.complete(resource,stored,observation,copied)
                     client.stopped(stored,identifier,resource.intent)
+                    from native_retained_runtime import RetainedRuntimeFixture
+                    runtime_proof = RetainedRuntimeFixture().verify(session,resource)
                 retained.check()
                 packet.require(before=={name:pin.fd for name,pin in retained._bundle.pins.items()})
                 packet.require(policy.measure_sources(repository)==pins)
@@ -76,6 +78,7 @@ def exercise(repository, root, powershell, python, git, dotnet, published, *, wi
         nativeOwnerExitedBeforeImageIntent=True, consumedContinuationReplayRefused=duplicate, closedImageUseRefused=closed,
         allTransferredDescriptorsClosed=True, namespacePreservedUntilFixtureDisposal=True,
         actualDockerImageAndStoppedReadbackVerified=with_image, readback=readback, dockerVersion=version,
+        retainedSleepRuntimeProof=runtime_proof, totalCreatedContainers=2 if with_image else 0,
         ownStoppedContainersAbsent=with_image, ownImageReceiptIdsAbsent=with_image, cachedBasesPreserved=with_image,
         containersCreated=1 if with_image else 0, servicesStarted=0, selectedSourceFilesPinned=len(pins),
         controllerDeathCleanupVerified=False, operationalLeaseAuthorized=False, backendCleanupAuthorized=False,
