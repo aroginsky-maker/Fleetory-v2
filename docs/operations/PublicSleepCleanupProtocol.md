@@ -6,6 +6,10 @@ authorize an operation. Controller/supervisor observations and the create receip
 are explicitly asserted data. Actual OS identity, receipt origin, durable state,
 independent expiry enforcement and cleanup remain unverified and reported false.
 
+Ticket bytes are frozen before parsing. All four assertion frames are frozen
+once before any of them is validated or hashed; caller bytearray mutation cannot
+change which bytes a candidate binds.
+
 The pinned protocol covers exactly one generated sleep worker:
 
 - Separate controller and supervisor nonces, distinct PIDs, matching OS birth-token
@@ -43,7 +47,7 @@ original data/secret/PKI paths are outside this protocol. Supervisor death and
 unknown or late outcomes must never be reported as successful cleanup.
 
 `cleanup_protocol_tests.py` uses generated assertions and controlled clocks.
-Its 29 contracts cover schema/type/size limits, receipt consistency, OS-token
+Its 31 contracts cover schema/type/size limits, receipt consistency, OS-token
 kinds, PID reuse, foreign IDs, label changes, both triggers, hard deadlines,
 rollback, mutation and replay. CI requires them on Windows and Linux. The suite starts no containers and has no restore or runtime actions. Existing
 mandatory CI gates remain required; completed local restores and unchanged native

@@ -233,6 +233,29 @@ class CleanupProtocolContracts(unittest.TestCase):
         self.assertFalse(model.report()['candidate']['cleanupAuthorized']);self.no_authority(model.report())
 
 
+    def test_constructor_keeps_the_same_ticket_bytes_after_validation(self):
+        raw=bytearray(C(self.value));original=policy._ticket
+        def mutate(data,pin):
+            value=original(data,pin);raw[:]=b'{}';return value
+        with patch.object(policy,'_ticket',side_effect=mutate):model=self.model(raw=raw)
+        self.assertEqual(self.evaluate(model)['state'],'armed')
+
+    def test_all_assertions_are_frozen_once_before_validation_and_hashing(self):
+        model=self.model()
+        frames=[bytearray(C(self.process('controller','exited'))),bytearray(C(self.process('supervisor'))),bytearray(C(self.receipt)),bytearray(C(self.resource))]
+        snapshots=[bytes(frame) for frame in frames];original=policy._process
+        def mutate_after_parse(data,identity,**kwargs):
+            state=original(data,identity,**kwargs)
+            if identity==self.value['controller']:
+                for frame in frames:frame[:]=b'{}'
+            return state
+        with patch.object(policy,'_process',side_effect=mutate_after_parse),patch.object(policy.time,'time_ns',return_value=self.now+1_000_000_000),patch.object(policy.time,'monotonic_ns',return_value=self.mono+1_000_000_000):
+            report=model.evaluate(*frames)
+        for key,raw in zip(('controllerAssertionSha256','supervisorAssertionSha256','createReceiptSha256','resourceAssertionSha256'),snapshots):
+            self.assertEqual(report['candidate'][key],H(raw))
+        self.assertEqual(report['candidate']['reason'],'asserted-controller-exit');self.no_authority(report)
+
+
 if __name__=='__main__':
     result=unittest.main(exit=False).result
     if not result.wasSuccessful() or result.skipped:raise SystemExit(1)

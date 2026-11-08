@@ -27,9 +27,13 @@ def _identity(value):
     packet.hex_value(value['executableSha256'])
 
 
-def _frame(data):
+def _freeze(data):
     packet.require(type(data) in (bytes,bytearray) and 0 < len(data) <= MAX_FRAME)
-    return packet.strict_json(bytes(data),MAX_FRAME)
+    return bytes(data)
+
+
+def _frame(data):
+    return packet.strict_json(_freeze(data),MAX_FRAME)
 
 
 def _ticket(data, expected):
@@ -97,8 +101,9 @@ def _receipt(data, ticket):
 class CleanupProtocolModel:
     """Candidate checks only. A model result never authorizes a Docker or process operation."""
     def __init__(self, data, expected):
-        self._value = _ticket(data,expected)
-        self._data,self._pin = bytes(data),expected
+        frozen = _freeze(data)
+        self._value = _ticket(frozen,expected)
+        self._data,self._pin = frozen,expected
         self._value_pin = packet.digest(C(self._value))
         now,mono=time.time_ns(),time.monotonic_ns()
         packet.require(type(now) is int and type(mono) is int and
@@ -119,6 +124,7 @@ class CleanupProtocolModel:
         packet.require(self._state=='armed')
         try:
             now=self._clock()
+            controller,supervisor,create_receipt,resource=(_freeze(frame) for frame in (controller,supervisor,create_receipt,resource))
             state=_process(controller,self._value['controller'])
             _process(supervisor,self._value['supervisor'],supervisor=True)
             _receipt(create_receipt,self._value)
