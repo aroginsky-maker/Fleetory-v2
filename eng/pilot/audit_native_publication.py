@@ -54,7 +54,7 @@ def authorize(info,ready_pin,decision,namespace_ready=None,release_pin=None):
 class _RecordedPublication(ns.OwnedPublication):
     """Reopen only the exact namespace just created for the current native parent."""
     def __init__(self,repository,intent,ready,native_pid):
-        packet.require(type(native_pid) is int and native_pid==os.getppid())
+        packet.require(type(native_pid) is int and 0<native_pid<=0xffffffff and native_pid==os.getppid())
         self.value=ns.admit(intent,packet.digest(intent));self.owner_pid=native_pid
         self._held=ExitStack();self.published=None;self._attempted=False
         try:
@@ -70,7 +70,7 @@ class _RecordedPublication(ns.OwnedPublication):
 
 
 def native_action(data,native_pin,ready_pin,native_pid,mode):
-    packet.require(mode in ('reserve','publish','seal','close') and type(native_pid) is int and native_pid==os.getppid())
+    packet.require(mode in ('reserve','publish','seal','close') and type(native_pid) is int and 0<native_pid<=0xffffffff and native_pid==os.getppid())
     action=packet.strict_json(data,MAX_ACTION)
     packet.keys(action,'schema headerBase64 frameBase64 namespaceReady')
     packet.require(action['schema']=='fleetory.native-publication-action.v1')

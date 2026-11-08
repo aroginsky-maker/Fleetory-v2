@@ -159,4 +159,15 @@ class NativePublicationContracts(unittest.TestCase):
         self.assertEqual({key:os.environ.get(key) for key in before},before)
 
 
+    def test_invisible_or_out_of_range_parent_refused_before_namespace_creation(self):
+        intent=policy.inputs(self.header(),self.pin)[2]
+        for pid in (0,0x100000000):
+            with self.subTest(pid=pid),patch.object(policy.ns.os,'getppid',return_value=pid):
+                with self.assertRaises(ValueError):
+                    policy.ns.OwnedPublication(self.repo,intent,H(intent),native_owner_pid=pid)
+                with self.assertRaises(ValueError):
+                    policy.native_action(b'',self.pin,'a'*64,pid,'reserve')
+            self.assertEqual(list((self.repo/'artifacts').iterdir()),[])
+
+
 if __name__=='__main__':unittest.main()

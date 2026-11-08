@@ -65,7 +65,7 @@ class _HeldNamespace:
 class OwnedPublication(_HeldNamespace):
     """Actual owner creates a fresh namespace. Close preserves all outcomes; no deletion API."""
     def __init__(self,repository,data,expected,*,native_owner_pid=None):
-        packet.require(native_owner_pid is None or type(native_owner_pid) is int and native_owner_pid==os.getppid())
+        packet.require(native_owner_pid is None or type(native_owner_pid) is int and 0<native_owner_pid<=0xffffffff and native_owner_pid==os.getppid())
         self.owner_pid=os.getpid() if native_owner_pid is None else native_owner_pid
         self.value=admit(data,expected);self._held=ExitStack();self.published=None;self._attempted=False
         try:
