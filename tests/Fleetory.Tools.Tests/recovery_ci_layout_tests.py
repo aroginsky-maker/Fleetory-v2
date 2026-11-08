@@ -67,6 +67,8 @@ def validate(text):
                 ('fixed probe runtime contracts', 'audit_probe_runtime_tests.py'),
                 ('native probe receipt contracts', 'audit_native_probe_tests.py'),
                 ('native probe create contracts', 'audit_native_create_tests.py'),
+                ('typed publication namespace contracts', 'publication_namespace_tests.py'),
+                ('fenced publication namespace handoff', 'native_publication_namespace.py'),
                 ('native create fault contracts', 'native_create_faults_tests.py'),
                 ('public probe owner fault contracts', 'public_probe_faults_tests.py'),
                 ('actual native probe receipt acknowledgement', 'native_probe_receipt_ack.py')):
@@ -136,6 +138,13 @@ def validate(text):
     start = block.index(native_probe_step)
     end = block.find('      - name:', start + len(native_probe_step))
     assert block[start:end if end >= 0 else len(block)].strip() == native_probe_step.strip()
+    publication_step = ('      - name: Verify real public publication namespace\n'
+        '        shell: pwsh\n'
+        '        run: python3 -B ./tests/Fleetory.Tools.Tests/native_publication_namespace.py --real-public\n')
+    assert block.count(publication_step) == 1
+    start = block.index(publication_step)
+    end = block.find('      - name:', start + len(publication_step))
+    assert block[start:end if end >= 0 else len(block)].strip() == publication_step.strip()
     create_step = ('      - name: Verify actual public native probe creation\n'
         '        shell: pwsh\n'
         '        run: python3 -B ./tests/Fleetory.Tools.Tests/native_public_probe_create.py\n')
@@ -334,6 +343,16 @@ class RecoveryCiLayoutTests(unittest.TestCase):
         for command in ('python -B ./tests/Fleetory.Tools.Tests/audit_native_create_tests.py',
                 'python3 -B ./tests/Fleetory.Tools.Tests/audit_native_create_tests.py',
                 'python3 -B ./tests/Fleetory.Tools.Tests/native_public_probe_create.py'):
+            self.refused(self.text.replace(command, 'omitted', 1))
+            self.refused(self.text.replace(command, command + '\n          ' + command, 1))
+            self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
+
+    def test_publication_namespace_gates_cannot_be_omitted_duplicated_or_softened(self):
+        for command in ('python -B ./tests/Fleetory.Tools.Tests/publication_namespace_tests.py',
+                'python3 -B ./tests/Fleetory.Tools.Tests/publication_namespace_tests.py',
+                'python -B ./tests/Fleetory.Tools.Tests/native_publication_namespace.py',
+                'python3 -B ./tests/Fleetory.Tools.Tests/native_publication_namespace.py',
+                'python3 -B ./tests/Fleetory.Tools.Tests/native_publication_namespace.py --real-public'):
             self.refused(self.text.replace(command, 'omitted', 1))
             self.refused(self.text.replace(command, command + '\n          ' + command, 1))
             self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))

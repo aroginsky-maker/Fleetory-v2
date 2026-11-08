@@ -164,6 +164,14 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/native_create_faults_tests.py
 
+      - name: Verify typed publication namespace contracts on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/publication_namespace_tests.py
+
+      - name: Verify fenced publication namespace handoff on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/native_publication_namespace.py
+
       - name: Verify native probe create contracts on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/audit_native_create_tests.py
@@ -576,6 +584,14 @@ jobs:
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/native_create_faults_tests.py
 
+      - name: Verify typed publication namespace contracts
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/publication_namespace_tests.py
+
+      - name: Verify fenced publication namespace handoff
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/native_publication_namespace.py
+
       - name: Verify native probe create contracts
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/audit_native_create_tests.py
@@ -691,6 +707,10 @@ jobs:
       - name: Verify actual public probe native receipt handoff
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/native_public_probe_receipt.py
+
+      - name: Verify real public publication namespace
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/native_publication_namespace.py --real-public
 
       - name: Verify actual public native probe creation
         shell: pwsh

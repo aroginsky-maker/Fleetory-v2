@@ -43,3 +43,7 @@ publication/image build, non-empty publication namespace, compiler input continu
 intermediate cache cleanup and operational service recovery remain open. No original
 data, credentials, private PKI, VPS, provider/root/issuer or production tokens are
 used. Phase 7 and full coordinated recovery remain open.
+
+The next separate public publication namespace is described in
+[PublicationNamespace.md](PublicationNamespace.md). Its Python fixture proves
+namespace handoff only; native publication/build remain open.
