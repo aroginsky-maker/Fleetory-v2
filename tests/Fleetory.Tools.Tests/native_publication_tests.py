@@ -134,4 +134,29 @@ class NativePublicationContracts(unittest.TestCase):
                 with self.assertRaises((ValueError,RuntimeError)):fixture.restore_public(Path(sys.executable))
 
 
+    def test_private_sdk_replica_keeps_shared_permissions_and_selects_only_sdk402(self):
+        from private_runtime_fixture import _copy_dotnet
+        source=self.root/'installed-sdk';source.mkdir()
+        executable=source/'dotnet';executable.write_bytes(b'public muxer')
+        source.chmod(0o775);original=source.stat().st_mode
+        for name in ('sdk/10.0.402','sdk/10.0.401','host/fxr/10.0.14','shared/runtime','packs/reference'):
+            path=source/name;path.mkdir(parents=True);(path/'public.txt').write_bytes(b'public fixture')
+        destination=self.root/'private';destination.mkdir()
+        copied=_copy_dotnet(executable,destination)
+        self.assertEqual(copied.read_bytes(),executable.read_bytes())
+        self.assertEqual(source.stat().st_mode,original)
+        self.assertEqual(set(p.name for p in (copied.parent/'sdk').iterdir()),{'10.0.402'})
+        self.assertTrue((copied.parent/'host/fxr/10.0.14/public.txt').is_file())
+        if os.name=='posix':
+            self.assertTrue(all(path.stat().st_mode&0o777==0o700 for path in [copied.parent,*[p for p in copied.parent.rglob('*') if p.is_dir()]]))
+
+    def test_private_sdk_environment_restores_previous_values(self):
+        import native_publication as fixture
+        before={key:os.environ.get(key) for key in ('PATH','DOTNET_ROOT','DOTNET_ROOT_X64','DOTNET_MULTILEVEL_LOOKUP')}
+        with fixture.public_sdk_environment(Path(sys.executable)):
+            self.assertEqual(os.environ['DOTNET_ROOT'],str(Path(sys.executable).parent))
+            self.assertEqual(os.environ['DOTNET_MULTILEVEL_LOOKUP'],'0')
+        self.assertEqual({key:os.environ.get(key) for key in before},before)
+
+
 if __name__=='__main__':unittest.main()

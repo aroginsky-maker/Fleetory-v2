@@ -1,4 +1,5 @@
 """Actual historical PowerShell publishes only the public probe under its OS lifetime fence."""
+from contextlib import contextmanager,ExitStack
 import json
 import os
 from pathlib import Path
@@ -12,7 +13,7 @@ from unittest.mock import patch
 from native_audit_preparation import active_sdk_input,claim_plan,sha,REPO
 from native_probe_image import publication
 from historical_audit_restore_tests import fixture
-from private_runtime_fixture import private_git,private_powershell,windows_git_core
+from private_runtime_fixture import private_git,private_powershell,private_dotnet,windows_git_core
 import audit_native_publication as policy
 
 C,H=policy.prep.canonical,policy.packet.digest
@@ -56,13 +57,28 @@ def restore_public(dotnet):
         raise RuntimeError('Public restore refused; exit='+str(restored.returncode)+'; codes='+','.join(c.decode('ascii') for c in codes))
 
 
+@contextmanager
+def public_sdk_environment(dotnet):
+    values=dict(PATH=str(dotnet.parent)+os.pathsep+os.environ.get('PATH',''),DOTNET_ROOT=str(dotnet.parent),
+        DOTNET_ROOT_X64=str(dotnet.parent),DOTNET_MULTILEVEL_LOOKUP='0')
+    before={key:os.environ.get(key) for key in values}
+    try:
+        os.environ.update(values)
+        yield
+    finally:
+        for key,value in before.items():
+            if value is None:os.environ.pop(key,None)
+            else:os.environ[key]=value
+
+
 def run():
     powershell=Path(shutil.which('pwsh') or '').resolve(strict=True)
     python=Path(sys.executable).resolve(strict=True);git=Path(shutil.which('git') or '').resolve(strict=True)
     dotnet=Path(shutil.which('dotnet') or '').resolve(strict=True)
     if os.name=='nt':git=windows_git_core(git)
-    with tempfile.TemporaryDirectory(prefix='fleetory-native-publication-') as temp,active_sdk_input():
+    with tempfile.TemporaryDirectory(prefix='fleetory-native-publication-') as temp,active_sdk_input(),ExitStack() as held:
         root=Path(temp).resolve();powershell=private_powershell(powershell,root);git=private_git(git,root)
+        dotnet=private_dotnet(dotnet,root);held.enter_context(public_sdk_environment(dotnet))
         public=root/'reference';public.mkdir()
         if not (REPO/'eng/ServerBackendProbe/obj/project.assets.json').exists():
             restore_public(dotnet)
@@ -131,7 +147,7 @@ def run():
         policy.packet.require(before==after)
     policy.packet.require(not root.exists())
     return dict(schema='fleetory.generated-native-publication-proof.v1',verified=True,referencePublication=published,cases=outcomes,
-        actualNativePublicationVerified=True,actualOwnerPowerShell=True,nativeSeconds=30,publisherSeconds=20,selectedSourceFilesPinned=len(pins),
+        actualNativePublicationVerified=True,actualOwnerPowerShell=True,privateDotnetReplicaPrepared=os.name=='posix',nativeSeconds=30,publisherSeconds=20,selectedSourceFilesPinned=len(pins),
         publicExpectedManifestCompatibilityVerified=True,compilerClosureAuthenticated=False,imageBuildVerified=False,
         backendServicesStarted=0,originalInputsRead=False,originalPrivatePkiUsed=False,sourceVpsAccessed=False,
         fullSystemRecoveryVerified=False,phase7Complete=False)

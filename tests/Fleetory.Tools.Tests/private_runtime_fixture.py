@@ -50,3 +50,33 @@ def private_git(executable, root):
     if hashlib.sha256(copied.read_bytes()).digest() != expected or copied.stat().st_nlink != 1:
         raise ValueError('Private Git copy differs from selected executable or has aliases.')
     return copied
+
+
+def _copy_dotnet(executable, root):
+    executable=Path(executable).resolve(strict=True)
+    target=Path(root).resolve(strict=True)/'dotnet-runtime'
+    target.mkdir(mode=0o700)
+    expected=hashlib.sha256(executable.read_bytes()).digest()
+    shutil.copy2(executable,target/executable.name)
+    for name in ('host','shared','packs','sdk-manifests','metadata','templates'):
+        source=executable.parent/name
+        if source.exists():
+            shutil.copytree(source,target/name,symlinks=True)
+    sdk=executable.parent/'sdk/10.0.402'
+    if not sdk.is_dir():
+        raise ValueError('Selected public SDK402 is missing.')
+    (target/'sdk').mkdir(mode=0o700)
+    shutil.copytree(sdk,target/'sdk/10.0.402',symlinks=True)
+    for directory,_,_ in os.walk(target,followlinks=False):
+        Path(directory).chmod(0o700)
+    copied=target/executable.name
+    if hashlib.sha256(copied.read_bytes()).digest()!=expected or copied.stat().st_nlink!=1:
+        raise ValueError('Private dotnet copy differs from selected executable or has aliases.')
+    return copied
+
+
+def private_dotnet(executable, root):
+    # Pinning the public muxer must not require changing shared runner directory permissions.
+    if os.name!='posix':
+        return Path(executable).resolve(strict=True)
+    return _copy_dotnet(executable,root)
