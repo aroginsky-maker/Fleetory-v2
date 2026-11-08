@@ -140,7 +140,7 @@ class ProbeBuild:
             packet.require(identifier not in found)
 
 
-def run(runtime_check=None):
+def run(runtime_check=None, control_factory=None):
     client = ProbeBuild();version = client.metadata.preflight()
     bases = []
     for reference in policy.BASES:
@@ -161,6 +161,7 @@ def run(runtime_check=None):
             value = control_plan(str(uuid.uuid4()))
             value.update(revision=published['source']['revision'], codeSha256=published['source']['sha256'],
                 probeSha256=held.entries['ServerBackendProbe.dll']['sha256'])
+            if control_factory is not None:value = control_factory(value)
             raw = image.canonical(value)
             return stack.enter_context(bundle.control.claim(directory, raw, packet.digest(raw)))
         try:

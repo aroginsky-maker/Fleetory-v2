@@ -13,6 +13,9 @@ SOURCES = (*payload.SOURCES, 'eng/pilot/audit_native_resources.py',
     'eng/pilot/HistoricalResourceAcknowledgement.ps1', 'eng/pilot/audit_linked_binding.py',
     'eng/pilot/audit_backend_binding.py', 'eng/pilot/audit_image_binding.py', 'eng/pilot/recovery_isolation.py')
 RECEIPT_SCHEMA = 'fleetory.native-linked-resource-receipt.v1'
+OFFER_SCHEMA = 'fleetory.native-linked-resource-offer.v1'
+ACK_SCHEMA = 'fleetory.native-linked-resource-ack.v1'
+ACTION_SCHEMA = 'fleetory.native-linked-resource-action.v1'
 
 
 def receipt(value, nonce, reservation):
@@ -28,69 +31,89 @@ def receipt(value, nonce, reservation):
     return value
 
 
-def pair_receipt(session, pair):
+def _pair_receipt(session, pair, source_type, target_type, source_anchor, bound_schema, validate):
     packet.require(type(pair) is tuple and len(pair) == 2)
     source, target = pair
-    packet.require(type(source) is linked.image.ImageBinding and type(target) is linked.LinkedContainerBinding and
+    packet.require(type(source) is source_type and type(target) is target_type and
         source.session is target.session is session and target._source is source)
-    anchor = linked.anchor(session, source)
+    anchor = source_anchor(session, source)
     report = target.report()
     packet.require(report['generatedImageContainerPairBound'] is True)
     raw = session._records['backend-binding.json'][1]
     record = json.loads(raw)
-    packet.require(record['schema'] == 'fleetory.audit-linked-container-binding.v1' and
-        record['containerId'] == report['containerId'] and record['imageId'] == anchor['imageId'] and
-        record['imageBindingSha256'] == anchor['imageBindingSha256'] and
-        record['imageIntentSha256'] == anchor['imageIntentSha256'] and
+    packet.require(record['schema'] == bound_schema and record['containerId'] == report['containerId'] and
+        all(record[key] == value for key, value in anchor.items()) and
         record['intentSha256'] == report['intentSha256'] and
         record['reservationSha256'] == session.report()['reservationSha256'])
-    value = dict(schema=RECEIPT_SCHEMA, nonce=target.intent['nonce'], controlSha256=target.intent['controlSha256'],
+    value = dict(nonce=target.intent['nonce'], controlSha256=target.intent['controlSha256'],
         **anchor, containerId=report['containerId'], containerBindingSha256=packet.digest(raw),
         containerIntentSha256=report['intentSha256'], expiresNs=target.intent['expiresNs'])
-    return receipt(value, target.intent['nonce'], target.intent['controlSha256'])
+    return validate(value)
 
 
-def offer(info, ready_pin, ready, value, intent_pin):
-    receipt(value, info['nonce'], info['controlSha256'])
+def pair_receipt(session, pair):
+    return _pair_receipt(session, pair, linked.image.ImageBinding, linked.LinkedContainerBinding, linked.anchor,
+        'fleetory.audit-linked-container-binding.v1',
+        lambda value: receipt(dict(schema=RECEIPT_SCHEMA, **value), value['nonce'], value['controlSha256']))
+
+
+def _offer(info, ready_pin, ready, value, intent_pin, schema, validate):
+    validate(value, info['nonce'], info['controlSha256'])
     for pin in (ready_pin, ready['ownerSha256'], ready['payloadDirectorySha256'], ready['intentSha256'], intent_pin):
         packet.hex_value(pin)
-    return dict(schema='fleetory.native-linked-resource-offer.v1', nonce=info['nonce'],
+    return dict(schema=schema, nonce=info['nonce'],
         headerSha256=info['headerSha256'], readySha256=ready_pin, ownerSha256=ready['ownerSha256'],
         payloadDirectorySha256=ready['payloadDirectorySha256'], payloadIntentSha256=ready['intentSha256'],
         receipt=value, intentSha256=intent_pin, decision='acknowledge-generated-receipts')
 
 
-def acknowledgement(info, ready_pin, ready, value, intent_pin, native_pid):
+def offer(info, ready_pin, ready, value, intent_pin):
+    return _offer(info, ready_pin, ready, value, intent_pin, OFFER_SCHEMA, receipt)
+
+
+def _acknowledgement(info, ready_pin, ready, value, intent_pin, native_pid, schema):
     packet.require(type(native_pid) is int and 0 < native_pid <= 0xffffffff)
-    return dict(schema='fleetory.native-linked-resource-ack.v1', nonce=info['nonce'],
+    return dict(schema=schema, nonce=info['nonce'],
         headerSha256=info['headerSha256'], readySha256=ready_pin, ownerSha256=ready['ownerSha256'],
         payloadDirectorySha256=ready['payloadDirectorySha256'], receiptSha256=packet.digest(prep.canonical(value)),
         intentSha256=intent_pin, imageId=value['imageId'], containerId=value['containerId'], pid=native_pid,
         privateInputsAccepted=False, backendControlAuthorized=False)
 
 
-def native_acknowledge(data, native_pin, ready_pin, native_pid):
-    # Direct helper delegation is the same restricted parent/marker check as empty removal,
-    # but this operation only reads the marker and returns typed metadata.
+def acknowledgement(info, ready_pin, ready, value, intent_pin, native_pid):
+    return _acknowledgement(info, ready_pin, ready, value, intent_pin, native_pid, ACK_SCHEMA)
+
+
+def _native_acknowledge(data, native_pin, ready_pin, native_pid, action_schema, make_offer, make_ack, validate):
     packet.require(type(native_pid) is int and native_pid == payload.os.getppid())
     wrapped = packet.strict_json(data, payload.MAX_ACTION)
     packet.keys(wrapped, 'schema headerBase64 frameBase64 ownerSha256 payloadDirectorySha256 intentSha256')
-    packet.require(wrapped['schema'] == 'fleetory.native-linked-resource-action.v1')
+    packet.require(wrapped['schema'] == action_schema)
     raw = packet.decode(wrapped['headerBase64'], prep.MAX_HEADER)
     info = payload.header(raw, native_pin)
     value = packet.strict_json(packet.decode(wrapped['frameBase64'], prep.MAX_FRAME), prep.MAX_FRAME)
     packet.keys(value, 'schema nonce headerSha256 readySha256 ownerSha256 payloadDirectorySha256 payloadIntentSha256 receipt intentSha256 decision')
-    packet.require(value == offer(info, ready_pin, wrapped, value['receipt'], value['intentSha256']))
+    packet.require(value == make_offer(info, ready_pin, wrapped, value['receipt'], value['intentSha256']))
     repository = payload.Path(__file__).resolve().parents[2]
     with payload._RecordedEmpty(repository, payload.reservation(raw, native_pin), wrapped, native_pid) as owned:
         owned.check()
-        result = acknowledgement(info, ready_pin, wrapped, value['receipt'], value['intentSha256'], native_pid)
-        receipt(value['receipt'], info['nonce'], info['controlSha256'])
+        result = make_ack(info, ready_pin, wrapped, value['receipt'], value['intentSha256'], native_pid)
+        validate(value['receipt'], info['nonce'], info['controlSha256'])
         return result
+
+
+def native_acknowledge(data, native_pin, ready_pin, native_pid):
+    return _native_acknowledge(data, native_pin, ready_pin, native_pid, ACTION_SCHEMA, offer, acknowledgement, receipt)
 
 
 class _NativeResourcePumps(payload._NativePayloadPumps):
     source_names = SOURCES
+    _pair_receipt = staticmethod(pair_receipt)
+    _offer, _acknowledgement = staticmethod(offer), staticmethod(acknowledgement)
+    _intent_schema = 'fleetory.native-linked-resource-intent.v1'
+    _bound_schema = 'fleetory.native-linked-resource-bound.v1'
+    _result_schema = 'fleetory.native-linked-resource-result.v1'
+    _ack_schema = ACK_SCHEMA
     profile, switch = 'native-resource-ack', '-ResourceAcknowledgementOnly'
     max_frames = 4
     refusal_schema = 'fleetory.native-linked-resource-refused.v1'
@@ -98,7 +121,7 @@ class _NativeResourcePumps(payload._NativePayloadPumps):
     def __init__(self, *args):
         super().__init__(*args)
         self.pair = self.command.linked_pair
-        self.receipt = pair_receipt(self.session, self.pair)
+        self.receipt = self._pair_receipt(self.session, self.pair)
         self.resource_ack = threading.Event()
         self.resource_intent_pin, self.ack_pin = None, None
 
@@ -111,7 +134,7 @@ class _NativeResourcePumps(payload._NativePayloadPumps):
         self.errors.append('native-linked-resource-refused')
 
     def _check_pair(self):
-        packet.require(pair_receipt(self.session, self.pair) == self.receipt)
+        packet.require(self._pair_receipt(self.session, self.pair) == self.receipt)
         self.command.check()
         self.bound.check()
         process._check_deadline(self.start_time, self.seconds)
@@ -120,28 +143,29 @@ class _NativeResourcePumps(payload._NativePayloadPumps):
         self._check_pair()
         owner = self.fence.identity(self.process, self.command.executable)
         ready = self.frames[1]
-        self.session._write_once('native-resource-intent.json', dict(schema='fleetory.native-linked-resource-intent.v1',
+        self.session._write_once('native-resource-intent.json', dict(schema=self._intent_schema,
             nonce=self.info['nonce'], headerSha256=self.info['headerSha256'], readySha256=self.ready_pin,
             payloadBindingSha256=packet.digest(self.session._records['payload-binding.json'][1]),
             actualOwnedProcess=owner, receipt=self.receipt, backendControlAuthorized=False, privateInputReleaseAuthorized=False))
         self._check_pair()
         self.resource_intent_pin = packet.digest(self.session._records['native-resource-intent.json'][1])
-        self._send_frame(offer(self.info, self.ready_pin, ready, self.receipt, self.resource_intent_pin))
+        self._send_frame(self._offer(self.info, self.ready_pin, ready, self.receipt, self.resource_intent_pin))
         self._wait(self.resource_ack)
         self._check_pair()
 
     def _accept_frame(self, value, raw):
         if len(self.frames) != 2:
+            packet.require(value.get('schema') != self._ack_schema)
             return super()._accept_frame(value, raw)
         self._check_pair()
         packet.require(self.resource_intent_pin is not None and not self.resource_ack.is_set())
-        expected = acknowledgement(self.info, self.ready_pin, self.frames[1], self.receipt,
+        expected = self._acknowledgement(self.info, self.ready_pin, self.frames[1], self.receipt,
             self.resource_intent_pin, self.process.pid)
         packet.require(value == expected and type(value['pid']) is int and
             value['privateInputsAccepted'] is False and value['backendControlAuthorized'] is False)
         # The pipe peer is re-observed at acceptance; a copied PID field is insufficient.
         owner = self.fence.identity(self.process, self.command.executable)
-        self.session._write_once('native-resource-ack.json', dict(schema='fleetory.native-linked-resource-bound.v1',
+        self.session._write_once('native-resource-ack.json', dict(schema=self._bound_schema,
             nonce=self.info['nonce'], actualOwnedProcess=owner, acknowledgement=value,
             acknowledgementSha256=packet.digest(raw), resourceIntentSha256=self.resource_intent_pin,
             backendControlAuthorized=False, privateInputReleaseAuthorized=False))
@@ -153,14 +177,14 @@ class _NativeResourcePumps(payload._NativePayloadPumps):
     def finalize_binding(self, child, ended, failed):
         try:
             super().finalize_binding(child, ended, failed)
-            self.resource_metadata.update(schema='fleetory.native-linked-resource-result.v1', nativeOwnerResourceAcknowledged=False)
+            self.resource_metadata.update(schema=self._result_schema, nativeOwnerResourceAcknowledged=False)
             packet.require(self.resource_ack.is_set() and self.ack_pin is not None and
                 packet.digest(self.session._records['native-resource-ack.json'][1]) == self.ack_pin and
-                pair_receipt(self.session, self.pair) == self.receipt)
+                self._pair_receipt(self.session, self.pair) == self.receipt)
             process._check_deadline(self.start_time, self.seconds)
             self.resource_metadata.update(nativeOwnerResourceAcknowledged=True, resourceAcknowledgementSha256=self.ack_pin)
         finally:
-            self.resource_metadata.update(schema='fleetory.native-linked-resource-result.v1',
+            self.resource_metadata.update(schema=self._result_schema,
                 nativeOwnerResourceAcknowledged=self.resource_metadata.get('nativeOwnerResourceAcknowledged', False),
                 generatedReceiptMetadataOnly=True, legacyApplicationImageVerified=False, dockerObservationAuthenticated=False,
                 backendControlAuthorized=False, backendCleanupAuthorized=False, legacyNativeOwnerIntegrated=False)

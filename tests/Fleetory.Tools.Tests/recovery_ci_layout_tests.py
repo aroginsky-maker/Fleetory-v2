@@ -64,7 +64,9 @@ def validate(text):
                 ('native resource receipt contracts', 'audit_native_resource_tests.py'),
                 ('actual native resource acknowledgement', 'native_resource_ack.py'),
                 ('fixed probe image build contracts', 'audit_probe_image_tests.py'),
-                ('fixed probe runtime contracts', 'audit_probe_runtime_tests.py')):
+                ('fixed probe runtime contracts', 'audit_probe_runtime_tests.py'),
+                ('native probe receipt contracts', 'audit_native_probe_tests.py'),
+                ('actual native probe receipt acknowledgement', 'native_probe_receipt_ack.py')):
             step = ('      - name: Verify ' + title + platform + '\n'
                 '        shell: pwsh\n'
                 '        run: ' + executable + ' -B ./tests/Fleetory.Tools.Tests/' + filename + '\n')
@@ -124,6 +126,13 @@ def validate(text):
     start = block.index(runtime_step)
     end = block.find('      - name:', start + len(runtime_step))
     assert block[start:end if end >= 0 else len(block)].strip() == runtime_step.strip()
+    native_probe_step = ('      - name: Verify actual public probe native receipt handoff\n'
+        '        shell: pwsh\n'
+        '        run: python3 -B ./tests/Fleetory.Tools.Tests/native_public_probe_receipt.py\n')
+    assert block.count(native_probe_step) == 1
+    start = block.index(native_probe_step)
+    end = block.find('      - name:', start + len(native_probe_step))
+    assert block[start:end if end >= 0 else len(block)].strip() == native_probe_step.strip()
     for command in ('./eng/verify-quality.ps1', './eng/verify-sonar-issues.ps1', './eng/report-sonar-metrics.ps1'):
         assert text.count(command) == 1 and command in blocks['quality']
     assert '    timeout-minutes: 30\n' in blocks['quality']
@@ -283,6 +292,16 @@ class RecoveryCiLayoutTests(unittest.TestCase):
         for command in ('python -B ./tests/Fleetory.Tools.Tests/audit_probe_runtime_tests.py',
                 'python3 -B ./tests/Fleetory.Tools.Tests/audit_probe_runtime_tests.py',
                 'python3 -B ./tests/Fleetory.Tools.Tests/native_probe_runtime.py'):
+            self.refused(self.text.replace(command, 'omitted', 1))
+            self.refused(self.text.replace(command, command + '\n          ' + command, 1))
+            self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
+
+    def test_native_probe_receipt_gates_cannot_be_omitted_duplicated_or_softened(self):
+        for command in ('python -B ./tests/Fleetory.Tools.Tests/audit_native_probe_tests.py',
+                'python3 -B ./tests/Fleetory.Tools.Tests/audit_native_probe_tests.py',
+                'python -B ./tests/Fleetory.Tools.Tests/native_probe_receipt_ack.py',
+                'python3 -B ./tests/Fleetory.Tools.Tests/native_probe_receipt_ack.py',
+                'python3 -B ./tests/Fleetory.Tools.Tests/native_public_probe_receipt.py'):
             self.refused(self.text.replace(command, 'omitted', 1))
             self.refused(self.text.replace(command, command + '\n          ' + command, 1))
             self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))

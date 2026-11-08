@@ -69,3 +69,6 @@ false. Next is actual native publication/build/create receipt handoff and
 bounded generated kill-after-build/create/restore cleanup. Accepted release
 provenance and original-data purpose/gate admission remain separate. Existing
 backup/restore evidence is preserved. Phase 7 remains open.
+
+The separate native receipt acknowledgement is described in
+[ProbeNativeReceiptAcknowledgement.md](ProbeNativeReceiptAcknowledgement.md).

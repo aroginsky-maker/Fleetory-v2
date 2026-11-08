@@ -7,10 +7,11 @@ function New-NativePayloadAction([byte[]]$Header,[byte[]]$Frame,$Reservation=$nu
     }
     return ,[Text.Encoding]::UTF8.GetBytes(($value|ConvertTo-Json -Depth 6 -Compress))
 }
-function Invoke-HistoricalPayloadReservation([string]$ExpectedPin,[string]$Python,[string]$Repository,[string]$Git,[switch]$AcknowledgeResources){
+function Invoke-HistoricalPayloadReservation([string]$ExpectedPin,[string]$Python,[string]$Repository,[string]$Git,[switch]$AcknowledgeResources,[switch]$ProbeRuntime){
     $stage='header';$state='not-attempted';$stream=[Console]::OpenStandardInput()
     $helper=Join-Path $PSScriptRoot 'audit_native_payload.py'
     try{
+        Assert-ImmuData (-not $ProbeRuntime -or $AcknowledgeResources) 'probe-ack-mode'
         $raw=Read-PreparationFrame $stream 24576
         $checked=Invoke-NativeBytes $Python @('-B',$helper,'header',$ExpectedPin) $raw 10
         Assert-ImmuData ($checked.ExitCode -eq 0 -and [string]::IsNullOrWhiteSpace($checked.Stderr)) 'empty-payload-header'
@@ -26,7 +27,7 @@ function Invoke-HistoricalPayloadReservation([string]$ExpectedPin,[string]$Pytho
         $state='reserved';$null=Send-PreparationFrame $reservation
         if($AcknowledgeResources){
             $stage='resources';$frame=Read-PreparationFrame $stream 2048
-            $null=Send-PreparationFrame (Get-HistoricalResourceAcknowledgement $ExpectedPin $Python $raw $readyPin $frame $reservation $PID)
+            $null=Send-PreparationFrame (Get-HistoricalResourceAcknowledgement $ExpectedPin $Python $raw $readyPin $frame $reservation $PID -ProbeRuntime:$ProbeRuntime)
         }
         $stage='remove';$frame=Read-PreparationFrame $stream 2048
         Assert-ImmuData ($stream.ReadByte() -eq -1) 'empty-payload-trailing-input'
@@ -36,7 +37,7 @@ function Invoke-HistoricalPayloadReservation([string]$ExpectedPin,[string]$Pytho
         $null=Send-PreparationFrame ($removed.Stdout|ConvertFrom-Json -AsHashtable)
         return 0
     }catch{
-        $schema=if($AcknowledgeResources){'fleetory.native-linked-resource-refused.v1'}else{'fleetory.native-empty-payload-refused.v1'}
+        $schema=if($ProbeRuntime){'fleetory.native-probe-runtime-refused.v1'}elseif($AcknowledgeResources){'fleetory.native-linked-resource-refused.v1'}else{'fleetory.native-empty-payload-refused.v1'}
         $null=Send-PreparationFrame @{schema=$schema;stage=$stage;emptyPayloadState=$state;privateInputsAccepted=$false;backendCreated=$false}
         [Console]::Error.WriteLine('Native empty metadata reservation refused; no private input accepted.')
         return 1

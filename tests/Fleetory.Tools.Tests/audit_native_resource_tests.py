@@ -221,7 +221,9 @@ class NativeResourceTests(unittest.TestCase):
             pump.resource_intent_pin = 'e' * 64
             valid = policy.acknowledgement(pump.info, pump.ready_pin, self.ready, pump.receipt, 'e' * 64, pump.process.pid)
             pump._accept_frame(valid, policy.prep.canonical(valid))
-            pump._accept_frame(valid, policy.prep.canonical(valid))
+            with self.assertRaises(ValueError):
+                pump._accept_frame(valid, policy.prep.canonical(valid))
+            self.assertEqual(len(pump.frames), 3)
             with self.assertRaises(ValueError):
                 pump.finalize_binding(SimpleNamespace(returncode=0), {'noRunningMembersVerified': True}, False)
             self.assertIs(pump.resource_metadata['nativeOwnerResourceAcknowledged'], False)

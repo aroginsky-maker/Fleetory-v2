@@ -75,6 +75,9 @@ class RuntimeFixture(NativeBinding):
             rootReadonlyObserved=True, bothTmpfsFlagsSizesOwnersModesVerified=True, publicScratchWritableAndRemoved=True,
             bothTmpfsDirectExecutionDenied=True, onlyLoopbackObserved=True, noDefaultRouteObserved=True)
 
+    def on_bound(self, session, source, target):
+        return None
+
     def __call__(self, session, source, fresh_session):
         raw = policy.prepare(session, source)
         target = policy.ProbeRuntimeBinding(session, raw, packet.digest(raw), source)
@@ -85,6 +88,7 @@ class RuntimeFixture(NativeBinding):
             report = target.bind(container.canonical(first), identifier)
             packet.require(report['generatedProbeRuntimeBound'] is True and first['configImage'] == first['imageId'] == source.report()['imageId'])
             kernel = self.kernel(identifier)
+            native_ack = self.on_bound(session, source, target)
             denied = False
             try:target.bind(container.canonical(first), identifier)
             except ValueError:denied = True
@@ -105,7 +109,7 @@ class RuntimeFixture(NativeBinding):
             self.cleanup()
         source.report()  # Successful disposal must still be inside the image admission lease.
         packet.require(len(self.receipts) == 1 and self.listed_id(self.receipts[0][0]) == [])
-        return dict(schema='fleetory.generated-native-probe-runtime.v1', verified=True, **kernel,
+        result = dict(schema='fleetory.generated-native-probe-runtime.v1', verified=True, **kernel,
             imageAndConfigImageImmutable=True, imageRecordIntentAndManifestMatched=True, sameHeldControllerVerified=True,
             sharedAdmissionExpiryVerified=True, cleanupBeforeAdmissionExpiry=True, runtimeProfileSha256=policy.PROFILE_SHA256, consumedObservationReplayRefused=True,
             foreignControllerRefused=True, foreignAttemptConsumed=True, sourceImageRecordPreserved=True,
@@ -114,6 +118,8 @@ class RuntimeFixture(NativeBinding):
             operationalLeaseAuthorized=False, runtimeContinuityVerified=False, actualProbeNativeOwnerAcknowledged=False,
             backendCleanupAuthorized=False, abruptOwnerDeathBackendCleanupVerified=False, originalInputsRead=False,
             originalPrivatePkiUsed=False, sourceVpsAccessed=False, fullSystemRecoveryVerified=False, phase7Complete=False)
+        if native_ack is not None:result['nativeReceiptAcknowledgement'] = native_ack
+        return result
 
 
 def run():

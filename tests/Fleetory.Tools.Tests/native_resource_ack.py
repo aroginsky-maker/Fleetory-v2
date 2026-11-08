@@ -1,4 +1,5 @@
 """Actual PowerShell receipt handshake on copied public components; no archives/private keys."""
+from contextlib import ExitStack
 import json
 import os
 from pathlib import Path
@@ -17,7 +18,8 @@ from private_runtime_fixture import private_git, private_powershell, windows_git
 CASES = ('positive', 'bad-offer', 'bad-ack', 'owner-exit', 'expired-after-ack', 'bad-close')
 
 
-def run(pair_factory=None, cases=CASES):
+def run(pair_factory=None, cases=CASES, *, protocol=policy, plan_changes=None, proof_check=None):
+    policy = protocol
     policy.packet.require(type(cases) is tuple and cases and set(cases) <= set(CASES) and len(set(cases)) == len(cases))
     powershell = Path(shutil.which('pwsh') or '').resolve(strict=True)
     python = Path(sys.executable).resolve(strict=True)
@@ -41,15 +43,16 @@ def run(pair_factory=None, cases=CASES):
         for kind in cases:
             _, original = vector_payload()
             plan = json.loads(original)
-            plan.update(nonce=str(uuid.uuid4()), revision=measured['revision'], codeSha256=measured['sha256'])
+            plan.update(nonce=str(uuid.uuid4()), revision=measured['revision'], codeSha256=measured['sha256'], **(plan_changes or {}))
             raw, claimed = claim_plan(control_root, plan, powershell, python)
             path = repository / 'artifacts' / policy.payload.binding.payload_name(plan['nonce'])
-            original_send, original_accept, original_wait = (policy._NativeResourcePumps._send,
-                policy._NativeResourcePumps._accept_frame, policy._NativeResourcePumps._wait)
+            pumps = policy._NativeResourcePumps
+            original_send, original_accept, original_wait = (pumps._send,
+                pumps._accept_frame, pumps._wait)
 
             def tamper(pump, data):
                 value = json.loads(data)
-                if ((kind == 'bad-offer' and value.get('schema') == 'fleetory.native-linked-resource-offer.v1') or
+                if ((kind == 'bad-offer' and value.get('schema') == policy.OFFER_SCHEMA) or
                         (kind == 'bad-close' and value.get('schema') == 'fleetory.native-empty-payload-remove.v1')):
                     value['decision'] = 'restore-private-data'
                     value['archiveBase64'] = 'GENERATED_REFUSED_BODY'
@@ -59,7 +62,7 @@ def run(pair_factory=None, cases=CASES):
                 return original_send(pump, data)
 
             def accept(pump, value, data):
-                if kind == 'bad-ack' and value.get('schema') == 'fleetory.native-linked-resource-ack.v1':
+                if kind == 'bad-ack' and value.get('schema') == policy.ACK_SCHEMA:
                     value = {**value, 'containerId': 'f' * 64}
                     data = policy.prep.canonical(value)
                 return original_accept(pump, value, data)
@@ -73,11 +76,12 @@ def run(pair_factory=None, cases=CASES):
                     if kind == 'expired-after-ack':
                         pump.pair[0]._deadline = time.monotonic() - 1
 
-            with claimed as session:
+            with claimed as session, ExitStack() as pair_holds:
                 pair = generated_pair(session) if pair_factory is None else pair_factory(session, root)
+                if hasattr(pair, '__enter__'):pair = pair_holds.enter_context(pair)
                 before = {name: session._records[name][1] for name in ('image-binding.json', 'backend-binding.json')}
-                with patch.object(policy._NativeResourcePumps, '_send', tamper), \
-                        patch.object(policy._NativeResourcePumps, '_accept_frame', accept), patch.object(policy._NativeResourcePumps, '_wait', wait):
+                with patch.object(pumps, '_send', tamper), \
+                        patch.object(pumps, '_accept_frame', accept), patch.object(pumps, '_wait', wait):
                     try:
                         result = policy.acknowledge_owner(repository, powershell, python, git, raw, pins, session, pair, git_sha256=sha(git))
                     except policy.process.LaunchError as error:
@@ -99,7 +103,7 @@ def run(pair_factory=None, cases=CASES):
                         proof = evidence['payload']
                         policy.packet.require(all(proof[key] is True for key in ('nativeReadinessBound', 'emptyPayloadNamespaceBound',
                             'emptyPayloadRemovedVerified', 'nativeOwnerResourceAcknowledged')))
-                        policy.packet.require(proof['selectedSourceFilesPinned'] == 40 and not path.exists())
+                        policy.packet.require(proof['selectedSourceFilesPinned'] == len(policy.SOURCES) and not path.exists())
                         bound = record(session, 'native-resource-ack.json')
                         intent = record(session, 'native-resource-intent.json')
                         policy.packet.require(bound['actualOwnedProcess']['pid'] == evidence['osIdentity']['pid'] == bound['acknowledgement']['pid'] and
@@ -112,6 +116,7 @@ def run(pair_factory=None, cases=CASES):
                             pass
                         else:
                             raise ValueError('Consumed native launch replay accepted.')
+                if proof_check is not None:proof_check(kind,evidence['payload'])
                 policy.packet.require(evidence['launchAttemptConsumed'] is True and evidence['processIdentityAuthenticated'] is True and
                     evidence['fence']['noRunningMembersVerified'] is True)
                 for key in ('privateInputsAccepted', 'backendCreated', 'backendNamespaceBound', 'originalInputsRead', 'originalPrivatePkiUsed',
@@ -123,7 +128,7 @@ def run(pair_factory=None, cases=CASES):
         policy.packet.require(policy.measure_sources(repository) == pins)
     policy.packet.require(fixture_root is not None and not fixture_root.exists())
     return dict(schema='fleetory.generated-native-resource-ack.v1', verified=True, actualOwnerCases=len(cases), cases=list(cases),
-        sourceFilesHeld=40, fixtureRevisionSynthetic=True, fullApplicationSnapshotClaimed=False, copiedPublicComponentsMatched=True,
+        sourceFilesHeld=len(policy.SOURCES), fixtureRevisionSynthetic=True, fullApplicationSnapshotClaimed=False, copiedPublicComponentsMatched=True,
         typedImageContainerReceiptAckVerified=True, actualOwnerOsIdentityVerified=True, payloadBindingAndReadyPinsMatched=True,
         ackExclusivePublicationVerified=True, positiveEmptyReservationRemovalVerified=True, consumedLaunchReplayRefused=True,
         foreignSentinelAndSourceRecordsPreserved=True, invalidOrInterruptedAckNeverGrantsFinalAcceptance=True,
