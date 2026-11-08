@@ -58,3 +58,6 @@ and scratch checks unchanged. Unknown names fail with a bounded public diagnosti
 This consumes time inside the existing image admission lease and never renews it.
 A prior CI failure recorded a non-sleep name without preserving its actual value;
 these transition tests do not prove the exact cause of that historical failure.
+
+See [Native publication faults](NativePublicationFaults.md) for the separate
+live-owner, observed compiler-child and pre-ACK receipt tests.
