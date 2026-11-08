@@ -220,13 +220,16 @@ class ProbeRuntimeTests(unittest.TestCase):
 
     def test_profile_complete_bytes_are_pinned_before_parse_or_runtime_use(self):
         self.assertEqual(policy.runtime_profile(), policy.PROFILE)
-        with patch.object(policy.probe.bundle.files, 'inspect_file', return_value=('f' * 64, 2, b'{}')):
+        valid = container.canonical(policy.PROFILE)
+        with patch.object(policy.probe.bundle.files, 'inspect_file', return_value=('f' * 64, len(valid), valid)), \
+                patch.object(packet, 'strict_json', wraps=packet.strict_json) as parsed:
             with self.assertRaises(ValueError):policy.runtime_profile()
+            parsed.assert_not_called()
         with self.held() as held, self.session() as session:
             source = self.source(session, held);target = self.resource(session, source)
             self.assertEqual(target.intent['runtimeProfileSha256'], policy.PROFILE_SHA256)
             self.assertEqual(target.intent['labels']['fleetory.audit.control.runtime.profile'], policy.PROFILE_SHA256)
-            with patch.object(policy.probe.bundle.files, 'inspect_file', return_value=('f' * 64, 2, b'{}')):
+            with patch.object(policy.probe.bundle.files, 'inspect_file', return_value=('f' * 64, len(valid), valid)):
                 with self.assertRaises(ValueError):target.report()
 
     def test_no_new_publication_or_backend_authority_on_unbound_report(self):
