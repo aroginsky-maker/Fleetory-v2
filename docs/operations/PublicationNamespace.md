@@ -39,11 +39,14 @@ backend, Docker service, private input, PKI, VPS or issuer is started by this ga
 Local/CI actual source revisions, manifests, SDK/entrypoint hashes and owner birth
 records remain separate; binary identity is not inferred.
 
-This verifies namespace handoff only. The fixture owner is Python, not the existing
-historical PowerShell owner. Native publication/image build, full SDK/package/
-compiler input continuity, historical-owner integration, operation lease,
-pre-receipt/controller-death cleanup and full recovery remain open. Existing
-30-second native and 60-second image admission limits stay unchanged. The next step
-is a fixed native publisher integrated with this separately typed namespace and
-its selected input/toolchain binding. Original data, secrets and PKI need their own
-current scope; no new sensitive permission is implied. Phase 7 stays open.
+This namespace fixture verifies handoff only; its owner is Python. The separate
+historical PowerShell publisher below verifies native publication without changing
+that fixture's claims. Native image build, full SDK/package/compiler input
+continuity, operation lease, pre-receipt/controller-death cleanup and full recovery
+remain open. Existing 30-second native and 60-second image admission limits stay
+unchanged. Original data, secrets and PKI need their own current scope; no new
+sensitive permission is implied. Phase 7 stays open.
+
+The fixed historical PowerShell publisher integration is documented in
+[Native public publication](NativePublicPublication.md). The namespace library
+itself continues to make no native compiler or full recovery claim.

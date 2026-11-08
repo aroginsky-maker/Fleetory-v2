@@ -232,7 +232,7 @@ def prepare_owner(repository, powershell_path, python_path, git_path, native_pla
         git_sha256, _PreparationPumps)
 
 
-def _prepare_owner(repository, powershell_path, python_path, git_path, native_plan, source_pins, session, git_sha256, factory, *, linked_pair=None, creation=None):
+def _prepare_owner(repository, powershell_path, python_path, git_path, native_plan, source_pins, session, git_sha256, factory, *, linked_pair=None, creation=None, publication=None):
     """Private fixed-profile construction; callers/wire data cannot choose commands."""
     root = Path(repository).resolve(strict=True)
     packet.require(type(source_pins) is dict and set(source_pins) == set(factory.source_names))
@@ -243,6 +243,9 @@ def _prepare_owner(repository, powershell_path, python_path, git_path, native_pl
         declared['codeSha256'] == session._plan['codeSha256'] and declared['probeSha256'] == session._plan['probeSha256'])
     packet.require(creation is None or factory.profile == "native-probe-create")
     extra = {} if creation is None else dict(docker_sha256=creation[1], runtime_intent_sha256=creation[2])
+    packet.require(publication is None or factory.profile == 'native-publication' and creation is None)
+    if publication is not None:
+        extra = dict(dotnet_sha256=publication[1], manifest=publication[2])
     value = factory.make_header(native_plan, report, session, source_pins, git_sha256, **extra)
     data = canonical(value)
     factory.decode_header(data, native_pin)
@@ -256,9 +259,13 @@ def _prepare_owner(repository, powershell_path, python_path, git_path, native_pl
         arguments = ('-NoLogo', '-NoProfile', '-NonInteractive', '-File', str(entry), factory.switch,
             '-ExpectedPlanSha256', native_pin, '-Python', str(python.path), '-PreparationGitPath', str(git.path))
         docker = held.enter_context(process.PinnedFile(creation[0], creation[1], True)) if creation else None
-        runtimes = (python, docker) if docker else (python,)
+        dotnet = held.enter_context(process.PinnedFile(publication[0], publication[1], True)) if publication else None
+        if dotnet:
+            packet.require(dotnet.path.name.lower() in ('dotnet', 'dotnet.exe'))
+            arguments += ('-PublicationDotnetPath', str(dotnet.path))
+        runtimes = (python, docker) if docker else ((python, dotnet) if dotnet else (python,))
         command = process._Command(powershell, (git, *runtimes, *sources, directory), arguments, root,
-            process.environment(powershell, runtimes), factory.profile, factory, linked_pair, docker)
+            process.environment(powershell, runtimes), factory.profile, factory, linked_pair, docker, dotnet)
         result = process._run_owned(command, session, data + b'\n', 30)
     packet.require(result.exit_code == 0 and result.stderr == b'')
     return result

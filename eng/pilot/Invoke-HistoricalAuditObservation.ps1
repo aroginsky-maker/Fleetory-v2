@@ -2,14 +2,18 @@
 # Private stdin/stdout pipe. Receives frozen bytes, never an operator file path or address.
 param([Parameter(Mandatory)][string]$ExpectedPlanSha256,[string]$Python='',
     [ValidateSet('none','after-container','after-restore')][string]$FailurePoint='none',[switch]$PreparationOnly,[string]$PreparationGitPath='',
-    [switch]$PayloadReservationOnly,[switch]$ResourceAcknowledgementOnly,[switch]$ProbeRuntimeAcknowledgementOnly,[switch]$ProbeRuntimeCreationOnly)
+    [switch]$PayloadReservationOnly,[switch]$ResourceAcknowledgementOnly,[switch]$ProbeRuntimeAcknowledgementOnly,[switch]$ProbeRuntimeCreationOnly,[switch]$PublicProbePublicationOnly,[string]$PublicationDotnetPath='')
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $repo=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $testRoot=Join-Path $repo 'tests/Fleetory.Tools.Tests'
-if($PreparationOnly -or $PayloadReservationOnly -or $ResourceAcknowledgementOnly -or $ProbeRuntimeAcknowledgementOnly -or $ProbeRuntimeCreationOnly){
-    if(@(@($PreparationOnly,$PayloadReservationOnly,$ResourceAcknowledgementOnly,$ProbeRuntimeAcknowledgementOnly,$ProbeRuntimeCreationOnly)|Where-Object {$_}).Count -ne 1){throw 'Exactly one preparation mode is required.'}
+if($PreparationOnly -or $PayloadReservationOnly -or $ResourceAcknowledgementOnly -or $ProbeRuntimeAcknowledgementOnly -or $ProbeRuntimeCreationOnly -or $PublicProbePublicationOnly){
+    if(@(@($PreparationOnly,$PayloadReservationOnly,$ResourceAcknowledgementOnly,$ProbeRuntimeAcknowledgementOnly,$ProbeRuntimeCreationOnly,$PublicProbePublicationOnly)|Where-Object {$_}).Count -ne 1){throw 'Exactly one preparation mode is required.'}
     foreach($helper in @('PilotNativeProcess.ps1','ProviderRecoveryPolicy.ps1','ImmuDataRoundtripPolicy.ps1','HistoricalAuditControllerPolicy.ps1','HistoricalPreparation.ps1')){. (Join-Path $PSScriptRoot $helper)}
+    if($PublicProbePublicationOnly){
+        . (Join-Path $PSScriptRoot 'HistoricalPublicPublication.ps1')
+        exit (Invoke-HistoricalPublicPublication $ExpectedPlanSha256 $Python $repo $PreparationGitPath $PublicationDotnetPath)
+    }
     if($ResourceAcknowledgementOnly -or $ProbeRuntimeAcknowledgementOnly -or $ProbeRuntimeCreationOnly){
         . (Join-Path $PSScriptRoot 'HistoricalPayloadReservation.ps1')
         . (Join-Path $PSScriptRoot 'HistoricalResourceAcknowledgement.ps1')

@@ -64,7 +64,9 @@ class _HeldNamespace:
 
 class OwnedPublication(_HeldNamespace):
     """Actual owner creates a fresh namespace. Close preserves all outcomes; no deletion API."""
-    def __init__(self,repository,data,expected):
+    def __init__(self,repository,data,expected,*,native_owner_pid=None):
+        packet.require(native_owner_pid is None or type(native_owner_pid) is int and native_owner_pid==os.getppid())
+        self.owner_pid=os.getpid() if native_owner_pid is None else native_owner_pid
         self.value=admit(data,expected);self._held=ExitStack();self.published=None;self._attempted=False
         try:
             self.parent=self._held.enter_context(control.DirectoryLease(Path(repository)/'artifacts'))
@@ -73,7 +75,7 @@ class OwnedPublication(_HeldNamespace):
             _mkdir(self.directory,OUTPUT)
             self.output=self._held.enter_context(control.DirectoryLease(self.directory.path/OUTPUT))
             self.root_pin,self.output_pin=empty.directory_hash(self.directory),empty.directory_hash(self.output)
-            raw=bundle.prep.canonical(marker(self.value,os.getpid(),self.root_pin,self.output_pin))
+            raw=bundle.prep.canonical(marker(self.value,self.owner_pid,self.root_pin,self.output_pin))
             self.owner_pin=packet.digest(raw);empty._create_named_record(self.directory,MARKER,raw)
             self.pin=self._held.enter_context(process.PinnedFile(self.directory.path/MARKER,self.owner_pin))
             self.check()
@@ -84,7 +86,7 @@ class OwnedPublication(_HeldNamespace):
 
     def ready(self):
         self.check()
-        return dict(schema='fleetory.publication-namespace-ready.v1',nonce=self.value['nonce'],pid=os.getpid(),
+        return dict(schema='fleetory.publication-namespace-ready.v1',nonce=self.value['nonce'],pid=self.owner_pid,
             intentSha256=packet.digest(bundle.prep.canonical(self.value)),ownerSha256=self.owner_pin,
             namespaceDirectorySha256=self.root_pin,outputDirectorySha256=self.output_pin,privateInputsAccepted=False)
 

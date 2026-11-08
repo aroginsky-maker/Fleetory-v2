@@ -69,6 +69,8 @@ def validate(text):
                 ('native probe create contracts', 'audit_native_create_tests.py'),
                 ('typed publication namespace contracts', 'publication_namespace_tests.py'),
                 ('fenced publication namespace handoff', 'native_publication_namespace.py'),
+                ('fixed native publication contracts', 'native_publication_tests.py'),
+                ('actual native public publisher', 'native_publication.py'),
                 ('native create fault contracts', 'native_create_faults_tests.py'),
                 ('public probe owner fault contracts', 'public_probe_faults_tests.py'),
                 ('actual native probe receipt acknowledgement', 'native_probe_receipt_ack.py')):
@@ -356,6 +358,14 @@ class RecoveryCiLayoutTests(unittest.TestCase):
             self.refused(self.text.replace(command, 'omitted', 1))
             self.refused(self.text.replace(command, command + '\n          ' + command, 1))
             self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
+
+    def test_native_publication_gates_cannot_be_omitted_duplicated_or_softened(self):
+        for executable in ('python', 'python3'):
+            for filename in ('native_publication_tests.py', 'native_publication.py'):
+                command = executable + ' -B ./tests/Fleetory.Tools.Tests/' + filename
+                self.refused(self.text.replace(command, 'omitted', 1))
+                self.refused(self.text.replace(command, command + '\n          ' + command, 1))
+                self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
 
     def test_native_create_fault_gates_cannot_be_omitted_duplicated_or_softened(self):
         for command in ('python -B ./tests/Fleetory.Tools.Tests/native_create_faults_tests.py',
