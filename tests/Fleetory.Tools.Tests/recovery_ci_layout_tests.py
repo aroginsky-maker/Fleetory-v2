@@ -74,6 +74,7 @@ def validate(text):
                 ('native publication fault contracts', 'publication_faults_tests.py'),
                 ('held publication continuation contracts', 'publication_continuation_tests.py'),
                 ('retained publication runtime contracts', 'retained_runtime_tests.py'),
+                ('public cleanup protocol contracts', 'cleanup_protocol_tests.py'),
                 ('actual native publication faults', 'native_publication_faults.py'),
                 ('native create fault contracts', 'native_create_faults_tests.py'),
                 ('public probe owner fault contracts', 'public_probe_faults_tests.py'),
@@ -426,6 +427,14 @@ class RecoveryCiLayoutTests(unittest.TestCase):
     def test_retained_runtime_contracts_are_required_without_soft_failure(self):
         for executable in ('python','python3'):
             command=executable+' -B ./tests/Fleetory.Tools.Tests/retained_runtime_tests.py'
+            self.refused(self.text.replace(command,'omitted',1))
+            self.refused(self.text.replace('run: '+command,'continue-on-error: true\n        run: '+command,1))
+            self.refused(self.text.replace(command,command+'\n          '+command,1))
+
+
+    def test_public_cleanup_protocol_contracts_are_required_without_soft_failure(self):
+        for executable in ('python','python3'):
+            command=executable+' -B ./tests/Fleetory.Tools.Tests/cleanup_protocol_tests.py'
             self.refused(self.text.replace(command,'omitted',1))
             self.refused(self.text.replace('run: '+command,'continue-on-error: true\n        run: '+command,1))
             self.refused(self.text.replace(command,command+'\n          '+command,1))

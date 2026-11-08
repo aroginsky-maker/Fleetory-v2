@@ -44,3 +44,7 @@ controller is alive. Independent expiry enforcement, abrupt controller death,
 operational/service leases, production cleanup, daemon/compiler provenance,
 coordinated full recovery and all remaining Baseline approvals remain open.
 Phase 7 stays open and PR #2 remains draft and unmerged.
+
+The next [cleanup protocol preparation](PublicSleepCleanupProtocol.md) pins
+asserted identities, one own receipt and bounded model decisions. It provides
+no executor and does not verify independent cleanup.
