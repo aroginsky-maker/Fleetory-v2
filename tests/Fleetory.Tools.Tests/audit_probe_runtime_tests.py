@@ -54,6 +54,44 @@ class ProbeRuntimeTests(unittest.TestCase):
         raw = policy.prepare(session, source)
         return policy.ProbeRuntimeBinding(session, raw, packet.digest(raw), source)
 
+    @staticmethod
+    def kernel_status(name='sleep', **updates):
+        value=dict(Name=name,Uid='3322 3322 3322 3322',Gid='3322 3322 3322 3322',
+            CapInh='0',CapPrm='0',CapEff='0',CapBnd='0',CapAmb='0',NoNewPrivs='1',Seccomp='2')
+        value.update(updates)
+        return ''.join(key+': '+value+'\n' for key,value in value.items()).encode('ascii')
+
+    def test_pid_one_shell_transition_requires_final_sleep(self):
+        from native_probe_runtime import RuntimeFixture
+        worker=RuntimeFixture()
+        with patch.object(worker,'call',side_effect=[self.kernel_status('sh'),self.kernel_status()]) as call,patch('native_probe_runtime.time.sleep'):
+            self.assertEqual(worker.pid_one_status('b'*64)['Name'],'sleep')
+        self.assertEqual(call.call_count,2)
+
+    def test_pid_one_unknown_name_is_not_retried(self):
+        from native_probe_runtime import RuntimeFixture
+        worker=RuntimeFixture()
+        with patch.object(worker,'call',return_value=self.kernel_status('other')) as call:
+            with self.assertRaisesRegex(ValueError,'Unexpected public PID1 process name: other'):
+                worker.pid_one_status('b'*64)
+        self.assertEqual(call.call_count,1)
+
+    def test_pid_one_insecure_shell_is_not_a_startup_exception(self):
+        from native_probe_runtime import RuntimeFixture
+        worker=RuntimeFixture()
+        for updates in (dict(CapEff='1'),dict(NoNewPrivs='0'),dict(Seccomp='0'),dict(Uid='0 0 0 0')):
+            with self.subTest(updates=updates),patch.object(worker,'call',return_value=self.kernel_status('sh',**updates)) as call:
+                with self.assertRaises(ValueError):worker.pid_one_status('b'*64)
+                self.assertEqual(call.call_count,1)
+
+    def test_pid_one_startup_deadline_cannot_accept_late_sleep(self):
+        from native_probe_runtime import RuntimeFixture
+        worker=RuntimeFixture()
+        for status in (self.kernel_status('sh'),self.kernel_status()):
+            with patch.object(worker,'call',return_value=status) as call,patch('native_probe_runtime.time.monotonic',side_effect=[0,0,3]):
+                with self.assertRaises(ValueError):worker.pid_one_status('b'*64)
+                self.assertEqual(call.call_count,1)
+
     def test_already_bound_exact_probe_image_and_same_session_required(self):
         with self.held() as held, self.session() as first, self.session() as second:
             source = self.source(first, held, False)

@@ -48,3 +48,13 @@ are required.
 Native image build/create composition, pre-receipt and controller-death
 cleanup, compiler provenance, an operational lease and full-system recovery
 remain separate open work. This evidence does not close Phase 7.
+
+
+The separate existing runtime fixture samples PID 1 with a two-second startup
+deadline. Only the secure initial sh process may transition to sleep; every
+sample must already have the required UID/GID, zero capabilities, NNP and seccomp.
+The final accepted process must still be sleep, with all previous mount, network
+and scratch checks unchanged. Unknown names fail with a bounded public diagnostic.
+This consumes time inside the existing image admission lease and never renews it.
+A prior CI failure recorded a non-sleep name without preserving its actual value;
+these transition tests do not prove the exact cause of that historical failure.

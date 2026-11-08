@@ -1,6 +1,7 @@
 """Actual generated probe-image runtime and kernel observations; sleep/public scratch only."""
 import json
 import re
+import time
 
 from audit_probe_runtime_tests import policy, packet, container
 from native_audit_resource_binding import NativeBinding, FIELDS
@@ -52,13 +53,26 @@ class RuntimeFixture(NativeBinding):
         packet.require(type(identifier) is str and re.fullmatch('[a-f0-9]{64}', identifier))
         return packet.strict_json(self.call(['container', 'inspect', '--format', FORMAT, identifier]), container.MAX_OBSERVATION)
 
+    def pid_one_status(self, identifier):
+        deadline = time.monotonic() + 2
+        while True:
+            packet.require(time.monotonic() < deadline)
+            status = self.call(['exec', identifier, '/bin/cat', '/proc/1/status']).decode('ascii')
+            fields = {row.split(':', 1)[0]:row.split(':', 1)[1].strip() for row in status.splitlines() if ':' in row}
+            packet.require(time.monotonic() < deadline)
+            required = ('Name','Uid','Gid','CapInh','CapPrm','CapEff','CapBnd','CapAmb','NoNewPrivs','Seccomp')
+            packet.require(all(key in fields for key in required))
+            packet.require(fields['Uid'].split() == ['3322'] * 4 and fields['Gid'].split() == ['3322'] * 4)
+            packet.require(all(int(fields[n], 16) == 0 for n in ('CapInh', 'CapPrm', 'CapEff', 'CapBnd', 'CapAmb')))
+            packet.require(fields['NoNewPrivs'] == '1' and fields['Seccomp'] == '2')
+            if fields['Name'] == 'sleep':
+                return fields
+            if fields['Name'] != 'sh':
+                raise ValueError('Unexpected public PID1 process name: ' + fields['Name'][:64])
+            time.sleep(0.01)
+
     def kernel(self, identifier):
-        status = self.call(['exec', identifier, '/bin/cat', '/proc/1/status']).decode('ascii')
-        fields = {row.split(':', 1)[0]:row.split(':', 1)[1].strip() for row in status.splitlines() if ':' in row}
-        packet.require(fields['Name'] == 'sleep')
-        packet.require(fields['Uid'].split() == ['3322'] * 4 and fields['Gid'].split() == ['3322'] * 4)
-        packet.require(all(int(fields[n], 16) == 0 for n in ('CapInh', 'CapPrm', 'CapEff', 'CapBnd', 'CapAmb')))
-        packet.require(fields['NoNewPrivs'] == '1' and fields['Seccomp'] == '2')
+        self.pid_one_status(identifier)
         rows = self.call(['exec', identifier, '/bin/cat', '/proc/mounts']).decode('ascii').splitlines()
         selected = {row.split()[1]:set(row.split()[3].split(',')) for row in rows if row.split()[1] in ('/', '/data', '/tmp')}
         packet.require(set(selected) == {'/', '/data', '/tmp'} and 'ro' in selected['/'])
