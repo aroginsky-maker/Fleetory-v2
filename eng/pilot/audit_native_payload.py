@@ -163,6 +163,10 @@ class _NativePayloadPumps(prep._PreparationPumps):
         self.expected_input_bytes += len(data)
         self._send(data)
 
+    def _after_payload_bound(self):
+        # The original fixed profile offers no resource metadata.
+        return None
+
     def _write(self):
         try:
             self._send(self.data)
@@ -178,6 +182,8 @@ class _NativePayloadPumps(prep._PreparationPumps):
             self._send_frame(authorize(self.info, self.ready_pin, self.intent_pin))
             self._wait(self.payload_ready)
             self.bound.check()
+            self._after_payload_bound()
+            self.bound.check()
             release = self.bound.release()
             process._check_deadline(self.start_time, self.seconds)
             self.session._write_once('native-close.json', dict(schema='fleetory.native-empty-payload-close-request.v1',
@@ -192,15 +198,15 @@ class _NativePayloadPumps(prep._PreparationPumps):
 
     def finalize_binding(self, child, ended, failed):
         self.resource_metadata = dict(schema='fleetory.native-empty-payload-result.v1', nativeReadinessBound=False,
-            emptyPayloadNamespaceBound=False, emptyPayloadRemovedVerified=False, selectedSourceFilesPinned=len(SOURCES),
+            emptyPayloadNamespaceBound=False, emptyPayloadRemovedVerified=False, selectedSourceFilesPinned=len(self.source_names),
             emptyReservationObserved=self.bound is not None, privateInputsAccepted=False, backendCreated=False,
             backendNamespaceBound=False, originalInputsRead=False, originalPrivatePkiUsed=False, cleanupAuthorized=False,
             fullLegacyExecutionContinuityVerified=False, fullSystemRecoveryVerified=False, phase7Complete=False,
             refusalStage=self.refusal_stage)
         try:
             packet.require(not failed and child.returncode == 0 and ended['noRunningMembersVerified'])
-            packet.require(not self.pending and len(self.frames) == 3 and self.bound is not None)
-            final = self.frames[2]
+            packet.require(not self.pending and len(self.frames) == self.max_frames and self.bound is not None)
+            final = self.frames[-1]
             packet.require(final == dict(schema='fleetory.native-empty-payload-closed.v1', nonce=self.info['nonce'],
                 headerSha256=self.info['headerSha256'], readySha256=self.ready_pin, ownerSha256=self.frames[1]['ownerSha256'],
                 removalRequested=True, privateInputsAccepted=False, backendCreated=False))

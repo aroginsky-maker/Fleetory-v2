@@ -40,6 +40,8 @@ budget or repository visibility change is required.
 The library has no Docker, build, deletion, command or original-data API.
 The fixture uses only public Python images and generated metadata.
 Docker observation authenticity, application build provenance, full runtime
-continuity, native PowerShell resource acknowledgement and operational
-backend cleanup remain unverified. Actual legacy application/probe
+continuity and operational backend cleanup remain unverified.
+[Native resource acknowledgement](NativeResourceAcknowledgement.md) adds a
+separate metadata-only handshake with the actual PowerShell owner; it does
+not turn these receipts into application or cleanup authority. Actual legacy application/probe
 integration and original-data dispatch remain open. Phase 7 is incomplete.

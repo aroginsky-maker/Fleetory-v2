@@ -2,14 +2,19 @@
 # Private stdin/stdout pipe. Receives frozen bytes, never an operator file path or address.
 param([Parameter(Mandatory)][string]$ExpectedPlanSha256,[string]$Python='',
     [ValidateSet('none','after-container','after-restore')][string]$FailurePoint='none',[switch]$PreparationOnly,[string]$PreparationGitPath='',
-    [switch]$PayloadReservationOnly)
+    [switch]$PayloadReservationOnly,[switch]$ResourceAcknowledgementOnly)
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 $repo=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $testRoot=Join-Path $repo 'tests/Fleetory.Tools.Tests'
-if($PreparationOnly -or $PayloadReservationOnly){
-    if($PreparationOnly -and $PayloadReservationOnly){throw 'Exactly one preparation mode is required.'}
+if($PreparationOnly -or $PayloadReservationOnly -or $ResourceAcknowledgementOnly){
+    if(@(@($PreparationOnly,$PayloadReservationOnly,$ResourceAcknowledgementOnly)|Where-Object {$_}).Count -ne 1){throw 'Exactly one preparation mode is required.'}
     foreach($helper in @('PilotNativeProcess.ps1','ProviderRecoveryPolicy.ps1','ImmuDataRoundtripPolicy.ps1','HistoricalAuditControllerPolicy.ps1','HistoricalPreparation.ps1')){. (Join-Path $PSScriptRoot $helper)}
+    if($ResourceAcknowledgementOnly){
+        . (Join-Path $PSScriptRoot 'HistoricalPayloadReservation.ps1')
+        . (Join-Path $PSScriptRoot 'HistoricalResourceAcknowledgement.ps1')
+        exit (Invoke-HistoricalResourceAcknowledgement $ExpectedPlanSha256 $Python $repo $PreparationGitPath)
+    }
     if($PayloadReservationOnly){
         . (Join-Path $PSScriptRoot 'HistoricalPayloadReservation.ps1')
         exit (Invoke-HistoricalPayloadReservation $ExpectedPlanSha256 $Python $repo $PreparationGitPath)

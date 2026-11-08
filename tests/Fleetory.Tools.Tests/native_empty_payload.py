@@ -14,10 +14,10 @@ from native_audit_preparation import snapshot, sha, claim_plan
 from private_runtime_fixture import private_git, private_powershell, windows_git_core
 
 
-def public_repository(root, git):
+def public_repository(root, git, source_names=None):
     repository = root / 'repository'
     repository.mkdir(mode=0o700)
-    for name in policy.SOURCES:
+    for name in policy.SOURCES if source_names is None else source_names:
         source = REPO / name
         if name == 'global.json' and not source.exists():
             source = REPO / 'eng/global.ci.json'

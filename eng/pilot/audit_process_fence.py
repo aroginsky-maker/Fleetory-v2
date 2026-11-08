@@ -113,15 +113,18 @@ class _Command:
     env: object
     profile: str
     transport_factory: object = None
+    linked_pair: object = None
 
     def check(self):
-        packet.require(self.profile in ('generated-worker', 'native-admission-refusal', 'payload-reservation', 'native-preparation', 'native-empty-payload'))
+        packet.require(self.profile in ('generated-worker', 'native-admission-refusal', 'payload-reservation', 'native-preparation', 'native-empty-payload', 'native-resource-ack'))
         factories = {'native-preparation': ('audit_native_preparation', '_PreparationPumps'),
-            'native-empty-payload': ('audit_native_payload', '_NativePayloadPumps')}
+            'native-empty-payload': ('audit_native_payload', '_NativePayloadPumps'),
+            'native-resource-ack': ('audit_native_resources', '_NativeResourcePumps')}
         if self.profile in factories:
             packet.require((getattr(self.transport_factory, '__module__', ''), getattr(self.transport_factory, '__name__', '')) == factories[self.profile])
         else:
             packet.require(self.transport_factory is None)
+        packet.require((type(self.linked_pair) is tuple and len(self.linked_pair) == 2) if self.profile == 'native-resource-ack' else self.linked_pair is None)
         packet.require(type(self.arguments) is tuple and all(type(x) is str for x in self.arguments))
         self.executable.check()
         for source in self.sources:
@@ -288,7 +291,7 @@ def _process_evidence(command, observed, ended, pumps, pins_rechecked):
 
 
 def _make_pumps(command, session, child, fence, data, start, seconds):
-    if command.profile in ('native-preparation', 'native-empty-payload'):
+    if command.profile in ('native-preparation', 'native-empty-payload', 'native-resource-ack'):
         return command.transport_factory(child, data, command, session, fence, start, seconds)
     if command.profile == 'payload-reservation':
         from audit_payload_launch import _ReservationPumps
@@ -297,7 +300,7 @@ def _make_pumps(command, session, child, fence, data, start, seconds):
 
 
 def _finish_binding(command, pumps, child, ended, failure):
-    if command.profile not in ('payload-reservation', 'native-preparation', 'native-empty-payload') or pumps is None:
+    if command.profile not in ('payload-reservation', 'native-preparation', 'native-empty-payload', 'native-resource-ack') or pumps is None:
         return failure
     try:
         pumps.finalize_binding(child, ended, failure or pumps.errors)

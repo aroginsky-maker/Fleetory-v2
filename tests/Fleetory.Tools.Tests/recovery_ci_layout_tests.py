@@ -60,7 +60,9 @@ def validate(text):
                 ('actual historical owner readiness', 'native_audit_preparation.py'),
                 ('native empty payload contracts', 'audit_native_payload_tests.py'),
                 ('actual native empty payload handoff', 'native_empty_payload.py'),
-                ('linked image and container contracts', 'audit_linked_binding_tests.py')):
+                ('linked image and container contracts', 'audit_linked_binding_tests.py'),
+                ('native resource receipt contracts', 'audit_native_resource_tests.py'),
+                ('actual native resource acknowledgement', 'native_resource_ack.py')):
             step = ('      - name: Verify ' + title + platform + '\n'
                 '        shell: pwsh\n'
                 '        run: ' + executable + ' -B ./tests/Fleetory.Tools.Tests/' + filename + '\n')
@@ -99,6 +101,13 @@ def validate(text):
     start = block.index(pair_step)
     end = block.find('      - name:', start + len(pair_step))
     assert block[start:end if end >= 0 else len(block)].strip() == pair_step.strip()
+    ack_step = ('      - name: Verify actual Docker receipts acknowledged by native owner\n'
+        '        shell: pwsh\n'
+        '        run: python3 -B ./tests/Fleetory.Tools.Tests/native_resource_docker_ack.py\n')
+    assert block.count(ack_step) == 1
+    start = block.index(ack_step)
+    end = block.find('      - name:', start + len(ack_step))
+    assert block[start:end if end >= 0 else len(block)].strip() == ack_step.strip()
     for command in ('./eng/verify-quality.ps1', './eng/verify-sonar-issues.ps1', './eng/report-sonar-metrics.ps1'):
         assert text.count(command) == 1 and command in blocks['quality']
     assert '    timeout-minutes: 30\n' in blocks['quality']
@@ -228,6 +237,20 @@ class RecoveryCiLayoutTests(unittest.TestCase):
 
     def test_linked_native_pair_cannot_be_omitted_duplicated_or_softened(self):
         command = 'python3 -B ./tests/Fleetory.Tools.Tests/native_audit_linked_pair.py'
+        self.refused(self.text.replace(command, 'omitted', 1))
+        self.refused(self.text.replace(command, command + '\n          ' + command, 1))
+        self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
+
+    def test_native_receipt_gates_are_required_on_both_platforms(self):
+        for filename in ('audit_native_resource_tests.py', 'native_resource_ack.py'):
+            for executable in ('python', 'python3'):
+                command = executable + ' -B ./tests/Fleetory.Tools.Tests/' + filename
+                self.refused(self.text.replace(command, 'omitted', 1))
+                self.refused(self.text.replace(command, command + '\n          ' + command, 1))
+                self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
+
+    def test_native_docker_receipt_gate_cannot_be_omitted_or_softened(self):
+        command = 'python3 -B ./tests/Fleetory.Tools.Tests/native_resource_docker_ack.py'
         self.refused(self.text.replace(command, 'omitted', 1))
         self.refused(self.text.replace(command, command + '\n          ' + command, 1))
         self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))

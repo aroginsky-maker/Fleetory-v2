@@ -231,7 +231,7 @@ def prepare_owner(repository, powershell_path, python_path, git_path, native_pla
         git_sha256, _PreparationPumps)
 
 
-def _prepare_owner(repository, powershell_path, python_path, git_path, native_plan, source_pins, session, git_sha256, factory):
+def _prepare_owner(repository, powershell_path, python_path, git_path, native_plan, source_pins, session, git_sha256, factory, *, linked_pair=None):
     """Private fixed-profile construction; callers/wire data cannot choose commands."""
     root = Path(repository).resolve(strict=True)
     packet.require(type(source_pins) is dict and set(source_pins) == set(factory.source_names))
@@ -253,7 +253,7 @@ def _prepare_owner(repository, powershell_path, python_path, git_path, native_pl
         arguments = ('-NoLogo', '-NoProfile', '-NonInteractive', '-File', str(entry), factory.switch,
             '-ExpectedPlanSha256', native_pin, '-Python', str(python.path), '-PreparationGitPath', str(git.path))
         command = process._Command(powershell, (python, git, *sources, directory), arguments, root,
-            process.environment(powershell, (python,)), factory.profile, factory)
+            process.environment(powershell, (python,)), factory.profile, factory, linked_pair)
         result = process._run_owned(command, session, data + b'\n', 30)
     packet.require(result.exit_code == 0 and result.stderr == b'')
     return result

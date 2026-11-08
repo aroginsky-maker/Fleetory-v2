@@ -7,7 +7,7 @@ function New-NativePayloadAction([byte[]]$Header,[byte[]]$Frame,$Reservation=$nu
     }
     return ,[Text.Encoding]::UTF8.GetBytes(($value|ConvertTo-Json -Depth 6 -Compress))
 }
-function Invoke-HistoricalPayloadReservation([string]$ExpectedPin,[string]$Python,[string]$Repository,[string]$Git){
+function Invoke-HistoricalPayloadReservation([string]$ExpectedPin,[string]$Python,[string]$Repository,[string]$Git,[switch]$AcknowledgeResources){
     $stage='header';$state='not-attempted';$stream=[Console]::OpenStandardInput()
     $helper=Join-Path $PSScriptRoot 'audit_native_payload.py'
     try{
@@ -24,6 +24,10 @@ function Invoke-HistoricalPayloadReservation([string]$ExpectedPin,[string]$Pytho
         Assert-ImmuData ($created.ExitCode -eq 0 -and [string]::IsNullOrWhiteSpace($created.Stderr)) 'empty-payload-reserve'
         $reservation=$created.Stdout|ConvertFrom-Json -AsHashtable
         $state='reserved';$null=Send-PreparationFrame $reservation
+        if($AcknowledgeResources){
+            $stage='resources';$frame=Read-PreparationFrame $stream 2048
+            $null=Send-PreparationFrame (Get-HistoricalResourceAcknowledgement $ExpectedPin $Python $raw $readyPin $frame $reservation $PID)
+        }
         $stage='remove';$frame=Read-PreparationFrame $stream 2048
         Assert-ImmuData ($stream.ReadByte() -eq -1) 'empty-payload-trailing-input'
         $body=New-NativePayloadAction $raw $frame $reservation
@@ -32,7 +36,8 @@ function Invoke-HistoricalPayloadReservation([string]$ExpectedPin,[string]$Pytho
         $null=Send-PreparationFrame ($removed.Stdout|ConvertFrom-Json -AsHashtable)
         return 0
     }catch{
-        $null=Send-PreparationFrame @{schema='fleetory.native-empty-payload-refused.v1';stage=$stage;emptyPayloadState=$state;privateInputsAccepted=$false;backendCreated=$false}
+        $schema=if($AcknowledgeResources){'fleetory.native-linked-resource-refused.v1'}else{'fleetory.native-empty-payload-refused.v1'}
+        $null=Send-PreparationFrame @{schema=$schema;stage=$stage;emptyPayloadState=$state;privateInputsAccepted=$false;backendCreated=$false}
         [Console]::Error.WriteLine('Native empty metadata reservation refused; no private input accepted.')
         return 1
     }
