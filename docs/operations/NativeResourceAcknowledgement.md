@@ -61,3 +61,8 @@ original-input release and full-system recovery remain false. Binding the
 actual application/probe image, accepted build/runtime provenance and operational
 owner-death cleanup are still required before original-data dispatch. Phase 7
 remains open. This step needs no additional secret/PKI permission or VPS access.
+
+[Fixed public probe image build](ProbeImageBuild.md) separately freezes the
+actual published probe bundle and legacy recipe. Its image type is intentionally
+not admitted by the original Python/native receipt profile; the operational
+native image/runtime handoff remains open.

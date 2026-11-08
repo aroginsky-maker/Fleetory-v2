@@ -62,7 +62,8 @@ def validate(text):
                 ('actual native empty payload handoff', 'native_empty_payload.py'),
                 ('linked image and container contracts', 'audit_linked_binding_tests.py'),
                 ('native resource receipt contracts', 'audit_native_resource_tests.py'),
-                ('actual native resource acknowledgement', 'native_resource_ack.py')):
+                ('actual native resource acknowledgement', 'native_resource_ack.py'),
+                ('fixed probe image build contracts', 'audit_probe_image_tests.py')):
             step = ('      - name: Verify ' + title + platform + '\n'
                 '        shell: pwsh\n'
                 '        run: ' + executable + ' -B ./tests/Fleetory.Tools.Tests/' + filename + '\n')
@@ -108,6 +109,13 @@ def validate(text):
     start = block.index(ack_step)
     end = block.find('      - name:', start + len(ack_step))
     assert block[start:end if end >= 0 else len(block)].strip() == ack_step.strip()
+    probe_step = ('      - name: Verify actual public probe image build and readback\n'
+        '        shell: pwsh\n'
+        '        run: python3 -B ./tests/Fleetory.Tools.Tests/native_probe_image.py\n')
+    assert block.count(probe_step) == 1
+    start = block.index(probe_step)
+    end = block.find('      - name:', start + len(probe_step))
+    assert block[start:end if end >= 0 else len(block)].strip() == probe_step.strip()
     for command in ('./eng/verify-quality.ps1', './eng/verify-sonar-issues.ps1', './eng/report-sonar-metrics.ps1'):
         assert text.count(command) == 1 and command in blocks['quality']
     assert '    timeout-minutes: 30\n' in blocks['quality']
@@ -254,6 +262,14 @@ class RecoveryCiLayoutTests(unittest.TestCase):
         self.refused(self.text.replace(command, 'omitted', 1))
         self.refused(self.text.replace(command, command + '\n          ' + command, 1))
         self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
+
+    def test_probe_image_gates_cannot_be_omitted_duplicated_or_softened(self):
+        for command in ('python -B ./tests/Fleetory.Tools.Tests/audit_probe_image_tests.py',
+                'python3 -B ./tests/Fleetory.Tools.Tests/audit_probe_image_tests.py',
+                'python3 -B ./tests/Fleetory.Tools.Tests/native_probe_image.py'):
+            self.refused(self.text.replace(command, 'omitted', 1))
+            self.refused(self.text.replace(command, command + '\n          ' + command, 1))
+            self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
 
     def test_actual_aggregate_rejects_failed_cancelled_skipped_or_missing_jobs(self):
         block = jobs(self.text)['quality-gate']
