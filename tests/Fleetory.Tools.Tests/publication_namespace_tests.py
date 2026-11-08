@@ -180,5 +180,11 @@ class PublicationNamespaceContracts(unittest.TestCase):
                 with self.assertRaises(ValueError):empty.remove()
                 self.assertTrue((empty.path/'public.json').is_file())
 
+    def test_shared_writer_refuses_unknown_paths_before_any_file_creation(self):
+        with ns.control.DirectoryLease(self.repo/'artifacts') as directory:
+            for name in ('../outside.json','.env','unknown.json','C:/private.key',True):
+                with self.subTest(name=name),self.assertRaises(ValueError):ns.empty._create_named_record(directory,name,b'public bytes')
+            self.assertEqual(list(directory.path.iterdir()),[])
+
 
 if __name__=='__main__':unittest.main()
