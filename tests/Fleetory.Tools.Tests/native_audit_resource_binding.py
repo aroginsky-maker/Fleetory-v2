@@ -43,6 +43,9 @@ class NativeBinding(DockerRehearsal):
         template = '{"id":{{json .Id}},"name":{{json .Name}},"labels":{{json .Config.Labels}},"imageId":{{json .Image}}}'
         return binding.packet.strict_json(self.call(['container', 'inspect', '--format', template, identifier]), binding.MAX_OBSERVATION)
 
+    def source_reference(self, intent):
+        return binding.IMAGE
+
     def create(self, intent):
         existing = self.call(['container', 'ls', '-a', '--no-trunc', '--filter', 'name=^/' + intent['name'] + '$', '--format', '{{.ID}}'])
         binding.packet.require(not existing.strip())
@@ -51,7 +54,7 @@ class NativeBinding(DockerRehearsal):
             '--cpus=0.25', '--pids-limit=32', '--restart=no', '--entrypoint=python']
         for name, value in intent['labels'].items():
             args.extend(['--label', name + '=' + value])
-        identifier = self.call(args + [binding.IMAGE, *binding.COMMAND]).decode().strip()
+        identifier = self.call(args + [self.source_reference(intent), *binding.COMMAND]).decode().strip()
         binding.packet.require(re.fullmatch('[a-f0-9]{64}', identifier))
         self.receipts.append((identifier, intent))
         return identifier

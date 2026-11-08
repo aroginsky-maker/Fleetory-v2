@@ -74,6 +74,10 @@ def timestamp_ns(value):
 
 
 def observation(data, intent, returned_id, now):
+    return _observation_for_reference(data, intent, returned_id, now, IMAGE)
+
+
+def _observation_for_reference(data, intent, returned_id, now, expected_reference):
     packet.require(type(returned_id) is str and re.fullmatch('[a-f0-9]{64}', returned_id))
     value = packet.strict_json(data, MAX_OBSERVATION)
     packet.keys(value, 'schema id name imageId created labels configImage user entrypoint command running paused restarting dead '
@@ -84,7 +88,7 @@ def observation(data, intent, returned_id, now):
                    value['imageId'] == intent['imageId'] and value['labels'] == intent['labels'])
     created = timestamp_ns(value['created'])
     packet.require(intent['openedNs'] <= created <= now < intent['expiresNs'])
-    packet.require(value['configImage'] == IMAGE and value['user'] == '65534:65534' and
+    packet.require(value['configImage'] == expected_reference and value['user'] == '65534:65534' and
                    value['entrypoint'] == ['python'] and value['command'] == COMMAND)
     packet.require(value['running'] is True and all(value[n] is False for n in ('paused', 'restarting', 'dead', 'privileged', 'publishAllPorts')))
     packet.require(value['networkMode'] == 'none' and type(value['networks']) is dict and set(value['networks']) == {'none'})

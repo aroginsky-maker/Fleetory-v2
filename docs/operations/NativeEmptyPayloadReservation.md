@@ -57,3 +57,5 @@ Full legacy payload/image/container handoff, complete release/runtime
 provenance and cleanup after owner death with real backends remain open.
 This mode grants no original-data, PKI, provider/root/issuer or production-token
 authority. Full-system recovery and Phase 7 remain incomplete.
+
+The separate [linked generated image/container gate](LinkedRecoveryResources.md) provides the same-session immutable-image dependency needed before native resource acknowledgement and legacy application handoff.
