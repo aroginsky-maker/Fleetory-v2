@@ -107,7 +107,7 @@ class RuntimeFixture(NativeBinding):
         packet.require(len(self.receipts) == 1 and self.listed_id(self.receipts[0][0]) == [])
         return dict(schema='fleetory.generated-native-probe-runtime.v1', verified=True, **kernel,
             imageAndConfigImageImmutable=True, imageRecordIntentAndManifestMatched=True, sameHeldControllerVerified=True,
-            sharedAdmissionExpiryVerified=True, cleanupBeforeAdmissionExpiry=True, consumedObservationReplayRefused=True,
+            sharedAdmissionExpiryVerified=True, cleanupBeforeAdmissionExpiry=True, runtimeProfileSha256=policy.PROFILE_SHA256, consumedObservationReplayRefused=True,
             foreignControllerRefused=True, foreignAttemptConsumed=True, sourceImageRecordPreserved=True,
             runtimeMetadataUnchangedAfterScratch=True, createdSleepWorkers=1, backendServicesStarted=0,
             ownedSleepWorkersAbsent=True, fixtureCleanupFromOwnCreateReceiptOnly=True, commandLifetimeSeconds=660,

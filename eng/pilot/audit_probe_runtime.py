@@ -1,5 +1,6 @@
 """Fixed generated probe runtime metadata; no Docker, launch, cleanup or private-input authority."""
 import json
+from pathlib import Path
 import time
 
 import audit_linked_binding as linked
@@ -9,15 +10,29 @@ container, packet = linked.container, linked.packet
 SCHEMA = 'fleetory.audit-probe-runtime-intent.v1'
 PURPOSE = 'generated-probe-runtime-control-binding.v1'
 OBSERVATION_SCHEMA = 'fleetory.audit-probe-runtime-observation.v1'
-COMMAND = ['-c', 'exec /bin/sleep 660']
-TMPFS = {'/data': 'rw,noexec,nosuid,nodev,size=256m,uid=3322,gid=3322,mode=0700',
-    '/tmp': 'rw,noexec,nosuid,nodev,size=32m,uid=3322,gid=3322,mode=0700'}
-ENVIRONMENT = ['PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', 'APP_UID=1654',
-    'ASPNETCORE_HTTP_PORTS=8080', 'DOTNET_RUNNING_IN_CONTAINER=true', 'DOTNET_VERSION=10.0.14', 'ASPNET_VERSION=10.0.14']
-SOURCE_FIELDS = ('imageId', 'imageBindingSha256', 'imageIntentSha256', 'bundleManifestSha256', 'sourceCodeSha256')
+PROFILE_SHA256 = '5402adcd0d010f4bc2e6b7c78d6f16ddbcbd3f3ad4ebab5f111e8c9fb17e034f'
+
+
+def runtime_profile():
+    # Container paths are declarative Docker data, never host filesystem targets.
+    # Only this fixed public profile file is opened; its complete bytes are pinned.
+    with probe.bundle.control.DirectoryLease(Path(__file__).absolute().parent) as directory:
+        digest, _, raw = probe.bundle.files.inspect_file(directory.path, directory.fd,
+            'probe-runtime-profile.json', 4096, retain=True)
+    packet.require(digest == PROFILE_SHA256)
+    value = packet.strict_json(raw, 4096)
+    packet.keys(value, 'schema user entrypoint command tmpfs environment memoryBytes nanoCpus pidsLimit ulimits')
+    packet.require(value['schema'] == 'fleetory.probe-runtime-profile.v1')
+    return value
+
+
+PROFILE = runtime_profile()
+COMMAND, TMPFS, ENVIRONMENT = PROFILE['command'], PROFILE['tmpfs'], PROFILE['environment']
+SOURCE_FIELDS = ('imageId', 'imageBindingSha256', 'imageIntentSha256', 'bundleManifestSha256', 'sourceCodeSha256', 'runtimeProfileSha256')
 
 
 def anchor(session, source):
+    packet.require(runtime_profile() == PROFILE)
     packet.require(type(source) is probe.ProbeImageBinding and source.session is session)
     report = source.report()
     packet.require(report['generatedProbeImageRecipeBound'] is True)
@@ -29,7 +44,7 @@ def anchor(session, source):
         saved['sourceCodeSha256'] == session._plan['codeSha256'] and saved['contextSha256'] == source.intent['contextSha256'])
     return dict(imageId=container.image_id(report['imageId']), imageBindingSha256=packet.digest(raw),
         imageIntentSha256=report['intentSha256'], bundleManifestSha256=saved['bundleManifestSha256'],
-        sourceCodeSha256=saved['sourceCodeSha256'])
+        sourceCodeSha256=saved['sourceCodeSha256'], runtimeProfileSha256=PROFILE_SHA256)
 
 
 def name(nonce):
@@ -38,7 +53,8 @@ def name(nonce):
 
 def labels(source, pins):
     value = dict(source.intent['labels'])
-    value.update({'fleetory.audit.control.profile': PURPOSE, 'fleetory.audit.control.image.binding': pins['imageBindingSha256']})
+    value.update({'fleetory.audit.control.profile': PURPOSE, 'fleetory.audit.control.image.binding': pins['imageBindingSha256'],
+        'fleetory.audit.control.runtime.profile': PROFILE_SHA256})
     return value
 
 
@@ -64,19 +80,19 @@ class ProbeRuntimeBinding(linked.LinkedContainerBinding):
     def _observe(data, intent, returned_id, now):
         value, created = container._container_identity(data, intent, returned_id, now, OBSERVATION_SCHEMA,
             container.OBSERVATION_FIELDS + ' environment ulimits')
-        packet.require(value['configImage'] == intent['imageId'] and value['user'] == '3322:3322' and
-            value['entrypoint'] == ['/bin/sh'] and value['command'] == COMMAND and value['environment'] == ENVIRONMENT)
+        packet.require(value['configImage'] == intent['imageId'] and value['user'] == PROFILE['user'] and
+            value['entrypoint'] == PROFILE['entrypoint'] and value['command'] == COMMAND and value['environment'] == ENVIRONMENT)
         container._container_sandbox(value)
         packet.require(all(type(value[n]) is int and value[n] == limit for n, limit in
-            (('memory', 402653184), ('nanoCpus', 1000000000), ('pidsLimit', 128))))
-        packet.require(value['tmpfs'] == TMPFS and value['ulimits'] == [{'Name': 'core', 'Soft': 0, 'Hard': 0}])
+            (('memory', PROFILE['memoryBytes']), ('nanoCpus', PROFILE['nanoCpus']), ('pidsLimit', PROFILE['pidsLimit']))))
+        packet.require(value['tmpfs'] == TMPFS and value['ulimits'] == PROFILE['ulimits'])
         packet.require(all(type(value['ulimits'][0][key]) is int for key in ('Soft', 'Hard')))
         return value, created
 
     def report(self):
         result = super().report()
         result.update(generatedProbeRuntimeBound=self._bound is not None, sourceImageAdmissionExpiryNs=self.intent['expiresNs'],
-            sourceBundleManifestSha256=self.intent['bundleManifestSha256'], operationalLeaseAuthorized=False,
+            sourceBundleManifestSha256=self.intent['bundleManifestSha256'], runtimeProfileSha256=PROFILE_SHA256, operationalLeaseAuthorized=False,
             backendServiceStartedVerified=False, actualProbeNativeOwnerAcknowledged=False, backendCleanupAuthorized=False)
         return result
 

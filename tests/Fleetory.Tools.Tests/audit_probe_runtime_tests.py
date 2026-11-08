@@ -117,7 +117,7 @@ class ProbeRuntimeTests(unittest.TestCase):
         changes = [('schema', policy.linked.SCHEMA), ('purpose', policy.linked.PURPOSE), ('nonce', str(uuid.uuid4())),
             ('revision', 'f' * 40), ('controlSha256', 'f' * 64), ('image', probe.BASES[2]), ('imageId', 'sha256:' + 'f' * 64),
             ('imageBindingSha256', 'f' * 64), ('imageIntentSha256', 'f' * 64), ('bundleManifestSha256', 'f' * 64),
-            ('sourceCodeSha256', 'f' * 64), ('name', 'foreign'), ('labels', {}), ('openedNs', 0), ('expiresNs', True),
+            ('sourceCodeSha256', 'f' * 64), ('runtimeProfileSha256', 'f' * 64), ('name', 'foreign'), ('labels', {}), ('openedNs', 0), ('expiresNs', True),
             ('command', 'restore'), ('root', '/foreign')]
         for key, value in changes:
             with self.subTest(key=key), self.held() as held, self.session() as session:
@@ -216,6 +216,17 @@ class ProbeRuntimeTests(unittest.TestCase):
                 source = self.source(session, held);target = self.resource(session, source)
                 changed = source if which == 'source' else target
                 changed.intent['expiresNs'] += 1
+                with self.assertRaises(ValueError):target.report()
+
+    def test_profile_complete_bytes_are_pinned_before_parse_or_runtime_use(self):
+        self.assertEqual(policy.runtime_profile(), policy.PROFILE)
+        with patch.object(policy.probe.bundle.files, 'inspect_file', return_value=('f' * 64, 2, b'{}')):
+            with self.assertRaises(ValueError):policy.runtime_profile()
+        with self.held() as held, self.session() as session:
+            source = self.source(session, held);target = self.resource(session, source)
+            self.assertEqual(target.intent['runtimeProfileSha256'], policy.PROFILE_SHA256)
+            self.assertEqual(target.intent['labels']['fleetory.audit.control.runtime.profile'], policy.PROFILE_SHA256)
+            with patch.object(policy.probe.bundle.files, 'inspect_file', return_value=('f' * 64, 2, b'{}')):
                 with self.assertRaises(ValueError):target.report()
 
     def test_no_new_publication_or_backend_authority_on_unbound_report(self):

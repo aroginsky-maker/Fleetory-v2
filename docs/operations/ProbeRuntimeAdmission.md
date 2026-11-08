@@ -15,6 +15,13 @@ provide a 660-second operational lease, cleanup authority or a claim that a
 service ran continuously for that duration. Generated tests inspect and remove
 their own worker before admission expires.
 
+The container layout is declarative data in `eng/pilot/probe-runtime-profile.json`.
+The host opens only that fixed ordinary public file with a bounded, rooted read;
+its complete SHA-256 is checked before parsing and on every source/report check.
+The digest is pinned in the runtime intent, labels and binding record. Container
+paths are never used as host filesystem targets. No rule suppression, accepted
+issue, threshold change or path-string obfuscation is needed for this boundary.
+
 The runtime tuple is fixed: UID/GID 3322, /bin/sh plus the bounded sleep command,
 network none, no ports/user binds/devices, read-only root, cap-drop ALL,
 no-new-privileges, 384 MiB memory, one CPU, 128 PIDs, core soft/hard limits zero,
