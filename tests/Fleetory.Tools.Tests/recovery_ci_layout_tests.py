@@ -72,13 +72,15 @@ def validate(text):
                 ('fixed native publication contracts', 'native_publication_tests.py'),
                 ('actual native public publisher', 'native_publication.py'),
                 ('native publication fault contracts', 'publication_faults_tests.py'),
+                ('held publication continuation contracts', 'publication_continuation_tests.py'),
                 ('actual native publication faults', 'native_publication_faults.py'),
                 ('native create fault contracts', 'native_create_faults_tests.py'),
                 ('public probe owner fault contracts', 'public_probe_faults_tests.py'),
                 ('actual native probe receipt acknowledgement', 'native_probe_receipt_ack.py')):
+            suffix = (' --continuation-image' if key=='quality' else ' --continuation') if filename=='native_publication_faults.py' else ''
             step = ('      - name: Verify ' + title + platform + '\n'
                 '        shell: pwsh\n'
-                '        run: ' + executable + ' -B ./tests/Fleetory.Tools.Tests/' + filename + '\n')
+                '        run: ' + executable + ' -B ./tests/Fleetory.Tools.Tests/' + filename + suffix + '\n')
             block = blocks[key]
             assert block.count(step) == 1
             start = block.index(step)
@@ -410,6 +412,14 @@ class RecoveryCiLayoutTests(unittest.TestCase):
             env = dict(os.environ, FLEETORY_GATE_RESULTS=json.dumps(value))
             run = subprocess.run([executable, '-NoProfile', '-Command', script], env=env, capture_output=True, timeout=10)
             self.assertEqual(run.returncode == 0, accepted)
+
+
+    def test_retained_publication_contracts_and_actual_flags_cannot_be_omitted(self):
+        for executable,flag in (('python','--continuation'),('python3','--continuation-image')):
+            command=executable+' -B ./tests/Fleetory.Tools.Tests/publication_continuation_tests.py'
+            self.refused(self.text.replace(command,'omitted',1))
+            self.refused(self.text.replace('run: '+command,'continue-on-error: true\n        run: '+command,1))
+            self.refused(self.text.replace('native_publication_faults.py '+flag,'native_publication_faults.py',1))
 
 
 if __name__ == '__main__':

@@ -196,7 +196,9 @@ class ControlIdentity:
             'native-payload-intent.json', 'native-resource-intent.json', 'native-resource-ack.json',
             'native-probe-create-intent.json', 'native-probe-create-binding.json',
             'publication-attempt.json', 'publication-namespace.json', 'publication-seal-attempt.json',
-            'publication-binding.json', 'publication-owner-ack.json', 'publication-release.json', 'native-publication-receipt.json') and name not in self._records)
+            'publication-binding.json', 'publication-owner-ack.json', 'publication-release.json', 'native-publication-receipt.json',
+            'publication-continuation-attempt.json', 'publication-continuation-binding.json',
+            'publication-continuation-use.json', 'publication-continuation-readback-attempt.json', 'publication-continuation-readback.json') and name not in self._records)
         data = json.dumps(value, sort_keys=True, separators=(',', ':')).encode() + b'\n'
         packet.require(0 < len(data) <= MAX_RECORD)
         if os.name == 'nt':

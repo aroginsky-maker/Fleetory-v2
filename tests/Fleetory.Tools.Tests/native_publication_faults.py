@@ -124,7 +124,8 @@ class Fault:
         if self.child is not None:self.child.close()
 
 
-def run():
+def run(*, continuation=False, with_image=False):
+    packet.require(type(continuation) is bool and type(with_image) is bool and (not with_image or continuation))
     powershell=Path(shutil.which('pwsh') or '').resolve(strict=True);python=Path(sys.executable).resolve(strict=True)
     git=Path(shutil.which('git') or '').resolve(strict=True);dotnet=Path(shutil.which('dotnet') or '').resolve(strict=True)
     if os.name=='nt':git=windows_git_core(git)
@@ -171,6 +172,10 @@ def run():
                         unrelatedSentinelPreserved=True,namespaceNonce=plan['nonce'],controlRecords=sorted(session._records))
                     outcomes.append(outcome);print('NATIVE PUBLICATION FAULT CASE PASS: '+case,flush=True)
                 finally:fault.close()
+        continued = None
+        if continuation:
+            from native_publication_continuation import exercise
+            continued = exercise(repository,root,powershell,python,git,dotnet,published,with_image=with_image)
         copied.check()
         tree=copied.tree_id;revision=copied.revision
     packet.require(root.is_absolute() and root.name.startswith('fleetory-public-publication-fault-') and repository.parent==root)
@@ -180,11 +185,19 @@ def run():
             policy.ns.files.regular_single_file(target.lstat()))
         target.chmod(0o600);function(path)
     shutil.rmtree(root,onexc=readonly_file);packet.require(not root.exists())
-    return dict(schema='fleetory.generated-native-publication-faults.v1',verified=True,cases=outcomes,
+    return dict(schema='fleetory.generated-native-publication-faults.v1',verified=True,cases=outcomes,continuationProof=continued,
         referencePublication=published,revision=revision,tree=tree,selectedSourceFilesPinned=36,nativeSeconds=30,
         ownPublicFixtureDisposed=True,actualCompilerChildObservedAndExited=True,compilerChildObservationSource='owned Job or process group plus held process handle/pidfd and pinned dotnet image',
         controllerDeathCleanupVerified=False,operationalLeaseAuthorized=False,nativeImageBuildVerified=False,
         backendServicesStarted=0,originalInputsRead=False,originalPrivatePkiUsed=False,sourceVpsAccessed=False,fullSystemRecoveryVerified=False,phase7Complete=False)
 
 
-if __name__=='__main__':print('NATIVE PUBLICATION FAULTS PASS: '+json.dumps(run(),sort_keys=True))
+if __name__=='__main__':
+    args=sys.argv[1:]
+    packet.require(args in ([],['--continuation'],['--continuation-image']))
+    result=run(continuation=bool(args),with_image=args==['--continuation-image'])
+    continued=result.pop('continuationProof')
+    print('NATIVE PUBLICATION FAULTS PASS: '+json.dumps(result,sort_keys=True))
+    if continued is not None:
+        continued['ownPublicFixtureDisposed']=True
+        print('NATIVE PUBLICATION CONTINUATION PASS: '+json.dumps(continued,sort_keys=True))

@@ -232,7 +232,7 @@ def prepare_owner(repository, powershell_path, python_path, git_path, native_pla
         git_sha256, _PreparationPumps)
 
 
-def _prepare_owner(repository, powershell_path, python_path, git_path, native_plan, source_pins, session, git_sha256, factory, *, linked_pair=None, creation=None, publication=None):
+def _prepare_owner(repository, powershell_path, python_path, git_path, native_plan, source_pins, session, git_sha256, factory, *, linked_pair=None, creation=None, publication=None, continuation=None):
     """Private fixed-profile construction; callers/wire data cannot choose commands."""
     root = Path(repository).resolve(strict=True)
     packet.require(type(source_pins) is dict and set(source_pins) == set(factory.source_names))
@@ -243,7 +243,8 @@ def _prepare_owner(repository, powershell_path, python_path, git_path, native_pl
         declared['codeSha256'] == session._plan['codeSha256'] and declared['probeSha256'] == session._plan['probeSha256'])
     packet.require(creation is None or factory.profile == "native-probe-create")
     extra = {} if creation is None else dict(docker_sha256=creation[1], runtime_intent_sha256=creation[2])
-    packet.require(publication is None or factory.profile == 'native-publication' and creation is None)
+    packet.require(publication is None or factory.profile in ('native-publication', 'native-publication-retain') and creation is None)
+    packet.require((continuation is not None) == (factory.profile == 'native-publication-retain'))
     if publication is not None:
         extra = dict(dotnet_sha256=publication[1], manifest=publication[2])
     value = factory.make_header(native_plan, report, session, source_pins, git_sha256, **extra)
@@ -265,7 +266,7 @@ def _prepare_owner(repository, powershell_path, python_path, git_path, native_pl
             arguments += ('-PublicationDotnetPath', str(dotnet.path))
         runtimes = (python, docker) if docker else ((python, dotnet) if dotnet else (python,))
         command = process._Command(powershell, (git, *runtimes, *sources, directory), arguments, root,
-            process.environment(powershell, runtimes), factory.profile, factory, linked_pair, docker, dotnet)
+            process.environment(powershell, runtimes), factory.profile, factory, linked_pair, docker, dotnet, continuation)
         result = process._run_owned(command, session, data + b'\n', 30)
     packet.require(result.exit_code == 0 and result.stderr == b'')
     return result

@@ -180,13 +180,17 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/native_publication.py
 
+      - name: Verify held publication continuation contracts on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/publication_continuation_tests.py
+
       - name: Verify native publication fault contracts on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/publication_faults_tests.py
 
       - name: Verify actual native publication faults on Windows
         shell: pwsh
-        run: python -B ./tests/Fleetory.Tools.Tests/native_publication_faults.py
+        run: python -B ./tests/Fleetory.Tools.Tests/native_publication_faults.py --continuation
 
       - name: Verify native probe create contracts on Windows
         shell: pwsh
@@ -616,13 +620,17 @@ jobs:
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/native_publication.py
 
+      - name: Verify held publication continuation contracts
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/publication_continuation_tests.py
+
       - name: Verify native publication fault contracts
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/publication_faults_tests.py
 
       - name: Verify actual native publication faults
         shell: pwsh
-        run: python3 -B ./tests/Fleetory.Tools.Tests/native_publication_faults.py
+        run: python3 -B ./tests/Fleetory.Tools.Tests/native_publication_faults.py --continuation-image
 
       - name: Verify native probe create contracts
         shell: pwsh

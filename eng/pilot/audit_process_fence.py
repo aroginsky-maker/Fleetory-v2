@@ -104,6 +104,16 @@ def environment(executable, additional=()):
     return MappingProxyType(value)
 
 
+class _PublicationDelivery:
+    """Fixed-profile in-process return slot; no import into the old native preparation closure."""
+    def __init__(self, root, sources):
+        self.root, self.sources, self.item = root, sources, None
+
+    def check(self):
+        self.root.check()
+        for source in self.sources:source.check()
+
+
 @dataclass(frozen=True)
 class _Command:
     executable: PinnedFile
@@ -116,22 +126,28 @@ class _Command:
     linked_pair: object = None
     docker: object = None
     dotnet: object = None
+    continuation: object = None
 
     def check(self):
-        packet.require(self.profile in ('generated-worker', 'native-admission-refusal', 'payload-reservation', 'native-preparation', 'native-empty-payload', 'native-resource-ack', 'native-probe-runtime-ack', 'native-probe-create', 'native-publication'))
+        packet.require(self.profile in ('generated-worker', 'native-admission-refusal', 'payload-reservation', 'native-preparation', 'native-empty-payload', 'native-resource-ack', 'native-probe-runtime-ack', 'native-probe-create', 'native-publication', 'native-publication-retain'))
         factories = {'native-preparation': ('audit_native_preparation', '_PreparationPumps'),
             'native-empty-payload': ('audit_native_payload', '_NativePayloadPumps'),
             'native-resource-ack': ('audit_native_resources', '_NativeResourcePumps'),
             'native-probe-runtime-ack': ('audit_native_probe_runtime', '_NativeProbePumps'),
             'native-probe-create': ('audit_native_probe_create', '_NativeCreatePumps'),
-            'native-publication': ('audit_native_publication', '_NativePublicationPumps')}
+            'native-publication': ('audit_native_publication', '_NativePublicationPumps'),
+            'native-publication-retain': ('audit_publication_continuation', '_ContinuationPumps')}
         if self.profile in factories:
             packet.require((getattr(self.transport_factory, '__module__', ''), getattr(self.transport_factory, '__name__', '')) == factories[self.profile])
         else:
             packet.require(self.transport_factory is None)
         packet.require((type(self.linked_pair) is tuple and len(self.linked_pair) == 2) if self.profile in ('native-resource-ack', 'native-probe-runtime-ack', 'native-probe-create') else self.linked_pair is None)
         packet.require(type(self.docker) is PinnedFile if self.profile == 'native-probe-create' else self.docker is None)
-        packet.require(type(self.dotnet) is PinnedFile if self.profile == 'native-publication' else self.dotnet is None)
+        packet.require(type(self.dotnet) is PinnedFile if self.profile in ('native-publication', 'native-publication-retain') else self.dotnet is None)
+        if self.profile == 'native-publication-retain':
+            packet.require(type(self.continuation) is _PublicationDelivery)
+        else:
+            packet.require(self.continuation is None)
         packet.require(type(self.arguments) is tuple and all(type(x) is str for x in self.arguments))
         self.executable.check()
         for source in self.sources:
@@ -298,7 +314,7 @@ def _process_evidence(command, observed, ended, pumps, pins_rechecked):
 
 
 def _make_pumps(command, session, child, fence, data, start, seconds):
-    if command.profile in ('native-preparation', 'native-empty-payload', 'native-resource-ack', 'native-probe-runtime-ack', 'native-probe-create', 'native-publication'):
+    if command.profile in ('native-preparation', 'native-empty-payload', 'native-resource-ack', 'native-probe-runtime-ack', 'native-probe-create', 'native-publication', 'native-publication-retain'):
         return command.transport_factory(child, data, command, session, fence, start, seconds)
     if command.profile == 'payload-reservation':
         from audit_payload_launch import _ReservationPumps
@@ -307,7 +323,7 @@ def _make_pumps(command, session, child, fence, data, start, seconds):
 
 
 def _finish_binding(command, pumps, child, ended, failure):
-    if command.profile not in ('payload-reservation', 'native-preparation', 'native-empty-payload', 'native-resource-ack', 'native-probe-runtime-ack', 'native-probe-create', 'native-publication') or pumps is None:
+    if command.profile not in ('payload-reservation', 'native-preparation', 'native-empty-payload', 'native-resource-ack', 'native-probe-runtime-ack', 'native-probe-create', 'native-publication', 'native-publication-retain') or pumps is None:
         return failure
     try:
         pumps.finalize_binding(child, ended, failure or pumps.errors)

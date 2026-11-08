@@ -162,13 +162,16 @@ class _NativePublicationPumps(prep._PreparationPumps):
     def _send_frame(self,value):
         data=prep.canonical(value)+b'\n';self.expected_input_bytes+=len(data);self._send(data)
 
+    def _release_publication(self):
+        return self.bound.release()
+
     def _write(self):
         try:
             self._send(self.data);self._wait(self.ready)
             self._send_frame(authorize(self.info,self.ready_pin,'reserve'))
             self._wait(self.namespace_ready);self.bound.check()
             self._send_frame(authorize(self.info,self.ready_pin,'publish',self.frames[1]))
-            self._wait(self.produced);self.release_pin=self.bound.release()
+            self._wait(self.produced);self.release_pin=self._release_publication()
             process._check_deadline(self.start_time,self.seconds)
             self._send_frame(authorize(self.info,self.ready_pin,'close',self.frames[1],self.release_pin))
         except Exception:self.errors.append('native-publication-handoff-refused')

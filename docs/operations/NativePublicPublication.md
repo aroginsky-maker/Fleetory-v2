@@ -61,3 +61,7 @@ these transition tests do not prove the exact cause of that historical failure.
 
 See [Native publication faults](NativePublicationFaults.md) for the separate
 live-owner, observed compiler-child and pre-ACK receipt tests.
+
+The separate [held continuation](NativePublicationContinuation.md) keeps the same
+publication descriptors through native close and a bounded public image/readback
+attempt. The original publication profile continues to release its descriptors.
