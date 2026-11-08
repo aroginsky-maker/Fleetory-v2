@@ -70,3 +70,7 @@ separate service runtime profile, backend kill-after-create/restore cleanup,
 accepted release provenance and original-data purpose/gate admission remain open.
 No archive, PKI, provider, issuer or VPS input is used. Full-system recovery and
 Phase 7 remain incomplete.
+
+[Fixed probe runtime admission](ProbeRuntimeAdmission.md) separately binds the
+initial generated runtime tuple to this image and checks a public sleep worker.
+It does not complete native operational receipt ownership or service recovery.

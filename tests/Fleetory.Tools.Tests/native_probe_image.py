@@ -140,7 +140,7 @@ class ProbeBuild:
             packet.require(identifier not in found)
 
 
-def run():
+def run(runtime_check=None):
     client = ProbeBuild();version = client.metadata.preflight()
     bases = []
     for reference in policy.BASES:
@@ -195,10 +195,11 @@ def run():
                 dotnetSha256=published['dotnetSha256'], sdkVersion=published['sdkVersion'], bundleManifestSha256=held.pin, bundleSha256=checked['bundleSha256'],
                 files=checked['files'], bytes=checked['bytes'], contextSha256=resource.intent['contextSha256'],
                 contextBytes=resource.intent['contextBytes'], imageId=identifier)
+            runtime_observation = runtime_check(current, resource, session) if runtime_check is not None else None
         finally:
             client.cleanup()
             packet.require([client.base(reference) for reference in policy.BASES] == bases)
-    return dict(schema='fleetory.generated-native-probe-image.v1', verified=True, dockerVersion=version, publication=publication_info,
+    result = dict(schema='fleetory.generated-native-probe-image.v1', verified=True, dockerVersion=version, publication=publication_info,
         actualCurrentProbePublished=True, currentSourceSnapshotStable=True, heldPublicBundleVerified=True, deterministicContextBound=True,
         fixedThreeBaseRecipeVerified=True, untaggedBuildIdBound=True, foreignObservationRefused=True, consumedObservationReplayRefused=True,
         stoppedFullBundleReadbackVerified=True, corruptReadbackRefused=True, containersCreated=1, servicesStarted=0,
@@ -208,6 +209,9 @@ def run():
         publicationOriginAuthenticated=False, deployedReleaseVerified=False, dockerObservationAuthenticated=False,
         backendControlAuthorized=False, backendCleanupAuthorized=False, abruptOwnerDeathBackendCleanupVerified=False,
         originalInputsRead=False, originalPrivatePkiUsed=False, sourceVpsAccessed=False, fullSystemRecoveryVerified=False, phase7Complete=False)
+    if runtime_check is not None:
+        result['runtimeObservation'] = runtime_observation
+    return result
 
 
 if __name__ == '__main__':

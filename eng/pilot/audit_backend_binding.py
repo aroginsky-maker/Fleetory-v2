@@ -77,31 +77,43 @@ def observation(data, intent, returned_id, now):
     return _observation_for_reference(data, intent, returned_id, now, IMAGE)
 
 
-def _observation_for_reference(data, intent, returned_id, now, expected_reference):
+OBSERVATION_FIELDS = ('schema id name imageId created labels configImage user entrypoint command running paused restarting dead '
+    'networkMode networks readonly privileged capDrop capAdd securityOpt memory nanoCpus pidsLimit mounts ports '
+    'portBindings binds tmpfs volumesFrom devices deviceRequests pidMode ipcMode utsMode usernsMode restart autoRemove publishAllPorts')
+
+
+def _container_identity(data, intent, returned_id, now, schema, fields):
     packet.require(type(returned_id) is str and re.fullmatch('[a-f0-9]{64}', returned_id))
     value = packet.strict_json(data, MAX_OBSERVATION)
-    packet.keys(value, 'schema id name imageId created labels configImage user entrypoint command running paused restarting dead '
-        'networkMode networks readonly privileged capDrop capAdd securityOpt memory nanoCpus pidsLimit mounts ports '
-        'portBindings binds tmpfs volumesFrom devices deviceRequests pidMode ipcMode utsMode usernsMode restart autoRemove publishAllPorts')
-    packet.require(value['schema'] == 'fleetory.audit-generated-container-observation.v1' and
-                   value['id'] == returned_id and value['name'] == '/' + intent['name'] and
-                   value['imageId'] == intent['imageId'] and value['labels'] == intent['labels'])
+    packet.keys(value, fields)
+    packet.require(value['schema'] == schema and value['id'] == returned_id and value['name'] == '/' + intent['name'] and
+        value['imageId'] == intent['imageId'] and value['labels'] == intent['labels'])
     created = timestamp_ns(value['created'])
     packet.require(intent['openedNs'] <= created <= now < intent['expiresNs'])
-    packet.require(value['configImage'] == expected_reference and value['user'] == '65534:65534' and
-                   value['entrypoint'] == ['python'] and value['command'] == COMMAND)
+    return value, created
+
+
+def _container_sandbox(value):
     packet.require(value['running'] is True and all(value[n] is False for n in ('paused', 'restarting', 'dead', 'privileged', 'publishAllPorts')))
     packet.require(value['networkMode'] == 'none' and type(value['networks']) is dict and set(value['networks']) == {'none'})
     packet.require(value['readonly'] is True and value['autoRemove'] is True and value['capDrop'] == ['ALL'] and
-                   value['securityOpt'] == ['no-new-privileges:true'])
-    packet.require(all(type(value[n]) is int and value[n] == limit for n, limit in
-        (('memory', 67108864), ('nanoCpus', 250000000), ('pidsLimit', 32))))
+        value['securityOpt'] == ['no-new-privileges:true'])
     packet.require(value['mounts'] == [] and all(value[n] is None or value[n] == [] for n in
         ('capAdd', 'binds', 'volumesFrom', 'devices', 'deviceRequests')))
-    packet.require(all(value[n] is None or value[n] == {} for n in ('ports', 'portBindings', 'tmpfs')))
+    packet.require(all(value[n] is None or value[n] == {} for n in ('ports', 'portBindings')))
     packet.require(all(value[n] == '' for n in ('pidMode', 'utsMode', 'usernsMode')) and value['ipcMode'] == 'private')
-    packet.require(value['restart'] == {'Name': 'no', 'MaximumRetryCount': 0} and
-                   type(value['restart']['MaximumRetryCount']) is int)
+    packet.require(value['restart'] == {'Name': 'no', 'MaximumRetryCount': 0} and type(value['restart']['MaximumRetryCount']) is int)
+
+
+def _observation_for_reference(data, intent, returned_id, now, expected_reference):
+    value, created = _container_identity(data, intent, returned_id, now,
+        'fleetory.audit-generated-container-observation.v1', OBSERVATION_FIELDS)
+    packet.require(value['configImage'] == expected_reference and value['user'] == '65534:65534' and
+        value['entrypoint'] == ['python'] and value['command'] == COMMAND)
+    _container_sandbox(value)
+    packet.require(all(type(value[n]) is int and value[n] == limit for n, limit in
+        (('memory', 67108864), ('nanoCpus', 250000000), ('pidsLimit', 32))))
+    packet.require(value['tmpfs'] is None or value['tmpfs'] == {})
     return value, created
 
 

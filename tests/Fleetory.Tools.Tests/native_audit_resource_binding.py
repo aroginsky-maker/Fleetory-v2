@@ -46,15 +46,21 @@ class NativeBinding(DockerRehearsal):
     def source_reference(self, intent):
         return binding.IMAGE
 
+    def arguments(self, intent):
+        return ['run', '-d', '--pull=never', '--name', intent['name'], '--rm', '--network=none', '--read-only',
+            '--user=65534:65534', '--cap-drop=ALL', '--security-opt=no-new-privileges:true', '--memory=64m',
+            '--cpus=0.25', '--pids-limit=32', '--restart=no', '--entrypoint=python']
+
+    def command(self, intent):
+        return binding.COMMAND
+
     def create(self, intent):
         existing = self.call(['container', 'ls', '-a', '--no-trunc', '--filter', 'name=^/' + intent['name'] + '$', '--format', '{{.ID}}'])
         binding.packet.require(not existing.strip())
-        args = ['run', '-d', '--pull=never', '--name', intent['name'], '--rm', '--network=none', '--read-only',
-            '--user=65534:65534', '--cap-drop=ALL', '--security-opt=no-new-privileges:true', '--memory=64m',
-            '--cpus=0.25', '--pids-limit=32', '--restart=no', '--entrypoint=python']
+        args = self.arguments(intent)
         for name, value in intent['labels'].items():
             args.extend(['--label', name + '=' + value])
-        identifier = self.call(args + [self.source_reference(intent), *binding.COMMAND]).decode().strip()
+        identifier = self.call(args + [self.source_reference(intent), *self.command(intent)]).decode().strip()
         binding.packet.require(re.fullmatch('[a-f0-9]{64}', identifier))
         self.receipts.append((identifier, intent))
         return identifier

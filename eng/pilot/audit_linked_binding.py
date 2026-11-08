@@ -42,7 +42,17 @@ def prepare(session, bound_image):
 
 class LinkedContainerBinding(container.ContainerBinding):
     """One-use backend slot; no build, Docker, deletion, native-owner or data authority."""
-    _intent_schema = SCHEMA
+    _intent_schema, _purpose = SCHEMA, PURPOSE
+    _record_schema = 'fleetory.audit-linked-container-binding.v1'
+    _source_fields = ('imageId', 'imageBindingSha256', 'imageIntentSha256')
+    _source_anchor = staticmethod(anchor)
+
+    @staticmethod
+    def _name(nonce):
+        return container.container_name(nonce)
+
+    def _labels(self, session, source):
+        return labels(session, source['imageBindingSha256'])
 
     def __init__(self, session, data, expected_pin, bound_image):
         self._source = bound_image
@@ -54,16 +64,16 @@ class LinkedContainerBinding(container.ContainerBinding):
         frozen = bytes(data)
         packet.require(packet.digest(frozen) == expected)
         value = packet.strict_json(frozen, container.MAX_INTENT)
-        packet.keys(value, 'schema purpose nonce revision controlSha256 image imageId imageBindingSha256 imageIntentSha256 name labels openedNs expiresNs')
-        source = anchor(session, self._source)
+        packet.keys(value, 'schema purpose nonce revision controlSha256 image name labels openedNs expiresNs ' + ' '.join(self._source_fields))
+        source = self._source_anchor(session, self._source)
         report = session.report()
-        packet.require(value['schema'] == SCHEMA and value['purpose'] == PURPOSE and
+        packet.require(value['schema'] == self._intent_schema and value['purpose'] == self._purpose and
             value['nonce'] == report['nonce'] and value['revision'] == session._plan['revision'] and
             value['controlSha256'] == report['reservationSha256'])
         for key, item in source.items():
             packet.require(value[key] == item)
-        packet.require(value['image'] == source['imageId'] and value['name'] == container.container_name(report['nonce']) and
-            value['labels'] == labels(session, source['imageBindingSha256']))
+        packet.require(value['image'] == source['imageId'] and value['name'] == self._name(report['nonce']) and
+            value['labels'] == self._labels(session, source))
         packet.require(type(value['openedNs']) is int and type(value['expiresNs']) is int and
             value['expiresNs'] == self._source.intent['expiresNs'] and
             0 < value['expiresNs'] - value['openedNs'] <= container.WINDOW_NS and
@@ -71,7 +81,7 @@ class LinkedContainerBinding(container.ContainerBinding):
         return value, frozen
 
     def _check(self):
-        source = anchor(self.session, self._source)
+        source = self._source_anchor(self.session, self._source)
         packet.require(all(self.intent[key] == value for key, value in source.items()))
         super()._check()
 
@@ -81,8 +91,7 @@ class LinkedContainerBinding(container.ContainerBinding):
 
     def _record(self, value, created, now, frozen):
         record = super()._record(value, created, now, frozen)
-        record.update(schema='fleetory.audit-linked-container-binding.v1',
-            imageBindingSha256=self.intent['imageBindingSha256'], imageIntentSha256=self.intent['imageIntentSha256'])
+        record.update(schema=self._record_schema, **{key: self.intent[key] for key in self._source_fields})
         return record
 
     def report(self):
