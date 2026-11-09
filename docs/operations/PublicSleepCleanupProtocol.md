@@ -55,3 +55,8 @@ experiments are not rerun for this contract change.
 Actual independent expiry/controller-death cleanup, operational/service leases,
 full recovery and the remaining Baseline requirements stay open. Phase 7 and
 PR #2 remain open; no production or privileged cleanup grant is added.
+
+The separate [read-only supervisor handoff](ReadOnlyCleanupSupervisor.md) now
+observes actual parent/self OS objects and binds the asserted receipt bytes in a
+fixed generated fixture. It does not change this model's asserted-data semantics,
+authenticate the create receipt's origin or provide cleanup authority.

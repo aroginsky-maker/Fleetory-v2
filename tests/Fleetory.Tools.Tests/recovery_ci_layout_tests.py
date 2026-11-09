@@ -75,6 +75,8 @@ def validate(text):
                 ('held publication continuation contracts', 'publication_continuation_tests.py'),
                 ('retained publication runtime contracts', 'retained_runtime_tests.py'),
                 ('public cleanup protocol contracts', 'cleanup_protocol_tests.py'),
+                ('read-only supervisor identity contracts', 'supervisor_identity_tests.py'),
+                ('actual read-only supervisor handoff', 'native_supervisor_observation.py'),
                 ('actual native publication faults', 'native_publication_faults.py'),
                 ('native create fault contracts', 'native_create_faults_tests.py'),
                 ('public probe owner fault contracts', 'public_probe_faults_tests.py'),
@@ -438,6 +440,15 @@ class RecoveryCiLayoutTests(unittest.TestCase):
             self.refused(self.text.replace(command,'omitted',1))
             self.refused(self.text.replace('run: '+command,'continue-on-error: true\n        run: '+command,1))
             self.refused(self.text.replace(command,command+'\n          '+command,1))
+
+
+    def test_readonly_supervisor_gates_are_required_once_without_soft_failure(self):
+        for executable in ('python','python3'):
+            for filename in ('supervisor_identity_tests.py','native_supervisor_observation.py'):
+                command=executable+' -B ./tests/Fleetory.Tools.Tests/'+filename
+                self.refused(self.text.replace(command,'omitted',1))
+                self.refused(self.text.replace('run: '+command,'continue-on-error: true\n        run: '+command,1))
+                self.refused(self.text.replace(command,command+'\n          '+command,1))
 
 
 if __name__ == '__main__':
