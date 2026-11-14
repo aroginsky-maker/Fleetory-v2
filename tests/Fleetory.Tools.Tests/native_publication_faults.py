@@ -1,5 +1,5 @@
 """Actual public native publisher failures; no private material, backend, image or operational lease."""
-from contextlib import ExitStack
+from contextlib import ExitStack,contextmanager
 import copy
 import json
 import os
@@ -9,6 +9,7 @@ import sys
 import tempfile
 import time
 import uuid
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import native_publication as public
@@ -124,8 +125,9 @@ class Fault:
         if self.child is not None:self.child.close()
 
 
-def run(*, continuation=False, with_image=False):
-    packet.require(type(continuation) is bool and type(with_image) is bool and (not with_image or continuation))
+@contextmanager
+def reference_fixture():
+    """One public Git snapshot/private tool set/reference; shared by both native test scopes."""
     powershell=Path(shutil.which('pwsh') or '').resolve(strict=True);python=Path(sys.executable).resolve(strict=True)
     git=Path(shutil.which('git') or '').resolve(strict=True);dotnet=Path(shutil.which('dotnet') or '').resolve(strict=True)
     if os.name=='nt':git=windows_git_core(git)
@@ -139,6 +141,24 @@ def run(*, continuation=False, with_image=False):
         reference=root/'reference';reference.mkdir();published=public.publication(reference,repository=repository)
         packet.require(published['sdkVersion']==policy.SDK and published['dotnetSha256']==sha(dotnet))
         artifacts=repository/'artifacts';artifacts.mkdir(mode=0o700)
+        yield SimpleNamespace(root=root,repository=repository,copied=copied,powershell=powershell,python=python,git=git,dotnet=dotnet,
+            published=published,artifacts=artifacts)
+        copied.check()
+    packet.require(root.is_absolute() and root.name.startswith('fleetory-public-publication-fault-') and repository.parent==root)
+    def readonly_file(function,path,error):
+        target=Path(path)
+        packet.require(os.name=='nt' and isinstance(error,PermissionError) and target.is_relative_to(root) and
+            policy.ns.files.regular_single_file(target.lstat()))
+        target.chmod(0o600);function(path)
+    shutil.rmtree(root,onexc=readonly_file);packet.require(not root.exists())
+
+
+def run(*, continuation=False, with_image=False):
+    packet.require(type(continuation) is bool and type(with_image) is bool and (not with_image or continuation))
+    with reference_fixture() as prepared:
+        root,repository,copied=prepared.root,prepared.repository,prepared.copied
+        powershell,python,git,dotnet=prepared.powershell,prepared.python,prepared.git,prepared.dotnet
+        published,artifacts=prepared.published,prepared.artifacts
         sentinel=artifacts/'foreign-public-sentinel';sentinel.mkdir();(sentinel/'keep.txt').write_bytes(b'UNRELATED_PUBLIC_FIXTURE')
         before=(sentinel/'keep.txt').read_bytes();manifest=policy.prep.canonical(published['bundle'])
         pins=policy.measure_sources(repository);outcomes=[]
@@ -176,16 +196,13 @@ def run(*, continuation=False, with_image=False):
         if continuation:
             from native_publication_continuation import exercise
             continued = exercise(repository,root,powershell,python,git,dotnet,published,with_image=with_image)
+        transported=None
+        if with_image:
+            from native_retained_context_transport import exercise
+            transported=exercise(prepared)
         copied.check()
         tree=copied.tree_id;revision=copied.revision
-    packet.require(root.is_absolute() and root.name.startswith('fleetory-public-publication-fault-') and repository.parent==root)
-    def readonly_file(function,path,error):
-        target=Path(path)
-        packet.require(os.name=='nt' and isinstance(error,PermissionError) and target.is_relative_to(root) and
-            policy.ns.files.regular_single_file(target.lstat()))
-        target.chmod(0o600);function(path)
-    shutil.rmtree(root,onexc=readonly_file);packet.require(not root.exists())
-    return dict(schema='fleetory.generated-native-publication-faults.v1',verified=True,cases=outcomes,continuationProof=continued,
+    return dict(schema='fleetory.generated-native-publication-faults.v1',verified=True,cases=outcomes,continuationProof=continued,retainedContextTransport=transported,
         referencePublication=published,revision=revision,tree=tree,selectedSourceFilesPinned=36,nativeSeconds=30,
         ownPublicFixtureDisposed=True,actualCompilerChildObservedAndExited=True,compilerChildObservationSource='owned Job or process group plus held process handle/pidfd and pinned dotnet image',
         controllerDeathCleanupVerified=False,operationalLeaseAuthorized=False,nativeImageBuildVerified=False,

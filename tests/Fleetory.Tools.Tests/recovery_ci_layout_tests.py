@@ -75,6 +75,7 @@ def validate(text):
                 ('held publication continuation contracts', 'publication_continuation_tests.py'),
                 ('retained publication runtime contracts', 'retained_runtime_tests.py'),
                 ('retained guardian preparation contracts', 'retained_guard_preparation_tests.py'),
+                ('retained public context transport contracts', 'retained_context_transport_tests.py'),
                 ('public cleanup protocol contracts', 'cleanup_protocol_tests.py'),
                 ('read-only supervisor identity contracts', 'supervisor_identity_tests.py'),
                 ('actual read-only supervisor handoff', 'native_supervisor_observation.py'),
@@ -480,6 +481,14 @@ class RecoveryCiLayoutTests(unittest.TestCase):
     def test_retained_guard_preparation_gate_cannot_be_omitted_duplicated_or_softened(self):
         for executable in ('python','python3'):
             command=executable+' -B ./tests/Fleetory.Tools.Tests/retained_guard_preparation_tests.py'
+            self.refused(self.text.replace(command,'omitted',1))
+            self.refused(self.text.replace('run: '+command,'continue-on-error: true\n        run: '+command,1))
+            self.refused(self.text.replace(command,command+'\n          '+command,1))
+
+
+    def test_retained_context_transport_gate_cannot_be_omitted_duplicated_or_softened(self):
+        for executable in ('python','python3'):
+            command=executable+' -B ./tests/Fleetory.Tools.Tests/retained_context_transport_tests.py'
             self.refused(self.text.replace(command,'omitted',1))
             self.refused(self.text.replace('run: '+command,'continue-on-error: true\n        run: '+command,1))
             self.refused(self.text.replace(command,command+'\n          '+command,1))

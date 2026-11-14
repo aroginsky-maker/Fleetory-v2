@@ -87,7 +87,8 @@ def _claim_record(trusted_operator_root,name,record):
     packet.require(type(name) is str and len(name)>41)
     nonce=packet.identity(name[-41:-5])
     prefixes=('public-sleep-cleanup-','public-sleep-guard-start-','public-sleep-guard-ready-','public-sleep-guard-cleanup-',
-        'retained-public-guard-attempt-','retained-public-guard-ready-')
+        'retained-public-guard-attempt-','retained-public-guard-ready-',
+        'retained-context-start-','retained-context-ready-')
     packet.require(any(name==prefix+nonce+'.json' for prefix in prefixes))
     with control.DirectoryLease(Path(trusted_operator_root)) as directory,_stable_namespace(directory):
         if os.name=='posix':

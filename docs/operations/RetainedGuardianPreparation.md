@@ -15,7 +15,7 @@ hashes. Even coordinated changes to an object's in-memory intent/bytes/hash
 cannot replace the original persisted intent. Unknown outcomes, flush errors,
 expired admission or lost responses retain consumption; no reset is provided.
 
-All 59 fixed public Python/profile inputs from the accepted public guardian
+All 61 fixed public Python/profile inputs from the accepted public guardian
 inventory are held and checked. The existing forty native-publication inputs
 and four retained-runtime inputs remain held by the original capabilities;
 their exact-type/schema guards and sixty-second windows are unchanged. The
@@ -62,3 +62,7 @@ No secret, original backup, private PKI, provider, issuer, production token or
 VPS access is added. Original-service recovery, full RPO/RTO, human/physical-Agent
 acceptance, independent WORM/custody and production approvals remain open.
 Phase 7 remains open and PR #2 remains draft/unmerged.
+
+The next [owned controller context transport](RetainedContextTransport.md) keeps
+the actual retained controller in a child process and validates public bytes
+against the independent parent reference. It performs no Docker dispatch.

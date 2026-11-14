@@ -8,7 +8,7 @@ This profile is separate from the retained native publication controller and
 does not extend the original-service recovery permission.
 
 The trusted host supplies the repository and an already protected operator
-directory. Fifty-nine fixed public source inputs, the current Python executable
+directory. Sixty-one fixed public source inputs, the current Python executable
 and the local Docker CLI are held and checked. The controller runs a fixed
 entrypoint with `-I -B`, no caller command or argument vector. Before readiness,
 the guardian obtains its actual owned process birth/image using a Windows Job
