@@ -65,7 +65,7 @@ class PublicGuardContracts(unittest.TestCase):
     def test_full_id_and_canonical_nonce_only(self):
         for bad in ('','a'*12,'A'*64,'--all',True):
             with self.assertRaises(REFUSALS):guard._identifier(bad)
-        for bad in ('../x','--all',self.nonce.upper()):
+        for bad in ('../x','--all','AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA'):
             with self.assertRaises(REFUSALS):guard._ledger('start',bad)
 
     def test_unknown_record_prefix_cannot_write(self):

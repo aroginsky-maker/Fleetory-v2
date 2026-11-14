@@ -48,3 +48,8 @@ Phase 7 stays open and PR #2 remains draft and unmerged.
 The next [cleanup protocol preparation](PublicSleepCleanupProtocol.md) pins
 asserted identities, one own receipt and bounded model decisions. It provides
 no executor and does not verify independent cleanup.
+
+[Typed guardian preparation](RetainedGuardianPreparation.md) now binds the same
+unobserved retained runtime and persisted intent to a real preparing controller
+and fixed source/executable pins. It consumes no runtime observation and grants
+no launch, own-create receipt or cleanup authority.

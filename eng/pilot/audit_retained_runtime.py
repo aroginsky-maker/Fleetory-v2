@@ -121,4 +121,100 @@ class RetainedRuntimeBinding(runtime.ProbeRuntimeBinding):
     def __exit__(self,*_):self.close()
 
 
+def guardian_preparation_name(nonce,*,ready=False):
+    packet.require(type(ready) is bool)
+    return ('retained-public-guard-ready-' if ready else 'retained-public-guard-attempt-')+packet.identity(nonce)+'.json'
+
+
+class RetainedGuardPreparation:
+    """Typed live-source preparation only. Persisted metadata cannot authorize a launcher."""
+    def __init__(self,session,target,trusted_operator_root,*,python_path,python_sha256,docker_path,docker_sha256,source_pins):
+        # Local imports keep the old retained runtime's import/source inventories unchanged.
+        import audit_public_cleanup_guard as guard
+        from pathlib import Path
+        import sys
+        self._guard,self._held,self._closed=guard,ExitStack(),False
+        self._caller,self._session,self._target=os.getpid(),session,target
+        self._ready=None
+        try:
+            packet.require(type(session) is publication.native.control.ControlIdentity)
+            current=session.report();nonce=current['nonce']
+            consumed=dict(schema='fleetory.retained-guard-preparation-attempt.v1',nonce=nonce,
+                status='PREPARATION_CONSUMED',reservationSha256=current['reservationSha256'],assertedControllerPid=self._caller,
+                launchAuthorized=False,cleanupAuthorized=False)
+            self._attempt=self._held.enter_context(guard.attempts._claim_record(trusted_operator_root,guardian_preparation_name(nonce),consumed))
+            self._source()
+            self._root=target._source._continuation._delivery.root.path
+            packet.require(type(source_pins) is dict and set(source_pins)==set(guard.SOURCES))
+            frozen=dict(source_pins)
+            self._sources=tuple(self._held.enter_context(guard.process.PinnedFile(self._root/name,frozen[name])) for name in guard.SOURCES)
+            self._python=self._held.enter_context(guard.process.PinnedFile(python_path,python_sha256,True))
+            packet.require(self._python.path==Path(sys.executable).resolve(strict=True))
+            self._docker=self._held.enter_context(guard.process.PinnedFile(docker_path,docker_sha256,True))
+            packet.require(self._docker.path.name.lower() in ('docker','docker.exe'))
+            actual=guard.identity.current_identity(self._python)
+            self._peer=self._held.enter_context(guard.identity.HeldLocalPeer('self',self._python,actual))
+            self._snapshot=publication.prep.canonical(self._capture(actual,frozen))
+            self.check()
+            ready=packet.strict_json(self._snapshot,8192)
+            self._ready=self._held.enter_context(guard.attempts._claim_record(trusted_operator_root,guardian_preparation_name(nonce,ready=True),ready))
+            self.check()
+        except BaseException:self.close();raise
+
+    def _source(self):
+        packet.require(not self._closed and os.getpid()==self._caller and type(self._target) is RetainedRuntimeBinding and self._target.session is self._session)
+        result=self._target.report()
+        packet.require(self._target._bound is None and not self._target._attempted and
+            result['retainedPublicationSleepRuntimeBound'] is False and not result['observationAttemptConsumed'] and
+            'backend-binding-attempt.json' not in self._session._records and 'backend-binding.json' not in self._session._records)
+        recorded=publication._record(self._session,'backend-intent.json')
+        packet.require(recorded['schema']==SCHEMA and recorded['intentSha256']==self._target._pin and
+            publication.prep.canonical(recorded['intent'])==publication.prep.canonical(self._target.intent) and
+            packet.digest(self._target._intent_bytes)==recorded['intentSha256'])
+        self._target._source._continuation.check()
+        return self._target._source._continuation.report()
+
+    def _capture(self,actual,pins):
+        source=self._source();intent=self._target.intent
+        return dict(schema='fleetory.retained-guard-preparation.v1',purpose='retained-publication-guardian-preparation.v1',
+            status='PREPARED_NO_DISPATCH',nonce=intent['nonce'],revision=intent['revision'],controller=actual,
+            reservationSha256=intent['controlSha256'],runtimeIntentSha256=self._target._pin,
+            frozenRuntimeIntentSha256=packet.digest(self._target._intent_bytes),
+            lineage={key:intent[key] for key in runtime.SOURCE_FIELDS+EXTRA_FIELDS},
+            publicationDescriptorsHeld=source['fileDescriptorsHeld'],sourcePinsSha256=packet.digest(publication.prep.canonical(pins)),
+            sourceFilesPinned=len(self._sources),pythonSha256=self._python.digest,dockerSha256=self._docker.digest,
+            admissionExpiresNs=intent['expiresNs'],actualPreparingControllerIdentityVerified=True,
+            exactUnboundRetainedSourceChecked=True,publicationAndReadbackCapabilitiesHeld=True,
+            localPreparationAttemptFlushed=True,preparationReplayRefusedWhileRecordRetained=True,
+            guardianProcessStarted=False,ownDockerCreateReceiptAvailable=False,dockerOperationsPerformed=0,
+            launchAuthorized=False,cleanupAuthorized=False,retainedControllerDeathCleanupVerified=False,
+            retainedExpiryCleanupVerified=False,publicationOriginAuthenticated=False,dependenciesAuthenticated=False,
+            independentRollbackResistanceVerified=False,originalInputsRead=False,originalPrivatePkiUsed=False,
+            sourceVpsAccessed=False,fullSystemRecoveryVerified=False,phase7Complete=False)
+
+    def check(self):
+        self._source();self._attempt.check()
+        for source in self._sources:source.check()
+        self._python.check();self._docker.check()
+        peer=self._peer.snapshot();packet.require(peer['state']=='live')
+        # Capture contains no current timestamps, mutable resource ID or caller-owned dictionary.
+        saved=packet.strict_json(self._snapshot,8192)
+        current=self._capture(peer['identity'],{name:pin.digest for name,pin in zip(self._guard.SOURCES,self._sources)})
+        packet.require(publication.prep.canonical(current)==self._snapshot and
+            saved['runtimeIntentSha256']==saved['frozenRuntimeIntentSha256'])
+        if self._ready is not None:self._ready.check()
+
+    def report(self):
+        self.check()
+        packet.require(self._ready is not None)
+        return packet.strict_json(self._snapshot,8192)
+
+    def close(self):
+        self._closed=True
+        self._held.close()
+
+    def __enter__(self):return self
+    def __exit__(self,*_):self.close()
+
+
 if __name__ == '__main__':raise SystemExit('Retained sleep metadata library only; no Docker, service, secret, PKI or cleanup CLI.')
