@@ -59,3 +59,8 @@ and draft PR #2 remain open.
 The stream reference is retained locally and explicitly checked for closure. A
 close during the directory recheck is a controlled refusal before descriptor
 access; it cannot turn into a None attribute error or a successful report.
+
+The shared private record primitive also supports the separate fixed public
+guardian start/ready/cleanup records described in [IndependentPublicCleanup.md](IndependentPublicCleanup.md).
+Its active result does not change the assertion-only properties of this library
+or grant cleanup to the existing retained-publication protocol.

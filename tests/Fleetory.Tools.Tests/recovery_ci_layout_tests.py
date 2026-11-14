@@ -78,6 +78,7 @@ def validate(text):
                 ('read-only supervisor identity contracts', 'supervisor_identity_tests.py'),
                 ('actual read-only supervisor handoff', 'native_supervisor_observation.py'),
                 ('consumed public cleanup attempts', 'cleanup_attempt_tests.py'),
+                ('independent public cleanup contracts', 'public_cleanup_guard_tests.py'),
                 ('actual native publication faults', 'native_publication_faults.py'),
                 ('native create fault contracts', 'native_create_faults_tests.py'),
                 ('public probe owner fault contracts', 'public_probe_faults_tests.py'),
@@ -99,6 +100,14 @@ def validate(text):
         start = block.index(step)
         end = block.find('      - name:', start + len(step))
         assert block[start:end if end >= 0 else len(block)].strip() == step.strip()
+    guard_step = ('      - name: Verify actual independent public cleanup\n'
+        '        shell: pwsh\n'
+        '        run: python3 -B ./tests/Fleetory.Tools.Tests/native_public_cleanup_guard.py\n')
+    block = blocks['quality']
+    assert block.count(guard_step) == 1
+    start = block.index(guard_step)
+    end = block.find('      - name:', start + len(guard_step))
+    assert block[start:end if end >= 0 else len(block)].strip() == guard_step.strip()
     native_step = ('      - name: Verify actual generated Docker control binding\n'
         '        shell: pwsh\n'
         '        run: python3 -B ./tests/Fleetory.Tools.Tests/native_audit_resource_binding.py\n')
@@ -196,6 +205,13 @@ class RecoveryCiLayoutTests(unittest.TestCase):
     def refused(self, text):
         with self.assertRaises(AssertionError):
             validate(text)
+
+    def test_independent_guard_native_gate_cannot_be_removed_or_softened(self):
+        step=('      - name: Verify actual independent public cleanup\n'
+            '        shell: pwsh\n'
+            '        run: python3 -B ./tests/Fleetory.Tools.Tests/native_public_cleanup_guard.py\n')
+        self.refused(self.text.replace(step,''))
+        self.refused(self.text.replace(step,step+'        continue-on-error: true\n'))
 
     def test_all_existing_gates_are_partitioned_with_strict_bootstrap(self):
         self.assertTrue(validate(self.text))

@@ -83,6 +83,31 @@ class ConsumedAttempt:
 
 
 @contextmanager
+def _claim_record(trusted_operator_root,name,record):
+    packet.require(type(name) is str and len(name)>41)
+    nonce=packet.identity(name[-41:-5])
+    prefixes=('public-sleep-cleanup-','public-sleep-guard-start-','public-sleep-guard-ready-','public-sleep-guard-cleanup-')
+    packet.require(any(name==prefix+nonce+'.json' for prefix in prefixes))
+    with control.DirectoryLease(Path(trusted_operator_root)) as directory,_stable_namespace(directory):
+        if os.name=='posix':
+            info=directory.path.stat(follow_symlinks=False)
+            packet.require(info.st_uid==os.geteuid() and stat.S_IMODE(info.st_mode)==0o700)
+        fd=create_ledger(directory.path,directory.fd,name)
+        attempt=None
+        try:
+            os.set_inheritable(fd,False)
+            with os.fdopen(fd,'r+b',buffering=0) as stream:
+                fd=None
+                attempt=ConsumedAttempt(directory,stream,name,record)
+                attempt._seal()
+                yield attempt
+                attempt.check()
+        finally:
+            if attempt is not None:attempt.close()
+            if fd is not None:os.close(fd)
+
+
+@contextmanager
 def claim(trusted_operator_root,ticket,expected_ticket,create_receipt,resource):
     # Freeze all caller-owned buffers before validating or hashing any of them.
     ticket,create_receipt,resource=(protocol._freeze(v) for v in (ticket,create_receipt,resource))
@@ -101,23 +126,8 @@ def claim(trusted_operator_root,ticket,expected_ticket,create_receipt,resource):
         actualCleanupExecuted=False,independentExpiryEnforcementVerified=False,controllerDeathCleanupVerified=False,
         supervisorDeathCleanupVerified=False,operationalLeaseAuthorized=False,originalInputsRead=False,
         originalPrivatePkiUsed=False,sourceVpsAccessed=False,fullSystemRecoveryVerified=False,phase7Complete=False)
-    with control.DirectoryLease(Path(trusted_operator_root)) as directory,_stable_namespace(directory):
-        if os.name=='posix':
-            info=directory.path.stat(follow_symlinks=False)
-            packet.require(info.st_uid==os.geteuid() and stat.S_IMODE(info.st_mode)==0o700)
-        fd=create_ledger(directory.path,directory.fd,name)
-        attempt=None
-        try:
-            os.set_inheritable(fd,False)
-            with os.fdopen(fd,'r+b',buffering=0) as stream:
-                fd=None
-                attempt=ConsumedAttempt(directory,stream,name,record)
-                attempt._seal()
-                yield attempt
-                attempt.check()
-        finally:
-            if attempt is not None:attempt.close()
-            if fd is not None:os.close(fd)
+    with _claim_record(trusted_operator_root,name,record) as attempt:
+        yield attempt
 
 
 if __name__=='__main__':raise SystemExit('Consumed public attempt library only; no root CLI, reset, dispatch or cleanup operation.')

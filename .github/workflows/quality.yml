@@ -196,6 +196,10 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/cleanup_attempt_tests.py
 
+      - name: Verify independent public cleanup contracts on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/public_cleanup_guard_tests.py
+
       - name: Verify retained publication runtime contracts on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/retained_runtime_tests.py
@@ -655,6 +659,14 @@ jobs:
       - name: Verify consumed public cleanup attempts
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/cleanup_attempt_tests.py
+
+      - name: Verify independent public cleanup contracts
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/public_cleanup_guard_tests.py
+
+      - name: Verify actual independent public cleanup
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/native_public_cleanup_guard.py
 
       - name: Verify retained publication runtime contracts
         shell: pwsh
