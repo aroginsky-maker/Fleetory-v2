@@ -1,0 +1,237 @@
+name: fleetory-pilot
+
+services:
+  postgres:
+    image: postgres:18.6@sha256:74935e72241653ca55e0414067e6d8763aceb8a810eb51b452253ec3dcfc4336
+    user: "999:999"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres/admin-password
+    ports:
+      - 127.0.0.1:15432:5432
+    volumes:
+      - ./data/postgres:/var/lib/postgresql
+      - ./config/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./config/pg_hba.conf:/etc/postgresql/pg_hba.conf:ro
+      - ./secrets/postgres:/run/secrets/postgres:ro
+      - ./secrets/postgres-init:/docker-entrypoint-initdb.d:ro
+    command: [postgres, -c, config_file=/etc/postgresql/postgresql.conf]
+    networks:
+      app_net:
+        ipv4_address: 172.30.77.10
+      signer_net:
+        ipv4_address: 172.30.78.10
+    mem_limit: 512m
+    cpus: 0.50
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+
+  keycloak:
+    build:
+      context: ./infra/pilot
+      dockerfile: Keycloak.Dockerfile
+    image: fleetory-keycloak-pilot:26.8.0
+    entrypoint: [/bin/bash, -ec]
+    command: ["export KC_BOOTSTRAP_ADMIN_PASSWORD=\"$$(cat /run/secrets/keycloak/bootstrap-password)\"; exec /opt/keycloak/bin/kc.sh --config-file=/run/secrets/keycloak/keycloak.conf start --optimized --http-enabled=true --http-host=0.0.0.0"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: pilot-bootstrap
+      KC_HOSTNAME: https://${FLEETORY_AUTH_HOST:?set public auth hostname}
+      KC_PROXY_HEADERS: xforwarded
+    ports:
+      - 127.0.0.1:18080:8080
+    volumes:
+      - ./secrets/keycloak:/run/secrets/keycloak:ro
+    depends_on:
+      postgres:
+        condition: service_started
+    networks:
+      app_net:
+        ipv4_address: 172.30.77.11
+    mem_limit: 900m
+    cpus: 0.80
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m,mode=1777
+      - /opt/keycloak/data:rw,noexec,nosuid,size=64m,mode=1777
+    restart: unless-stopped
+
+  openbao:
+    image: ghcr.io/openbao/openbao:2.7.1@sha256:6d2b93856e3fcf7b18ad855a0b51eaba474dc8b79cf554379ea32034797d2acf
+    entrypoint: [/usr/bin/bao]
+    command: [server, -config=/etc/openbao/openbao.hcl]
+    user: "100:1000"
+    ports:
+      - 127.0.0.1:18200:8200
+    volumes:
+      - ./config/openbao.hcl:/etc/openbao/openbao.hcl:ro
+      - ./data/openbao:/openbao/data
+      - ./secrets/openbao:/run/secrets/openbao:ro
+    networks:
+      signer_net:
+        ipv4_address: 172.30.78.40
+    mem_limit: 384m
+    cpus: 0.30
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+
+  audit-store:
+    image: codenotary/immudb:1.11.2@sha256:f2efcf6a3de73b31691e0afb8dfec972642aaf0699b93387d1ec6074aedb2953
+    user: "3322:3322"
+    environment:
+      SSL_CERT_FILE: /run/secrets/immudb/infrastructure-ca
+    entrypoint: [/usr/sbin/immudb]
+    command: [--config=/run/secrets/immudb/immudb.toml, --dir=/var/lib/immudb, --logdir=/tmp/immudb-logs, --address=audit-store, --clientcas=/run/secrets/immudb/infrastructure-ca, --certificate=/run/secrets/immudb/server.crt, --pkey=/run/secrets/immudb/server.key, --signingKey=/run/secrets/immudb/state-signing.pem]
+    # Disable the image-inherited non-TLS HTTP healthcheck; verify service with the operator TLS probe on loopback port 18091.
+    healthcheck: { disable: true }
+    ports:
+      - 127.0.0.1:18091:8080
+    volumes:
+      - ./data/immudb:/var/lib/immudb
+      - ./secrets/immudb:/run/secrets/immudb:ro
+    networks:
+      audit_net:
+        ipv4_address: 172.30.79.10
+    mem_limit: 256m
+    cpus: 0.20
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+
+  audit-gateway:
+    image: nginx@sha256:0e52bd054126cdc040b1276c0af347aeb02a41b9cfe305d6094767ac30e97949
+    user: "101:101"
+    entrypoint: [nginx, -g, daemon off;]
+    ports:
+      - 127.0.0.1:18090:8080
+    volumes:
+      - ./config/audit-gateway.conf:/etc/nginx/nginx.conf:ro
+      - ./secrets/audit-gateway:/run/secrets/audit-gateway:ro
+    networks:
+      app_net:
+        ipv4_address: 172.30.77.30
+        aliases: [immudb]
+      audit_net:
+        ipv4_address: 172.30.79.20
+    depends_on: [audit-store]
+    mem_limit: 32m
+    cpus: 0.10
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=8m,mode=1777"]
+    restart: unless-stopped
+
+  server:
+    build:
+      context: ./releases/${FLEETORY_RELEASE:?set release identifier}/server
+      dockerfile: Server.Dockerfile
+    environment:
+      DOTNET_ENVIRONMENT: Production
+      DOTNET_EnableDiagnostics: "0"
+      ASPNETCORE_URLS: ""
+      SSL_CERT_FILE: /run/fleetory-server/infrastructure-ca
+      FLEETORY_AllowedHosts: ${FLEETORY_HOST:?set public app hostname};localhost;127.0.0.1
+      FLEETORY_Fleetory__Secrets__Provider: File
+      FLEETORY_Fleetory__Secrets__Directory: /run/fleetory-server
+      FLEETORY_Fleetory__Web__Port: "5088"
+      FLEETORY_Fleetory__AgentGateway__Enabled: "true"
+      FLEETORY_Fleetory__AgentGateway__Port: "5443"
+      FLEETORY_Fleetory__AdminGateway__Enabled: "true"
+      FLEETORY_Fleetory__AdminGateway__BindAddress: 172.30.77.20
+      FLEETORY_Fleetory__AdminGateway__Port: "5444"
+      FLEETORY_Fleetory__AdminGateway__Oidc__Enabled: "true"
+      FLEETORY_Fleetory__AdminGateway__Oidc__Authority: https://${FLEETORY_AUTH_HOST:?set public auth hostname}/realms/fleetory
+      FLEETORY_Fleetory__AdminGateway__Oidc__Audience: fleetory-admin-api
+      FLEETORY_Fleetory__AdminGateway__Oidc__ClientId: fleetory-pilot
+      FLEETORY_Fleetory__AuditExport__Enabled: "true"
+      FLEETORY_Fleetory__AuditExport__Sink: Immudb
+      FLEETORY_Fleetory__AuditExport__Address: https://immudb:8080
+      FLEETORY_Fleetory__AuditExport__Username: fleetory_audit_writer
+      FLEETORY_Fleetory__AuditExport__Database: fleetoryaudit
+    ports:
+      - 127.0.0.1:5088:5088
+      - 127.0.0.1:5443:5443
+      - 127.0.0.1:5444:5444
+    volumes:
+      - ./secrets/server:/run/fleetory-server:ro
+    networks:
+      app_net:
+        ipv4_address: 172.30.77.20
+    depends_on: [postgres, keycloak, audit-gateway]
+    mem_limit: 384m
+    cpus: 0.50
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=64m"]
+    restart: unless-stopped
+
+  signer:
+    image: fleetory-command-signer:${FLEETORY_RELEASE:?set release identifier}
+    profiles: [signer-approved]
+    build:
+      context: ./releases/${FLEETORY_RELEASE:?set release identifier}/signer
+    ports:
+      - 127.0.0.1:9443:9443
+    volumes:
+      - ./secrets/signer:/run/fleetory-signer:ro
+    environment:
+      SSL_CERT_FILE: /run/fleetory-signer/infrastructure-ca
+      DOTNET_EnableDiagnostics: "0"
+    command:
+      - --Signer:SecretsDirectory=/run/fleetory-signer
+      - --Signer:Port=9443
+      - --Signer:TransitAddress=https://openbao:8200
+      - --Signer:TransitKey=fleetory-command
+      - --Signer:TransitKeyVersion=1
+    networks:
+      signer_net:
+        ipv4_address: 172.30.78.30
+    depends_on: [postgres, openbao]
+    mem_limit: 256m
+    cpus: 0.20
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    read_only: true
+    tmpfs: ["/tmp:rw,noexec,nosuid,size=32m"]
+    restart: unless-stopped
+
+  caddy:
+    image: caddy@sha256:e70b164da81ef698b3ad19af799ea6086ce6d9e48ed4079eb9fe26f6fbf14ee5
+    network_mode: host
+    volumes:
+      - ./config/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    mem_limit: 128m
+    cpus: 0.20
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    security_opt: [no-new-privileges:true]
+    restart: unless-stopped
+
+networks:
+  app_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.77.0/24
+  signer_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.78.0/24
+  audit_net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.79.0/24
+
+volumes:
+  caddy-data:
+  caddy-config:

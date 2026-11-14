@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../eng/AgentTestSupport/WindowsAgentAclTestHelper.cs" Link="WindowsAgentAclTestHelper.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Fleetory.Agent.Security/Fleetory.Agent.Security.csproj" />
+    <ProjectReference Include="../../src/Fleetory.Core/Fleetory.Core.csproj" />
+    <ProjectReference Include="../../src/Fleetory.Core.Contracts/Fleetory.Core.Contracts.csproj" />
+    <ProjectReference Include="../../src/Fleetory.SharedKernel/Fleetory.SharedKernel.csproj" />
+    <ProjectReference Include="..\..\src\Fleetory.CommandSigning\Fleetory.CommandSigning.csproj" />
+  </ItemGroup>
+</Project>

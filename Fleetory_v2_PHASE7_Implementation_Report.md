@@ -1,0 +1,414 @@
+# Fleetory v2 — PHASE 7 Security Foundation progress report
+
+**Status:** IN PROGRESS, 14 November 2026. PHASE 6 is complete; PHASE 8 has not started. Draft [PR #2](https://github.com/aroginsky-maker/Fleetory-v2/pull/2) contains the current implementation. The detailed controls and limits are maintained in [SecurityFoundation](docs/architecture/SecurityFoundation.md) and the [local lab guide](docs/architecture/SecurityLab.md).
+
+The [closure evidence checklist](docs/operations/Phase7Closure.md) distinguishes
+implemented checks from the actual independent deployment, custody, PKI/Agent
+and full recovery evidence still needed. The [read-only supervisor](docs/operations/ReadOnlyCleanupSupervisor.md)
+and [consumed attempt](docs/operations/ConsumedCleanupAttempt.md) preparations
+do not grant cleanup authority or complete those controls.
+
+## Implemented
+
+- A separately versioned native PostgreSQL v2 readback now preserves the legacy
+  inventory encoding while adding an independent role/settings/membership
+  fingerprint. Generated application18/24 and signer4/5 profiles use real schemas,
+  four roles, native restores and drift/refusal checks. Unsupported objects are
+  refused in the native read-only transaction before table values are read.
+  Original data and service recovery remain unverified. See
+  [NativePgInventoryV2](docs/operations/NativePgInventoryV2.md).
+
+- A separate retained-pair metadata reviewer now reconciles four pinned reports
+  without opening their referenced backups or key paths. It preserves the actual
+  18-table/24-row and four-event/five-transaction profile, rejects mixed inventories,
+  points, events and invented authority, and documents the incompatible v1/v2 role,
+  ACL and hash scopes. Original native readback and service recovery remain open.
+  See [RetainedServerPairMetadata](docs/operations/RetainedServerPairMetadata.md).
+
+- A distinct fresh Server pair controller now uses one generated four-event model
+  across real PostgreSQL and the production immudb sink, captures both native
+  backups under measured metadata, restores into isolated targets and verifies
+  all ten fields before native Server startup. Typed data refusals must leave
+  ports closed; host/restart checks must preserve data and signed audit state.
+  It uses no original approval profiles or placeholder artifact. Original-v2
+  compatibility, original service recovery and full-system readiness remain open.
+  See [NativeServerPair](docs/operations/NativeServerPair.md).
+
+- A separate fresh immudb data fixture now backs up and restores four synthetic
+  audit keys through immutable captured native bytes. It compares exact values,
+  revisions, transactions and signed tips, rejects corrupted/truncated backups
+  and a changed signature, and verifies target-only reader/password refusals,
+  restart and owned cleanup including a deliberately failed child. The paired
+  PostgreSQL slot and component reports remain explicit test fixtures; this is
+  not a coordinated original-data restore or a Server startup controller. See
+  [NativeImmuDataRoundtrip](docs/operations/NativeImmuDataRoundtrip.md).
+
+- A separate native PostgreSQL data fixture now restores the current application
+  schema with18 tables/23 synthetic rows through immutable captured dump bytes.
+  It compares data/catalog/security fingerprints, rejects eight mutations and
+  truncated format, proves late ACL failure rolls back atomically, and checks
+  runtime SCRAM/refusals/restart and owned cleanup. The offline schema generator
+  must equal the existing native DI generator. Its algorithm and synthetic
+  component profiles do not stand in for retained original inventories. Its
+  immudb slot is a placeholder; the separate audit rehearsal above does not
+  establish a common capture point. Server startup remains open. See
+  [NativePgDataRoundtrip](docs/operations/NativePgDataRoundtrip.md).
+
+- The first Server recovery slice now has a closed two-input admission stage.
+  It binds fixed application/immudb bytes to the reconciled metadata set and
+  returns both immutable captured packets only after every check succeeds.
+  Fresh binary fixtures cover all-or-nothing delivery, later source replacement,
+  scope/pin/type/memory boundaries, canary-safe output and unintended input refusal.
+  Native restore, schema compatibility and Server startup remain unverified;
+  no original raw inputs are read for this implementation. See
+  [ServerDataInputs](docs/operations/ServerDataInputs.md).
+
+- A read-only component composition preflight now reconciles eight pinned pilot
+  metadata reports before original-service recovery planning. It binds target-only
+  LOGIN to the exact accepted database report/dumps/inventories, matches audit
+  counts/source revisions and rebuilt payload lineage, and preserves consumed
+  provider/configuration permissions and historical identity limits. It reads no
+  referenced backups/keys and cannot authorize an operation or mark full recovery
+  complete. See [RecoveryComposition](docs/operations/RecoveryComposition.md).
+
+- The third native Server host now retains its original Agent/Admin TLS connections
+  across fixture-owner durable revocation. Their second GETs must return403 on the
+  same exact native connections, with real Revoked readers/inventories and no
+  runtime owner privileges. A distinct pre-OIDC live denial is automatically
+  exported before the fourth-host cold refusal; eight SQL events/nine revision-one
+  immudb keys match all ten fields without changing prior records. Separate bounded
+  persistent framing and controller refusal tests preserve the original EOF/TLS
+  controls. See [NativeLiveRevocation](docs/operations/NativeLiveRevocation.md).
+
+- A fourth generated native Server host verifies durable revocation of the same
+  previously accepted fixture Agent/Admin credentials after restart: both actual
+  private GETs return403, with real Revoked store preflights and exact inventories.
+  Runtime registration/revocation writes remain denied42501. The Admin refusal
+  creates one certificate-revocation denial before OIDC, automatically exported;
+  seven SQL events/eight revision-one immudb keys match all ten fields and preserve
+  prior values. No original PKI or real approval is implied. See
+  [NativeRevokedBoundary](docs/operations/NativeRevokedBoundary.md).
+
+- A third generated native host now verifies real durable Agent binding admission
+  (204) and mandatory OIDC refusal after Admin registration without a bearer
+  token (401). Fixture-owner rows explicitly state they are not external approval;
+  two runtime identity INSERT attempts remain denied. One OIDC-denial audit event
+  is automatically exported and independently matched across stores, preserving
+  prior records. The shared empty-response reader also rejects trailing CRLF-only
+  bodies and handles204 framing separately. See
+  [NativeRegisteredBoundary](docs/operations/NativeRegisteredBoundary.md).
+
+- The generated native gateway fixture now rejects valid-SAN credentials without
+  durable Agent binding or Admin registration. Actual parser/store preflights and
+  independent SQL inventories prevent a database error from satisfying403. The
+  Admin refusal creates one durable denial event, automatically exported by the
+  registered worker and independently matched across PostgreSQL/immudb. Prior
+  events remain unchanged; all six keys have revision one. See
+  [NativeRegistryBoundary](docs/operations/NativeRegistryBoundary.md). Original
+  service admission, positive registry/OIDC access and full recovery remain open.
+
+- Native gateway checks now distinguish trusted TLS from Fleetory identity.
+  Fresh client leaves without a SAN identity receive exact empty403 from the
+  registered Agent identity and Admin role-version GET routes, correlated to
+  successful native TLS and the exact GET path. Existing404 controls, ten TLS
+  refusals, unchanged audit/outbox state and owned cleanup remain required.
+  Positive identity/OIDC admission and original-service recovery remain open.
+  See [NativeIdentityBoundary](docs/operations/NativeIdentityBoundary.md).
+
+- The generated native HTTP-host fixture now checks mutual TLS on both actual
+  Agent/Admin Kestrel listeners: trusted-client HTTP responses and missing-client,
+  cross-root, wrong-EKU, server-root and hostname refusals. Fresh client leaves
+  are issued in memory without exporting CA private keys; the default fixture
+  factory contract remains unchanged. OIDC and identity/registry/RBAC guards stay
+  enabled; the safe-path404 proves TLS, not identity authorization. See
+  [NativeClientTls](docs/operations/NativeClientTls.md) for bounds and remaining
+  original-service/full-recovery controls.
+
+- Synthetic recovery target isolation is now rendered and checked independently of the live pilot profile. Eight pinned, unprivileged Python probes use three internal isolated bridges, no ports or source mounts, read-only roots and fixed limits. Twenty portable tests reject 94 unsafe model mutations. The actual local rehearsal verified 28 permitted and 28 denied directed connections, no default route on all eight nodes, runtime isolation and removal of all owned containers/networks. Real service state, credentials and PKI were not loaded; image/release/configuration provenance and full-system recovery remain open. See [RecoveryIsolation](docs/operations/RecoveryIsolation.md).
+- A pinned, read-only preflight now binds all six retained recovery files to one explicit manifest digest before a whole-service exercise. It streams bounded hashes, validates paths again at the open boundary, confines CLI names to the operator-selected working directory, validates the complete component set and rejects links/special files and checks live file changes without database/provider operations. Twenty-seven synthetic tests passed on each of Windows and Linux; the actual six authorized files (350,081 bytes) and five negative cases passed separately. Historical identity/provider evidence retains its scope; full-system recovery, freshness, independent custody and approvals remain open. See [RecoveryFiles](docs/operations/RecoveryFiles.md).
+- The approved application/signer database recovery set was refreshed on 2 November 2026: 18 tables/24 rows and 4 tables/5 rows restored with matching data/schema/owner/ACL/role inventories and the retained four-event audit point. Per-database dumps and inventories share an MVCC snapshot; fresh observations and both immudb state signatures match the retained transaction-5 checkpoint. Nine clone-only mutations/stale-point cases were rejected, and restart preserved both databases. The older three-event dump remains a rejected counterexample. This closes the demonstrated stale application/signer recovery-set gap; global atomicity, credentials, other service/PKI/Agent recovery and independent custody remain open. See [ApplicationDatabaseRecovery](docs/operations/ApplicationDatabaseRecovery.md).
+
+- On 2 November 2026 the existing VPS audit timer and explicitly approved off-host export/file restore were verified. The real `fleetoryaudit` immudb backup (five transactions, four known audit events) was also restored in a network-isolated local container: exact event hashes/revisions, pinned-key state signatures, a retained checkpoint, read-only denial, restart and corrupted-backup rejection passed. Owned runtime/source staging was removed; independent WORM/custody and coordinated full-system recovery remain open. See [AuditArchive](docs/operations/AuditArchive.md) and [ImmudbBackupRestore](docs/operations/ImmudbBackupRestore.md). Raw records and private recovery artifacts are excluded from Git/PR.
+
+- A no-additional-service pilot audit archive now captures explicit Platform audit columns through a bounded read-only snapshot. Root-owned files, serialized exclusive publication, retained-event continuity, hash-linked receipts, capacity limits and an hourly systemd template are implemented. Portable exports can be verified against an off-host checkpoint. Real PostgreSQL and Linux filesystem/CLI regressions complement Windows portable verification. This adds testable pilot retention under Baseline sections 12/17 without claiming independent WORM custody, administrator-proof storage, full recovery or production approval; see [AuditArchive](docs/operations/AuditArchive.md).
+
+- A Windows CI concurrency failure exposed SQLite WAL/SHM removal between existence and permission checks. Replay admission now tolerates only a missing transient sidecar; main-database, directory, link and permission failures remain errors, and no history is reset. The strengthened regression runs 24 rounds of 12 concurrent consumers across two stores and checks rejection after recreation; Windows live-file ACL rejection now covers the database, WAL and SHM alongside the existing six Unix permission cases. This addresses the observed sidecar lifecycle race under Baseline section 12.
+- Local quality verification without Sonar credentials now runs the full strict-build suite once with fresh coverage instead of repeating the same suite before collection. The explicit Architecture gate, complete dependency audit, 80% floor and honest unconfigured exit 2 remain; partial Sonar configuration fails before costly work. Configured strict and scanner builds/tests remain independent, and standalone Sonar has no new reuse/skip option. A fresh-process CLI regression reproduced two local full-suite requests before the fix; 28 scenarios now verify command counts/order and failure handling, while the pinned native collector propagates an actual child exit 17. This closes the demonstrated redundant local execution under Baseline section 20 without changing production code, scope or thresholds.
+
+- Pilot profile validation now refuses signer privilege/capability additions, writable roots or secrets, substituted/extra binds, shadowing tmpfs, user/namespace overrides, devices/GPU reservations through either Compose form, custom runtimes, inherited mounts, engine-socket delegation and privileged lifecycle hooks. The current canonical profile and explicit safe/canonical equivalents pass; 36 unsafe mutations are rejected in 38 contract checks. Sixteen independent probes reproduced unsafe acceptance before the fix and denial afterward. This closes the demonstrated signer configuration acceptance gap under Baseline sections 12/20, including review of configuration to restore; actual runtime isolation and full recovery/custody remain deployment controls. No runtime application code or quality thresholds changed.
+
+- The sanitized actual OpenBao recovery result is retained in [OpenBaoRecovery](docs/operations/OpenBaoRecovery.md): the approved 27,161-byte encrypted snapshot preserved provider/key continuity and a fresh non-command signature in an isolated same-VPS target. The source root was revoked before capture, no second source-root session or renewal was used, and cleanup/source health were verified. Clone credential expiry was not independently introspected. This historical scoped acceptance does not establish independent custody, complete PKI/revocation recovery or Phase 7 completion.
+
+- Agent replay storage now refuses group/other write permission on each existing Unix database, WAL and shared-memory file at startup and before consumption. Six actual Linux cases reproduced permission admission before the fix; all now refuse with byte-identical state and unchanged modes. After an explicit permission repair, both replay identities remain denied and the refused new request can be consumed normally after store recreation. The cases passed in a restricted Linux runtime container; local Windows Core passed 199/199 (the six Unix-only bodies return on Windows), and architecture checks passed 29/29. This closes the demonstrated Unix replay-file permission gap under Baseline section 12; production service ownership, atomic path custody and complete-database rollback protection remain deployment controls.
+
+- Signed-command size guards now read scalar PayloadLength/SignatureLength metadata without invoking buffer-copying accessors. Both Agent verification and PostgreSQL signer-journal completion previously copied an oversized field before rejecting it; four real regression cases measured approximately 8 MiB of extra allocation per rejected field. The new checks stay below a 512-KiB managed allocation budget after envelope construction and reject before security dependencies or database access. Additional tests cover the exact 64-KiB payload limit, 63/65-byte signatures and constructor/accessor copy isolation while preserving signing bytes. Focused checks passed 26/26, local Core 193/193 and architecture 29/29. This closes the demonstrated envelope-validation allocation gap under Baseline section 12; transport input limits, deployment and production custody remain separate controls.
+
+- Agent SQLite replay consumption now requires matching uniqueness for both DeviceId/CommandId and DeviceId/nonce through explicit UPSERT targets. Four real SQLite regressions reproduced accepted replays with missing or partial constraints. Every write also refuses owned-table triggers under the same non-deferred writer transaction; extra CHECK/unique failures propagate as storage errors through INSERT OR ABORT. Thirteen new cases cover live index removal, trigger suppression/deletion/rewrite, unchanged logical history/schema on refusal, controlled repair, restart and device scoping. The focused group passed 13/13 and local Core 185/185. Protected test-directory setup is shared with the existing Agent tests. This closes the demonstrated replay-schema gap under Baseline section 12; protected ownership, independent history freshness and production recovery/custody remain external controls.
+
+- Agent command verification now rechecks caller cancellation after asynchronous key, policy and replay operations and before returning verified content. The execution gate also checks after verification and immediately before handler dispatch. Six controlled dependency cases and two P-256/SQLite gate cases reproduced ignored cancellation, including handler invocation after cancellation; all eight now withhold continuation or dispatch. Successful replay commits remain consumed, verified by uncancelled retries and gate recreation. Existing expiry/cancellation tests reuse one controlled dependency fixture without adding production test configuration. Focused tests passed 23/23 and full local Core 172/172. This closes the demonstrated cancellation-boundary gap under Baseline section 12; Agent transport, production deployment and external approval/custody controls remain open.
+
+- Agent-local command trust files now use one open handle and a fixed 1025-byte buffer to enforce the 1-KiB input limit, including an overflow probe. The former metadata check plus whole-file read could allocate a grown file before refusing it. Short reads, a stale declared length, empty/oversized content and cancellation before/during/after reads are exercised by bounded stream fixtures and actual protected files. The focused group passed 13/13, the full local Core suite 164/164 and architecture checks 29/29. No generic HTTP dependency or public test configuration was added to Agent security. This closes the demonstrated read-boundary gap under Baseline section 12; production trust-file provisioning/custody and Agent transport/deployment remain external controls.
+
+- Signed-artifact manifests now share the anchor's strict JSON record parser: exactly four unique decoded, case-sensitive fields, string identifiers/digest and a positive signed-64-bit JSON integer version. Seven real CLI probes reproduced acceptance of singleton-array roots, duplicate/escaped version fields, numeric-string/decimal versions, wrong-case fields and unsupported metadata. The expanded suite passes 85 rejection cases with unchanged existing or absent anchors, plus unique escaped/reordered BOM inputs, the maximum Int64 version, idempotence and rollback from that limit. Invalid first-acceptance metadata creates no coordination file. Reusing one parser removes duplicate record/type checks while preserving the prior bounds and signatures over exact manifest bytes. This closes the demonstrated signed-manifest ambiguity under Baseline section 12; production release approval, key/anchor custody and serialized installer integration remain external controls.
+
+- Signed-artifact inputs now enforce a 64-KiB manifest and 4-KiB UTF-8 signature/public-key limits. Public-key import accepts one complete P-256 PUBLIC KEY SubjectPublicKeyInfo block and refuses private PKCS#8/SEC1 material, mixed blocks, other algorithms/curves and trailing DER bytes. A real CLI regression reproduced private-key acceptance through the public-key input. Payload hashing now streams the file after signature validation; a 32-MiB fixture retains the expected digest while allocating less than 8 MiB on the hashing thread, where the prior whole-file reader exceeded that budget. The expanded suite covers 46 rejection cases with unchanged anchor bytes and exact-size BOM/whitespace acceptance. This closes the demonstrated verifier input/resource boundary under Baseline section 12; production signing-key custody, release approval and serialized installer integration remain external controls.
+
+- Signed-artifact anchor eligibility and atomic replacement now run under one per-anchor exclusive OS file handle. Hash/signature checks precede acquisition; a contender waits at most five seconds for sharing access and then reads the latest anchor under the lease. A real CLI probe previously advanced the anchor despite a held writer lock. Separate-process tests now cover bounded denial with unchanged bytes, both concurrent release orders retaining the highest version, reuse after holder termination and unsafe coordination paths. The persistent marker is never deleted by the verifier. This closes the demonstrated cooperative anchor-writer gap under Baseline section 12; complete installer serialization, distributed coordination, ownership and recovery custody remain deployment controls.
+
+- Signed-artifact verification now distinguishes an absent anti-rollback anchor from corrupt existing state. A real CLI regression accepted a validly signed older release when the anchor contained JSON `null`. Existing anchors now require a bounded 4-KiB UTF-8 object, exact unique fields, positive 64-bit JSON integer version, validated string metadata and UTC acceptance time; malformed state cannot be coerced or overwritten. Twenty-nine rejection cases preserve the original anchor bytes, while first/forward acceptance, idempotence, BOM/whitespace and exact-size anchors remain supported. Shared evidence reads avoid another unbounded reader, and Windows CI now runs this verifier suite. This closes the demonstrated anti-rollback-state validation gap under Baseline section 12; protected ownership, serialized installer integration, key custody and independent recovery records remain deployment controls.
+
+- Controlled scope reparenting now compares its ASCII operator/approver references without case sensitivity under a fixed PostgreSQL `C` collation. A differently cased spelling of one reference cannot satisfy the distinct-actor guard, while original references for valid distinct actors are retained in audit. Three real PostgreSQL regressions reproduced acceptance before the fix; six denial cases and three successful variants verify parent/version/audit/outbox invariants and stale-revision protection. Shared setup and state assertions avoid duplicate test SQL. This closes the demonstrated scope-change actor-reference gap under Baseline section 12; independent approval authenticity and production evidence retention remain external controls.
+
+- The PHASE 7 readiness verifier now rejects duplicate JSON members before object conversion, including escaped-name and case-insensitive aliases. Seven conflicting documents covering signer confirmation, actor, timestamp, CI gate, evidence digest and rollback were accepted by the prior reader on both PowerShell 7 and 5.1. The verifier now uses the shared bounded 64-KiB evidence reader and hashes the same retained bytes; nesting is limited to 16 and serializer metadata is refused. Local tests pass 91 rejection cases on both runtimes and preserve unique escaped fields, UTF-8/BOM, exact-size acceptance and exact-byte hashes. This closes the demonstrated readiness-record ambiguity under Baseline sections 12/20; it does not authenticate approvals or establish production deployment/custody.
+
+- CI now independently enforces zero new and accepted Sonar issues after the server Quality Gate succeeds. The guard binds the official GitHub App check to the exact PR head/branch, project and current submission time, waits for a fresh report, and fails closed on missing, malformed, positive or unavailable evidence. It rejected a real historical successful Sonar check carrying two new issues. Windows/Linux policy and CLI fixtures cover 23 malformed evidence cases, 14 CLI denials, valid PR/branch admission and stale-report replacement without credential disclosure. This closes the demonstrated CI enforcement gap under Baseline section 20; server gate/profile thresholds and production controls remain unchanged.
+
+- File-secret reads now revalidate the root directory before every uncached lookup, reusing the constructor's validator. Replacement by a symlink/Windows junction and newly broad Unix directory write permissions fail closed; validated cached values retain their process-lifetime snapshot. Five new scenarios cover cold/warm replacement, Unix group/other write changes and a valid later read. Two actual Windows junction cases loaded replacement material before the fix. Windows CI now includes the full Server security suite. This closes the demonstrated deferred-root validation gap under Baseline section 12; atomic path custody, Windows mount ACL provisioning and production key ownership remain deployment responsibilities.
+
+- Security JSON parsing now enforces its byte budget independently of host request-size features, including unknown-length input and read-only/missing features. The bounded input buffer preserves charset handling, client cancellation and host stream ownership; exact limits are accepted and overflow cannot produce a model for application services. Twelve cases cover feature modes, UTF-8/UTF-16 boundaries, declared oversize, invalid JSON/media type and cancellation; four rejected-input cases failed against the previous reader. OpenBao and immudb reuse the extracted byte counter while retaining their caps, response error and complete-operation deadlines. This closes the demonstrated bounded-input validation gap under Baseline sections 12/20; deployment controls remain open.
+
+- The offline Admin registration procedure now locks existing credentials before evaluating eligibility and uses fresh database time after advisory/row-lock waits. A prior registration expiring during a wait cannot authorize rotation; recovery sees its current state and successful rotation receives a full one-hour overlap. Six real PostgreSQL cases check expiry, valid completion, recovery, rejected-state preservation and matching registration/audit/outbox timestamps. Five cases failed against the earlier SQL. Shared lock observation avoids duplicate polling. This closes the demonstrated operator credential-lifecycle race under Baseline section 12; independent approvals, operator provisioning and CA custody remain open.
+
+- Admin registration overlap now uses actual database time after SQL lock waits and carries the exact accepted deadline through subsequent authentication. Current Server UTC is checked after lookup and after OIDC work, so a captured registration cannot outlive the rotation overlap. A real PostgreSQL regression first reproduced acceptance after expiry; two lock-wait cases and eight admission cases cover expiry, valid completion, permanent registrations and revoked/unregistered/unknown denials. Shared lock observation and denial auditing avoid duplicate implementations. This closes the demonstrated credential-retirement admission gap under Baseline section 12; production clock trust, CA custody and approvals remain open.
+
+- Admin request admission now rechecks leaf validity on every request and after asynchronous registry/OIDC work, preventing an expired certificate from using an established TLS connection. A real mTLS regression first reproduced the unauthorized 204 response; the corrected path returns 403 without endpoint dispatch and commits a denial plus audit export entry. Seven focused tests cover exact time boundaries, cancellation and audit failure; two real mTLS/PostgreSQL cases cover connection reuse and expiry during a database-lock wait. Agent enrollment and binding verification reuse the same validity predicate. This closes the demonstrated Admin admission gap under Baseline section 12; production clock trust, CA custody and independent approvals remain open.
+
+- Agent certificate/binding verification now rechecks current UTC after the asynchronous identity-store read, including before returning `UnknownCertificate`. Leaf and binding windows cannot be accepted using a pre-lookup timestamp; cancellation is enforced before and after lookup. Fourteen cases cover separate leaf/binding lifetimes, known/unknown identities, exact boundaries and cancellation, with no additional lookup or external time request. Local Core tests pass 154/154 and architecture tests 29/29.
+
+- The isolated signer now checks caller grant/certificate validity after each asynchronous revocation read, including the final read before releasing a signature. Expiry during a read cannot advance to the next signing/journal boundary. Before-reservation rejection leaves no request; later rejection preserves pending/recorded state and replay denial. Eight cases cover exact expiry and valid completion across four boundaries; the current local Core suite passes 140/140 and architecture tests 29/29. No additional revocation read, command type or Agent transport is enabled.
+
+- Enrollment/rotation/recovery deadlines now use current UTC after device-row lock acquisition, and conditional grant consumption/recovery approval refresh it again. Enrollment revalidates the certificate under the lock, so an expired leaf cannot acquire a binding. Late recovery expiry rolls back certificate revocation, intent deletion and prior-grant deletion. Eleven PostgreSQL cases exercise actual lock waits, fresh lifetimes and complete rollback; six existing lifecycle/mTLS/authorization regressions also pass locally. Production clock trust, CA custody and independent approvals remain open.
+
+- Signed-command validity is now rechecked after asynchronous key, policy and replay operations and immediately before handler dispatch. Delayed or clock-shifted commands fail closed; a nonce already committed to replay storage remains consumed. Twelve deterministic cases cover expiry/skew rejection, valid boundary acceptance and retry behavior. This closes the demonstrated stale-command acceptance gap under Baseline section 12 without enabling additional commands or Agent transport.
+
+- OpenBao KV secret reads now have a single five-second request-and-body deadline. A real HTTP regression reproduced an incomplete-body startup hang after timely headers; both header and body stalls now fail without returning partial secrets or exposing the credential. OpenBao and immudb share one bounded response reader, retaining their distinct byte caps and the successful process-lifetime cache. This closes the demonstrated unbounded external-secret read under Baseline section 12; deployment/custody requirements remain open.
+
+- Separate Agent and Admin mTLS gateways, pinned CA roots, intermediate chains, device/person SAN validation, certificate binding, one-time Agent enrollment grants, rotation overlap and revocation.
+- Both gateways now accept an explicitly bounded two-root CA rollover window. Duplicate or third roots and any Agent/Admin root overlap fail startup. A real Agent mTLS/PostgreSQL test checks both roots during migration and denies the retired CA after the server switches to its replacement.
+- Local PostgreSQL RBAC with exact permissions and scoped grants; Admin OIDC gate validates signed tokens, WebAuthn AMR, client ID and certificate subject matching. Keycloak lab realm enforces WebAuthn and S256 PKCE.
+- Platform-owned Admin routes create immutable roles and scopes, assign scoped roles and revoke assignments. Every write requires the global `platform.authorization.manage` permission; authorization, state change and audit/outbox entry share a serializable PostgreSQL transaction. No management grant is seeded.
+- Offline first-admin bootstrap requires the Admin certificate SAN UUID, refuses a second global manager bootstrap and writes the initial grant with audit/outbox atomically. Integration tests exercise the real SQL procedure.
+- Controlled break-glass recovery grants a replacement Admin identity under an approved incident reference, records the database operator in audit/outbox, and refuses duplicate or missing-manager recovery. It leaves the old assignment for verified, audited revocation after the replacement can authenticate.
+- Assignment revocation refuses to remove the last global `platform.authorization.manage` grant. The refusal is audited in the same transaction and returns HTTP 409; no access is lost.
+- Roles and scopes can be retired through audited Admin routes only after their assignments or child scopes are removed. In-use objects return 409; the database also rejects direct cascading deletion of an assigned role.
+- PostgreSQL audit event and outbox transaction, lease-based background export and retry. The immudb sink uses conditional EventId writes, readback and revision checks. Non-Development Agent/Admin gateways now refuse startup unless export is enabled with the supported sink; a later sink outage leaves events in the durable local outbox. The lab provisions a dedicated `defaultdb` read/write account and supplies its password through OpenBao; the administrator credential remains outside Fleetory.
+- The immudb REST sink explicitly selects `defaultdb` after login and uses the returned database-scoped token before conditional writes or readback. The Docker audit pipeline and a focused unit test cover the selection path and fail-closed selection errors.
+- File and OpenBao secret providers; Agent-local ECDSA command verification, deny-by-default policy, durable SQLite replay store and per-device public-key trust files. A new execution gate creates the verifier with these concrete dependencies and invokes only the inventory-refresh handler after acceptance. Cryptographic and SQLite tests cover invalid commands, replay after restart and handler failure. No Agent command execution endpoint is exposed.
+- Agent trust and replay storage now check protected Windows directory ACLs, trusted owners and allowed access principals. File ACLs and changed directory permissions are checked before use; unsafe access fails closed. The lab and test fixtures share one Windows ACL provisioner.
+- The Admin mTLS listener now checks an emergency PostgreSQL denylist for the exact client certificate SHA-256 on every request. A controlled operator SQL statement commits the revocation and its audit/outbox entry together; a real mTLS/PostgreSQL test verifies the old certificate is refused and a replacement with the same Admin identity remains usable. The issuance, approval, CA-side revocation and recovery procedures remain open.
+- The production Admin listener now also requires an exact registered DER SHA-256 bound to the Admin SAN person identity on every request. An operator SQL procedure handles first registration, same-identity rotation with a one-hour maximum overlap, and controlled new-identity recovery, with atomic audit/outbox writes. Revocation takes precedence. Real mTLS/PostgreSQL tests cover unregistered denial, registration, stale rotation rejection, old/new overlap and old-cert expiry; the recovery SQL test covers grant plus certificate registration in one transaction. External CA issuance, OIDC custody and production operator approval remain open.
+- Lab-only OpenBao Transit signing key with a separate sign-only token and DeviceId-bound public trust file. The Server token can read only its eight named KV secrets; a live check confirmed 403 for an unrelated KV path and Transit sign.
+- Separate `Fleetory.CommandSigning` component signs only empty, one-minute `Inventory.Refresh` commands, pins the Transit key version and verifies the returned signature against a trusted public key. The Server cannot reference that project. A repeatable live lab check passed Transit signing, Agent verification, durable replay rejection and 403 for the Server token. After an OpenBao development-mode restart, every DeviceId-bound trust version is compared with the current key ring; mismatches fail closed and an explicit lab-only reset archives all stale versions. An isolated test covers this regression in CI.
+- A repeatable lab-only Transit key rotation check provisions the next DeviceId-bound public key, verifies old/new overlap, archives the previous trust file and proves that Agent rejects fresh old-version signatures while accepting new-version signatures. It does not establish production trust distribution or signer isolation.
+- Signed artifact verification now checks the exact manifest bytes, P-256 signature, artifact SHA-256 and protected anti-rollback anchor before installation. Repeated acceptance is idempotent; lower versions, same-version conflicts, changed artifacts and invalid signatures fail closed. PowerShell tests cover first acceptance, forward versioning, rollback, tampering and invalid signatures.
+- Agent command policy now classifies unsupported commands as high risk and `Fleet.Bulk.*` commands as bulk; both require `TwoPerson` approval and remain denied. Only argument-free `Inventory.Refresh` is low risk and locally allowed. Tests cover all three decisions without enabling command transport.
+- immudb receipt export now re-validates the SHA-256 chain and writes a deterministic atomic package for WORM/SIEM transfer. Repeated exports are idempotent and tampered anchors fail closed; external retention and custody remain deployment controls.
+- The read-only `eng/verify-immudb-receipt-export.ps1` operation independently validates an export package's schema, receipt range, exact source-anchor hash and P-256 receipt signatures. It is covered on PowerShell 7 and Windows PowerShell 5.1 and rejects wrong anchors, keys, chain tampering and relative paths before WORM/SIEM transfer.
+- The production immudb TLS runbook defines root-only OpenSSL chain validation, credential-free HTTPS probing, admin-network isolation and an auditable CA rotation order; the local lab remains intentionally loopback HTTP and is not production evidence.
+- The production certificate lifecycle runbook defines CA issuance, private-key custody, physical-device verification, Agent/Admin rotation, lost-key recovery and rollback evidence; the repository validates the records' technical invariants while production custody remains external.
+- The protected command signer runbook defines non-exportable P-256 key custody, isolated mTLS service deployment, two-person approvals, trust-file distribution and rotation evidence; command transport remains disabled until that external service is deployed.
+- The privileged change evidence runbook defines independent requester/approver/operator identities, payload and revision hashes, correlation/audit links, WORM/SIEM retention, legal hold and lost-acknowledgement recovery records.
+- The read-only `eng/verify-phase7-readiness.ps1` validator checks the final readiness record: distinct actors, UTC timestamps, all production control flags, CI/Sonar evidence, WORM reference and rollback validation. Its PowerShell 7 and Windows PowerShell 5.1 tests reject missing or inconsistent evidence.
+- The self-hosted evidence record captures the successful OpenBao signer, dedicated immudb writer pipeline, backup/restore drill and readiness-verifier checks while explicitly separating local evidence from production custody.
+- The self-hosted evidence record now also includes a disposable immudb HTTPS check using an explicit CA file; the TLS container and temporary key material were removed after validation.
+- The read-only `eng/verify-immudb-tls.ps1` preflight validates HTTPS-only origin, no embedded credentials, explicit CA trust, TLS 1.2+ and redirect rejection; PowerShell 7 and Windows PowerShell 5.1 tests cover its fail-closed inputs.
+- Reproducible local browser S256 PKCE and virtual WebAuthn check: the signed token carries `amr=webauthn` and the certificate-bound subject; the Admin route returns 401 without it and 403 at RBAC with it.
+- Admin Gateway startup rejects wildcard bind addresses, keeping its listener on loopback or an explicitly selected management IP.
+- Windows CI provisions an ephemeral root and intermediate in the runner certificate stores, then confirms the actual Admin listener sends two certificates and passes root-only OpenSSL verification. Windows hosts require equivalent approved CA-store provisioning.
+- A reusable Windows host PKI preflight now pins approved root and intermediate SHA-256 fingerprints, requires CA `Basic Constraints` and `KeyCertSign`, checks validity and the intermediate-to-root chain, installs public certificates idempotently into `LocalMachine\Root` and `LocalMachine\CA`, and rolls back only certificates added by a failed invocation. Its PowerShell 7 and Windows PowerShell 5.1 tests reject mismatched fingerprints, non-CA certificates and private-key files.
+- Lab certificate provisioning restricts the local key directory before copying new keys, validates each leaf certificate/key pair, archives the previous pair for rotation recovery and removes temporary leaf keys from CA containers. An isolated crypto-backed test verifies successful rotation and failed-copy rollback without touching the live lab.
+- Negative security checks exercise malformed Admin RBAC requests through the real mTLS listener, fail-closed Gateway startup for a wrong key, foreign CA and malformed chain, and rejection of mixed or incomplete OpenBao configuration and unsafe Admin rate-limit values.
+- Agent grant creation, certificate binding and certificate revocation now commit their Core state, completion audit event and export-queue entry in one PostgreSQL transaction. A completion-audit failure rolls back the Core change; integration tests cover failure and retry. The Platform audit writer accepts the caller's transaction while retaining ownership of its tables. The architecture guide includes a read-only recovery procedure for a lost commit acknowledgement.
+- Agent identity collision checks now require the Admin to name a previously bound certificate fingerprint when issuing a replacement grant. The expectation is stored with the token digest and checked again under a per-device PostgreSQL row lock at redemption. Missing or foreign fingerprints return 409; a stale initial grant cannot bind a second certificate after another grant succeeds. Collision denials are audited, and integration tests cover both a stale grant and concurrent first enrollments. The physical-device verification and approval process remains an operational requirement.
+- Replacement grants additionally require the global `core.agent_certificate.rotate` permission alongside enrollment permission. Without it, the Admin route returns 403 and writes a denial audit event without issuing a token; real mTLS/PostgreSQL tests cover denial and authorized rotation. Neither permission is seeded by default.
+- An active Agent certificate must now create a five-minute rotation intent over its mTLS port for the exact replacement certificate SHA-256. Admin uses that one-time intent alongside both permissions and the old fingerprint; the grant can be redeemed only by that replacement certificate. The device row lock serializes grant, enrollment and revocation checks. Tests cover unbound Agent denial, expiry, replay, wrong replacement, revocation and audit rollback. Possession of the old key is verified; independent physical-device approval remains open.
+- A separate lost-key recovery path now requires two distinct Admin identities with `core.agent_certificate.recover.request` and `.approve` permissions. Both independently name the new certificate SHA-256, incident reference and evidence-bundle SHA-256. Approval atomically revokes all old bindings, invalidates pending grants and rotation intents, issues a five-minute grant bound to the new certificate and writes durable audit. PostgreSQL and real mTLS tests cover separation, denied permissions, evidence mismatch, expiry, replay, old-certificate rejection and audit rollback. Physical evidence validation, secure token delivery and the production incident procedure remain open.
+- The Agent rotation-intent route now has its own per-certificate rate limit, separate from Admin requests and Agent identity checks. The default is 30 per minute per Server replica; configuration accepts 1–300. The real mTLS test confirms 429 after the limit while Admin grant creation and Agent identity continue.
+- OpenBao secret reads and immudb audit export now refuse HTTP redirects at the default transport handler. A real loopback HTTP test sends a redirect to a second listener and confirms neither the OpenBao token nor the immudb login request is forwarded.
+- immudb audit transport negative tests now reject malformed JSON and oversized readback responses fail-closed without exposing the writer credential; the write remains durable for retry after an oversized readback.
+- Agent enrollment now has a separate per-certificate one-minute rate limit, default 30 and configurable from 1–300. The real mTLS test checks HTTP 429 after repeated token attempts while Agent identity and another certificate's enrollment still work.
+- The Admin request limit is now partitioned by client certificate. Public web-port requests and a noisy Admin identity cannot consume another Admin's bucket; the real mTLS test verifies this isolation.
+- A first-enrollment grant now requires the exact new Agent certificate SHA-256, matching the already bound rotation and recovery grants. Redemption by another CA-issued certificate with the same DeviceId returns 403 without consuming the grant. Legacy grants lacking a target fingerprint also fail closed; real mTLS and PostgreSQL tests cover both paths.
+- Gateway rate limits now apply only on their matching mTLS listener. The tests send more than the configured limit to Admin and Agent paths through the public web port and confirm consistent 404 responses without consuming privileged buckets.
+- The file secret provider now refuses symbolic links for the mount and secret files and rejects a Unix mount writable by another group or user. A Linux CI test checks those failure paths; deployment still owns the parent path and service ACL.
+- Production immudb export now refuses the default administrator username or password and plain HTTP when the sink is constructed. Development retains its loopback lab configuration. The deployment guide calls for a dedicated read/write account and trusted HTTPS transport; production provisioning, backup and retention remain open.
+- With export enabled, readiness now reports a degraded audit-export state when the oldest pending outbox entry exceeds five minutes, without synchronously calling immudb or blocking local audit writes. A PostgreSQL integration test covers empty, fresh, stale and drained queue states.
+- Admin RBAC roles can now be replaced atomically through the Admin mTLS route. The operation moves existing assignment IDs and scopes to a newly identified role, preserves a snapshot of both permission sets, deletes the old active role and appends the audit/outbox event in one serializable transaction. Removing the last global management permission is blocked and audited. The migration backfills existing roles; bootstrap and recovery SQL also record snapshots. An Admin mTLS GET route reads and audits the version lineage, including retired IDs. PostgreSQL and real mTLS tests cover success, history, missing and malformed input, denied access, last-manager protection and audit rollback. Scope parent changes remain excluded from the HTTP API and use a separate audited procedure.
+- Scope name changes now require an expected revision on the Admin mTLS route. The `ScopeId`, parent, children and assignment references stay fixed; the active name, version snapshot and audit/outbox entry commit together. Stale edits return 409 and are audited. A protected GET route reads the revision history. PostgreSQL and mTLS tests cover successful and stale revisions, legacy scope snapshotting, audit rollback and unchanged descendant access. Reparenting needs a separate impact and approval process.
+- A read-only scope reparenting preflight lists candidate ancestor grants and the exact actor, permission and descendant-scope decisions that would change. It rejects missing scopes, missing parents, existing hierarchy cycles and no-op requests. A PostgreSQL test compares these results with real authorization decisions before and after a temporary move in a rolled-back transaction. The controlled `reparent-scope.sql` procedure now applies an approved parent change only with distinct operator and approver references, an incident ID and the expected scope revision; it serializes the change, rejects missing parents, self-parenting, cycles, stale revisions and no-ops, snapshots both parent versions, and commits the audit/outbox entry with the update. Production approval records and impact review remain operational controls.
+- The read-only `eng/verify-immudb-state.ps1` operation now reads the signed `GET /api/db/state` response, pins and verifies the immudb public signing key, rejects malformed or rolled-back state, and appends canonical transaction receipts without overwriting an existing anchor. Its PowerShell test covers valid state, duplicate idempotence, rollback, conflicting hashes, malformed state and path validation. This closes the independent state-receipt verification block; production still needs an off-host WORM anchor and a separate backup/restore and retention procedure.
+- The read-only `eng/verify-immudb-restore.ps1` acceptance operation now checks a restored signed state and a known audit `EventId` through a read-only bearer token. It verifies the expected revision and decoded value hash, rejects insecure or redirected audit readback, wrong keys, changed values and malformed state, and never accepts backup-admin credentials. `docs/operations/ImmudbBackupRestore.md` defines the separate-admin backup, immutable off-host copy, disposable restore and WORM/SIEM evidence procedure; production retention, custody and restore evidence remain deployment controls.
+- The immudb state, restore and export verifiers now run on both PowerShell 7 and Windows PowerShell 5.1. ECDSA P-256 public-key import, DER signature decoding, SHA-256 and absolute-path validation use APIs available on both runtimes; all three test suites pass on both runtimes.
+- Read-only immudb verifier tokens default to protected environment variables (`FLEETORY_IMMUDB_STATE_BEARER_TOKEN` and `FLEETORY_IMMUDB_RESTORE_READ_TOKEN`) so routine invocations do not place bearer credentials in process arguments. Explicit parameters remain available for controlled automation.
+- The signed-state receipt anchor now carries a SHA-256 chain across stable receipt fields. A changed, reordered or truncated receipt fails closed before append; PowerShell tests cover initialization, idempotence, rollback, conflict and tampering.
+- The two PowerShell provisioning checks now share their function-import and safe artifact-cleanup helper. Windows CI also runs the Agent security tests, including the protected-directory ACL checks, on a Windows runner.
+- The immudb TLS preflight now requires a credential-free HTTPS origin and HTTP 2xx, rejects redirects and HTTP errors, disables user curl defaults and proxies, and bounds its connection and request time. A real loopback TLS fixture tests explicit trust, foreign certificates, hostname mismatch, redirect non-delivery and non-2xx responses on PowerShell 7 and Windows PowerShell 5.1 without modifying system trust. This corrects the earlier input-only tests, which did not exercise the previously missing 3xx rejection. The fixture pins a self-signed leaf; production chain, custody and rotation records remain required.
+- The final readiness-record verifier now enforces current validity as well as UTC ordering, compares normalized actor identifiers without case sensitivity, requires actual JSON booleans, rejects non-finite coverage and unsafe/non-run CI URLs, and requires hashed object references for each of the five controls. Its summary binds the result to the exact record bytes with SHA-256 and includes check/expiry times. Regression tests exercise clock boundaries and malformed/coerced input on Linux, PowerShell 7 and Windows PowerShell 5.1. This verifies local record consistency; authentic approvals, external CI results, evidence hashes and immutable retention still require independent deployment validation.
+- Authenticated immudb state and restore checks now share a bounded HTTPS transport. It rejects redirects before forwarding any request, validates the origin and relative API path, disables cookies/proxy inheritance, and preserves TLS/hostname/revocation checks. A 20-second total deadline includes body reads, and the 16 KiB limit is enforced while streaming rather than after an unbounded download. Real TLS tests check token non-delivery to redirect targets, untrusted peers and wrong hostnames, exact-size acceptance, oversized/chunked/lengthless responses, malformed UTF-8/JSON and a stalled body without exposing credentials.
+- Independent receipt-export verification now binds all receipt contents to the supplied anchor, including count/order, signed state, chain fields and observation instant. A regression reproduced acceptance of a signed prefix with the full anchor's claimed hash; prefix/suffix/extension and same-range substitution now fail closed. Export and verification parse/hash one bounded byte buffer, enforce 8 MiB limits and receipt field types, and run on PowerShell 7 and Windows PowerShell 5.1. Tests cover a source file changed after buffer acquisition, equivalent JSON/timezone formatting, no-overwrite behavior and malformed/oversized inputs. External anchor custody, freshness and WORM retention remain deployment controls.
+- Receipt export verification now supports an independently approved predecessor package and exact SHA-256 checkpoint. The mode requires a pinned public key, verifies every predecessor signature and rejects joint local rollback, rewritten signed history, changed metadata and database mismatch while accepting identical or cumulative forward histories. The summary explicitly reports checkpoint verification, and no checkpoint file is updated. Twelve negative scenarios plus positive histories pass on Linux and Windows PowerShell 7/5.1; selection and retention of the latest independent checkpoint remain operational controls.
+- Restore acceptance now optionally verifies the exact transaction/hash of an independently approved checkpoint before reading the known event. It verifies signed state again after readback and appends the local acceptance receipt only after all checks pass. Real-cryptography tests reproduced and fixed premature anchor mutation, broken previous-hash canonicalization for ordered-dictionary forward receipts, and invalid database-name character validation. Fifteen negative cases preserve existing/absent anchors; exact-point acceptance, scoped-token use, forward chain validation and idempotence are tested on Linux and Windows PowerShell 7/5.1. Receipt-package verification is shared by export and restore without copying its implementation.
+
+- The OpenBao Transit command signer now enforces a ten-second total operation deadline through headers, body reads and envelope release, propagates caller cancellation, validates bounded visible-ASCII credentials before creating headers, and disables inherited proxies/cookies. HTTP status, JSON and signature-encoding failures use fixed messages without untrusted response text. Tests reproduce remote reason-phrase disclosure, reject malformed inputs and exercise stalled headers/body plus cancellation over real loopback HTTP. This hardens the existing signing library; isolated service deployment and authenticated approval remain open.
+
+- Signer caller authorization now pins each configured client certificate to an identity, explicit DeviceIds and a bounded UTC grant window. It validates client EKU/key usage and a custom-root chain locally without downloads, copies trust/target inputs, and denies unregistered or out-of-scope clients before Transit. The authorization wrapper rechecks expiry after signing before releasing an envelope. Tests cover certificate validity/purpose/trust, target scope, input mutation, grant boundaries, leaf rotation and denied-call non-delivery. This is a library prerequisite for the separate mTLS host, not a deployed service or authenticated approval workflow.
+
+- The caller-policy rollover regression exposed an OpenSSL difference: a combined trust store with same-subject CAs can choose the wrong public key. The policy now validates independently against each pinned root, preserving signature and chain checks. Equal-subject/different-key roots in both orders and an explicit intermediate are covered by the regression suite; the original difference was reproduced on Windows and in Linux Docker.
+
+- Authorized command signing now requires a durable RequestId reservation before Transit access and a committed result before envelope release. The independent signer PostgreSQL journal records caller/certificate/target metadata and a canonical envelope/signature digest with synchronous commit, rejects duplicate requests and conflicting completions, and works with SELECT/INSERT-only privileges. Pending attempts are retained without automatic retries; authorization and cancellation are rechecked after result commit. Real PostgreSQL tests cover persistence, concurrency, identity binding, result conflicts, narrow-role denial and forced durable commit. Host denial audit, delivery reconciliation and independent WORM export remain open.
+
+- CI now selects the exact SDK from `eng/global.ci.json` and pins the setup action revision. This addresses a failed environment setup in which the floating .NET channel selected unavailable SDK/runtime downloads (HTTP 409); SDK 10.0.402 was verified in the preceding successful CI and its Windows/Linux archives were available. The CI-only SDK selection does not change local developer SDK selection.
+
+- The independent `Fleetory.CommandSigner.Host` now exposes one mTLS-only Inventory.Refresh signing endpoint with registered-leaf proof, strict 1 KiB JSON, fixed rate/concurrency limits, total request deadline, duplicate denial and required durable journal. It requires an actual narrow PostgreSQL login before startup, exposes authenticated health checks, persists HTTP denial metadata and returns a denial audit ID. Real HTTPS/PostgreSQL tests cover missing/foreign/unregistered certificates, forged headers, scope/JSON/route denial, valid signature verification, repeated requests, rate/concurrency limits, backend/audit permission failure, unsafe configuration and production rejection of lab HTTP Transit. Shared TLS and file-secret adapters were extracted rather than copied; architecture checks preserve host isolation. Production deployment evidence, handshake audit retention, policy reload, human approvals, delivery and WORM export remain open.
+
+## Verification snapshot
+
+The dependency security gate now explicitly audits direct/transitive NuGet
+dependencies at every severity, requires successful access to the configured
+advisory source and verifies that forced restore audited every solution project.
+Missing coverage, skipped projects, weak settings and all NuGet audit warning
+classes fail. The real local restore covered 26/26 projects; a supplementary
+native vulnerability report returned no vulnerable packages. Actual MSBuild
+gate tests cover full coverage, 13 rejected configurations and six warning codes.
+See [DependencyAudit](docs/quality/DependencyAudit.md) for scope and limitations.
+
+The signer snapshot verifier now supports an independently approved checkpoint
+file/digest pair. It preserves every known request/result/rejection/revocation
+row, permits appended data and late completion, and rejects known-history
+rollback/tampering, duplicate primary identities and conflicting database/time
+metadata. UTC/UUID spelling and exporter rotation are normalized appropriately.
+The comparison is read-only; independently retaining the latest checkpoint,
+authenticating new records and approving actual restore lineage remain open.
+
+The independently retained signer snapshot can now be checked against the
+approved exact-byte SHA-256 with a read-only PowerShell 7.2+ verifier. Strict
+UTF-8, duplicate/unknown fields, typed flags, UTC/digest/UUID shapes and row/byte
+limits are checked from the same bounded buffer. Native LF/CRLF bytes remain
+part of the digest. Real PostgreSQL/psql outputs are verified end to end; immudb
+tools reuse the bounded reader and retain PowerShell 5.1 compatibility. External
+approval authenticity, database freshness and WORM custody remain open.
+
+A bounded read-only signer journal extract now observes requests, results, HTTP
+rejections and client revocations in one repeatable-read snapshot, under a separate
+SELECT-only login. It selects explicit metadata fields and fails rather than
+truncating above 5000 rows per table or 8 MiB. Tests cover concurrent commits,
+future-column exclusion, prior-write rollback, missing privileges, read deadlines
+and output bounds. The extract prepares evidence for independent retention;
+external WORM/SIEM delivery, immutable custody and database freshness remain open.
+
+Native psql regression tests exposed an encoding failure in that extract: an
+inherited LATIN1/WIN1251 client could not return multilingual incident references.
+The transaction now explicitly selects UTF-8; both real psql cases preserve
+Cyrillic, accented Latin and CJK metadata and return one JSON observation.
+
+The signer now has a narrowly packaged Linux image and a repeatable actual-process
+isolation check. The test verifies UID 1654, read-only root and secret mounts,
+capability removal, no-new-privileges, no Docker socket, unrelated process/database
+denial, real mTLS signing with verified PostgreSQL TLS and durable RequestId denial
+after restart. The runbook provides the required runtime flags and secret-volume
+layout. The test HTTPS Transit backend holds its key outside the container;
+production key custody, network policy, protected logs and approvals remain open.
+
+The signer now emits sanitized structured diagnostics for TLS admission that
+fails before HTTP. Missing/unregistered/foreign client keys, plaintext attempts
+and handshake stalls are covered without storing unauthenticated input or doing
+pre-authentication database work. Ordinary HTTP denials remain in PostgreSQL.
+Application emission is implemented; production log retention and custody remain
+open.
+
+Read-only signer request reconciliation now distinguishes `NotFound`, `Pending`
+and `SigningRecorded` under an independent SELECT-only login, with bounded
+database reads, actual operator/database identity and exact request/result
+metadata. It never returns a signature, changes journal rows or permits automatic
+retry. The operator runbook covers retained observations and external delivery
+evidence; delivery acknowledgement and WORM custody remain open.
+
+Signer-client emergency revocation is implemented without a service restart.
+The required revocation reader checks the exact certificate before reservation,
+before Transit, after Transit and after the result commit; the host also checks
+each HTTP request. Independent operator SQL appends approved evidence references,
+event UUID and database identity with synchronous commit. The runtime can only
+read that table; startup also rejects individual-column write grants. The operator
+can insert only evidence/input columns, preserving database-generated audit metadata. Revocation/read failure withholds the signature, including on
+an existing TLS connection; replacement leaves remain independently authorized.
+Policy additions/CA reload and production approval/custody remain open.
+
+| Check | Latest verified result |
+| --- | ---: |
+| Local strict Release build | 0 warnings, 0 errors |
+| Local full tests after native signer export regression | 401/401 passed |
+| Local production coverage after native signer export regression | 93.68% |
+| Local scope reparenting mutation and preflight tests | 2/2 passed |
+| Local SonarQube Community Build at `ad4271b` | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0% |
+| Local SonarQube Community Build after Windows Agent ACL hardening | Quality Gate PASS; overall coverage 90.7%; overall duplication 0.0%; 0 bugs, vulnerabilities, code smells and hotspots |
+| Completed CI baseline before TLS regression hardening, `4a4d69f` / run `40136441774` | 93.52% |
+| Local immudb | First delivery, matching retry, conflicting EventId rejection passed |
+| Local immudb restore acceptance | Read-only token separation, known EventId revision/hash and fail-closed validation passed |
+| Restore-point acceptance | Exact independently approved transaction/hash, stable signed state, 15 failures without anchor mutation, valid chain append and idempotence passed on Linux and Windows PowerShell 7/5.1 |
+| Local disposable immudb backup/restore drill | Hot backup transactions 1–33 restored into an isolated replica database; final state reported 33 transactions |
+| Local full audit pipeline | PostgreSQL outbox → Fleetory worker → immudb readback with dedicated account passed |
+| Local command-signing lab after Windows ACL hardening | OpenBao Transit v2 signature accepted once; replay rejected; Server token denied (403) |
+| Local live certificate renewal | 4/4 new pairs validated; 4/4 previous pairs archived and matched backup; identity UUIDs retained; OpenBao TLS secrets matched |
+| Isolated certificate provisioning checks | Rotation archive, failed-copy rollback and mismatched-key rejection passed |
+| Windows host PKI preflight checks | Fingerprint pinning, CA policy, chain validation and private-key rejection passed on PowerShell 7 and Windows PowerShell 5.1 |
+| Signed artifact verification checks | Signature, artifact hash, idempotence, forward versioning, rollback, tampering and invalid-signature rejection passed |
+| Command approval policy checks | Low-risk Inventory.Refresh allowed; high-risk and Fleet.Bulk.* classified as TwoPerson and denied |
+| immudb receipt export package checks | Chain validation, atomic export, idempotence and tamper rejection passed |
+| immudb receipt export independent verification checks | Exact anchor hash and receipt-content binding, signed substitution rejection, snapshot consistency, signatures and equivalent formatting passed on Linux and Windows PowerShell 7/5.1 |
+| Independent receipt checkpoint checks | Approved digest/signatures, unchanged prefix, joint rollback/fork rejection and idempotent/forward acceptance passed on Linux and Windows PowerShell 7/5.1 |
+| immudb transport negative tests | Malformed authentication JSON and oversized readback rejected without credential leakage |
+| Operational immudb HTTPS transport | 34 negative cases plus exact 16 KiB acceptance: real TLS, redirect non-delivery, trust/name rejection, streaming limits and total read deadline on Linux and Windows PowerShell 7/5.1 |
+| immudb production TLS runbook | Root-only chain check, credential-free HTTPS probe, network isolation and rotation evidence documented |
+| Production certificate lifecycle runbook | Issuance, custody, physical-device verification, rotation, recovery and rollback evidence documented |
+| Protected command signer runbook | Non-exportable key custody, isolated mTLS signer, two-person approvals and trust rotation documented |
+| Transit signing client regression checks | 28/28 passed: bounded headers/body lifetime, caller cancellation, rejected credentials, safe errors and signature verification |
+| Signer caller authorization checks | 31/31 passed: pinned client identity, custom trust, purpose/validity, exact target, immutable inputs, same-subject CA rollover, leaf rotation and no Transit call on denial |
+| Durable signer journal checks | 20 PostgreSQL cases and 9 orchestration cases passed: persistence, concurrent reservation, immutable completion, narrow permissions, forced synchronous commit and failure/cancellation/expiry without release |
+| Signer-client emergency revocation | 26 real PostgreSQL/mTLS cases and 8 orchestration cases passed: retained connections, revocation/read failure during signing, distinct replacement leaf, operator evidence, narrow permissions and no envelope release |
+| Standalone signer mTLS host | 29 real HTTPS/PostgreSQL cases passed: key possession, scoped signing, strict JSON, duplicate/rate/concurrency denial, dotted-route audit, journal safety and rejection of elevated database roles |
+| Read-only signer reconciliation | 20 real PostgreSQL cases passed: all three states, canonical digest/identity binding, fresh completion visibility, SELECT-only login, malformed input, role switching, prior-write rollback, missing rights and bounded lock waits |
+| Signer TLS diagnostics | 7 real socket/mTLS scenarios (3 strengthened existing cases) and 5 metadata-sanitization cases passed: failed keys, stalled/plaintext traffic, successful-TLS HTTP denial separation, disabled generic logging and no exception/credential output |
+| Signer container isolation | Actual restricted Linux process, read-only secret volume, unrelated process/database denial, verified PostgreSQL TLS, mTLS signature and restart/replay denial passed |
+| Signer package compatibility | PowerShell 7 and Windows PowerShell 5.1 produced the restricted runtime context; Server, application settings and debug symbols excluded |
+| Signer journal evidence extract | 20 real PostgreSQL cases passed: prior 18 cases plus native psql with inherited LATIN1/WIN1251, multilingual metadata and one UTF-8 JSON observation |
+| Independent signer snapshot verification | Exact retained digest, six acceptance scenarios, 33 rejection scenarios on Windows PowerShell 7, strict UUID/digest/date boundaries, unchanged source bytes and real PostgreSQL/psql-to-verifier integration passed; shared receipt regressions passed on PowerShell 7/5.1 |
+| Signer snapshot checkpoint continuity | Four acceptance and 18 rejection scenarios passed: unchanged/forward history, pending completion, equivalent representations, missing/changed/duplicate rows, old history with fresh metadata and incomplete/unapproved checkpoint inputs |
+| Dependency audit coverage | Forced solution restore audited 26/26 projects (100%); no vulnerable packages reported; 13 weakened/incomplete configurations and six synthetic NuGet warning-code cases failed as required |
+| Privileged change evidence runbook | Approval identities, impact hashes, audit/WORM links, retention and recovery evidence documented |
+| PHASE 7 readiness record verifier | Current UTC validity, distinct normalized actors, strict JSON flags, finite coverage, per-control object references and exact record SHA-256 checked |
+| Self-hosted PHASE 7 evidence record | Signer, least-privilege audit pipeline, TLS, backup/restore and readiness checks recorded with production limitations |
+| immudb TLS probe validation | Real TLS on PowerShell 7 and Windows PowerShell 5.1: trust, hostname, redirect non-delivery, HTTP errors and curl defaults checked |
+| Local WebAuthn/OIDC with real Admin mTLS | 401 without token; 403 with WebAuthn token at RBAC |
+| Windows server TLS chain in CI with provisioned OS CA stores | 2 certificates sent; root-only OpenSSL verification code 0 |
+| Linux container server TLS chain | 2 certificates sent; root-only OpenSSL verification code 0 |
+| Sonar PR coverage baseline, `4a4d69f` | 90.6% |
+| Sonar new-code coverage baseline, `4a4d69f` | 90.82901554404145% |
+| Sonar overall duplication baseline, `4a4d69f` | 0.0% |
+| Sonar new-code duplication baseline, `4a4d69f` | 0.0% |
+| Sonar Quality Gate baseline, `4a4d69f` | PASS |
+
+The completed CI baseline before TLS regression hardening is [run 40136441774](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/40136441774) for `4a4d69f`: both Windows and Linux jobs and SonarCloud passed, production coverage was 93.52%, overall Sonar coverage 90.6%, new-code coverage 90.82901554404145%, and both overall and new-code duplication were 0.0%. Fresh results for later changes are recorded in PR #2. The PR remains draft while the remaining production controls are open.
+
+The last completed CI at `14d2a65` is [run 39659108678](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39659108678); both jobs and the SonarCloud Quality Gate passed. Actions resumed without changing the owner's $0 budget. SonarCloud previously found 18 duplicated lines in each of the two PowerShell provisioning tests; their shared helper reduced overall and new-code duplication to 0.0%. The Windows job ran the Core security tests with the actual ACL checks. Local SonarQube Community Build scans of `ad4271b` and the subsequent Windows Agent ACL changes each passed their own Quality Gate with 90.7% overall coverage and 0.0% overall duplication. The latter also reported zero bugs, vulnerabilities, code smells and security hotspots. These local scans cannot substitute for a current SonarCloud PR analysis because the server, rules and new-code baseline differ. A live renewal of the local self-hosted CA leaf certificates and an OpenBao-backed Fleetory startup with both gateways and the PostgreSQL → immudb audit pipeline passed on 18 October 2026. The pipeline passed again on 19 October using the new dedicated immudb account. The PowerShell provisioning test runs in CI and remains under Sonar static analysis; it is excluded from the .NET coverage denominator because `dotnet-coverage` cannot instrument PowerShell. The Sonar project card for `main` remains a separate analysis until PR #2 merges; PR metrics cannot be substituted for that card.
+
+At `9b1de04`, [run 39668272054](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39668272054) passed strict build, 196 tests, coverage and SonarCloud. Its Windows TLS probe failed in the readiness retry because `$socket?.Dispose()` was parsed as an unset variable when the first connection attempt arrived before the listener. The retry now explicitly disposes a non-null socket. The subsequent [run 39669524437](https://github.com/aroginsky-maker/Fleetory-v2/actions/runs/39669524437) at `d2283bf` passed both Windows and Linux jobs, with the percentages above. The local full quality run reported 93.64% production coverage, with Sonar not configured locally.
+
+## Required before completion
+
+The Baseline section 20 secret-scanning gate now uses the pinned, MIT-licensed
+Gitleaks CLI against committed HEAD and all ancestors in a restricted Linux
+container. The policy retains all upstream default rules and refuses inline,
+fingerprint and repository-config suppressions. A real-scanner regression suite
+checks clean history, historical/merge-only token detection, redaction and ten
+failure/bypass cases. Linux CI runs both that suite and the repository scan;
+details and scope limits are in [SecretScanning.md](docs/quality/SecretScanning.md).
+This adds source-history evidence without closing the production controls below.
+
+- Run the approved Windows host PKI preflight during each production provisioning and renewal. The script and ephemeral root-only wire test are implemented, but production installation, custody, renewal approval and rollback evidence still need deployment records; the earlier local machine without those store entries still needs its own provisioning before that probe can pass.
+- Validate the controlled Admin recovery runbook with production incident approval and credential custody; validate production retention of the scope-reparenting approval and impact records before allowing hierarchy changes.
+- CA issuance and renewal policy, secure root distribution, grant delivery, production validation of Admin registration/rotation and verified physical-device approval for certificate replacement or lost-key recovery; production custody and retention of recovery evidence. The two-root rollover mechanism is implemented, but operator validation remains.
+- Deploy the isolated signer behind authenticated requests and an auditable approval path, distribute Agent trust files securely, define an approval protocol for high-risk and bulk commands, and wire Agent runtime enforcement before execution is enabled.
+- Production immudb TLS, retention/backups and independent receipt anchoring; the state verifier, export-package verifier, append-only receipt invariants and local disposable restore drill are tested, but production still needs a separately administered WORM/object-lock destination, signed-key custody and deployment records. A dedicated account is verified in the local lab, but production account provisioning still requires its own deployment process.
+- Negative and recovery security tests, then final strict build, full test suite and current Sonar Quality Gate.
+
+The local self-hosted lab validates integration behavior; it is not a production security deployment. PR #2 remains draft and unmerged while these controls are open.

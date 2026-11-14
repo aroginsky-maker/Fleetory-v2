@@ -1,0 +1,570 @@
+# Protected command signer deployment
+
+Fleetory now includes the separate `Fleetory.CommandSigner.Host` executable.
+It exposes only authenticated signing of empty `Inventory.Refresh` envelopes;
+Agent command delivery/execution and high-risk/bulk approvals are not enabled.
+The signer remains a separate trust domain from Fleetory Server and Agent.
+
+## Run the mTLS host
+
+Publish `src/Fleetory.CommandSigner.Host/Fleetory.CommandSigner.Host.csproj` for
+the selected Windows/Linux host and run its DLL as the dedicated signer identity.
+Use a protected management address, dedicated approval-service client CA/leaf
+grants and a separate signer database login. No application Server or Agent
+certificate should be granted signer-client authority.
+
+```text
+dotnet Fleetory.CommandSigner.Host.dll --Signer:SecretsDirectory=/run/fleetory-signer --Signer:TransitAddress=https://transit.example --Signer:TransitKey=agent-command --Signer:TransitKeyVersion=2
+```
+
+The default listener is `127.0.0.1:9443`. Set `Signer:BindAddress` to one specific
+management IP and `Signer:Port` to the approved port. Wildcard addresses and
+additional `Kestrel:Endpoints` are refused. Configuration can also be supplied
+through `FLEETORY_SIGNER_` environment variables using `__` for nested keys.
+Do not put tokens, connection strings or private keys in command arguments.
+
+The required secret files are loaded through the shared bounded file provider:
+
+| File | Value |
+| --- | --- |
+| `signer-server-ca` | Approved public server root CA PEM, one or two roots |
+| `signer-server-cert` | Server leaf followed by intermediate CA PEMs |
+| `signer-server-key` | Matching TLS private-key PEM |
+| `signer-policy` | JSON below, containing public client trust and explicit grants |
+| `signer-postgresql` | Separate runtime login connection string; local transport or verified TLS |
+| `signer-transit-token` | Short-lived, sign-only Transit token |
+| `signer-transit-public-key` | Base64 DER SubjectPublicKeyInfo for the pinned P-256 key version |
+
+`signer-policy` uses camelCase properties `rootsPem`, `intermediatesPem` (optional)
+and `callers`. Each caller contains `callerId`, `certificateSha256`, `deviceIds`
+(array of UUID strings), `notBefore` and `expiresAt` (UTC strings). All fields are
+validated; unknown/duplicate JSON properties, private-key policy material and
+malformed/missing callers fail startup. Existing policy bounds still apply.
+Mount directories/files with service-only access and protect their parent paths;
+Unix files require private modes, and Windows deployments must provision private
+service/System/Administrators ACLs. The shared loader rejects links and bounded
+UTF-8 violations. Windows TLS deployments must also perform host PKI provisioning
+as described in the Windows preflight runbook.
+
+Provision journal schema v3 with `eng/provision-signing-journal.sql`. Grant the
+runtime login only CONNECT, schema USAGE and SELECT/INSERT on all three signer
+request/result/rejection tables, and only SELECT on `client_certificate_revocations`.
+Keep the revocation writer on an independent operator identity. Startup and `/health/ready` check these
+rights, deny UPDATE/DELETE/TRUNCATE/schema CREATE and reject privileged,
+replication-capable or session-role-switched connections. Use direct grants;
+runtime login membership in other roles is rejected. Database credentials must not be shared with
+Fleetory Server. `/health/live` and `/health/ready` require registered mTLS too;
+readiness verifies the journal, while Transit failures are reported by signing
+requests and must be monitored separately.
+
+Send `POST /signing/inventory-refresh` with exactly `requestId` and `deviceId`
+as UUID JSON strings. The certificate must come from the TLS connection;
+forwarded-certificate headers cannot supply authentication. TLS 1.2/1.3 and
+client certificates are mandatory. The host permits at most four in-flight
+requests, defaults to ten requests/minute globally (configurable 1–60), rejects
+bodies above 1 KiB and applies a twenty-second application deadline, with up to
+five additional seconds for denial-audit cleanup after cancellation. Limits
+also apply to health probes. There is no HTTP listener, general command API,
+cookie login, forwarded-header trust or public command execution route.
+
+The response contains request/device/command IDs, format version, command type,
+issued/expiry times, nonce, signing key ID and base64 signature, with `no-store`.
+Reconstruct the signed envelope with an empty payload and verify it using the
+existing Core contract. Duplicate requests return 409, invalid JSON returns 400,
+scope denials return 403 and rate/concurrency denials return 429. HTTP rejections
+are committed with the actual peer fingerprint and a fixed reason; valid parsed
+request/device IDs are retained. `X-Fleetory-Audit-Id` identifies the denial record.
+If rejection audit fails, the response is 503. Operational errors use fixed
+responses and do not return backend exceptions or credentials.
+
+For disposable local tests only, Development plus explicit
+`Signer:AllowLoopbackHttpTransit=true` allows loopback HTTP Transit. Production
+rejects it even when the flag is supplied. The signer listener always remains
+HTTPS/mTLS. Grant/CA additions and other policy changes require a controlled restart;
+certificate revocations take effect through the database without restart, as below.
+Atomic policy reload, production custody, TLS-handshake audit retention, delivery
+reconciliation and WORM/SIEM export remain deployment/integration controls.
+
+## Restricted Linux container profile
+
+Build the Release solution first, then create a fresh, narrowly scoped build
+context. Run these commands from the repository root with PowerShell:
+
+```powershell
+dotnet build Fleetory.sln -c Release
+./eng/package-command-signer.ps1 -Name approved-release
+docker build --tag fleetory-command-signer:approved-release ./artifacts/command-signer-container/approved-release
+```
+
+The packager refuses existing output paths and unexpected Fleetory assemblies.
+Only runtime DLLs and the host's two runtime manifests enter the image context;
+Server/Agent implementations, application settings, development secrets and the
+raw publish directory are excluded. The Dockerfile pins the official .NET 10
+runtime manifest by digest and uses its `app` user (UID 1654). Rebuild under a new
+release name when updating the application or approved runtime digest.
+
+Provision a separate protected volume named `fleetory-signer-secrets` through
+the deployment secret manager, outside this build context. Its files must be
+owned by UID 1654, mode 0400, with a non-writable directory. Include the seven
+required files above and an approved public PEM bundle `infrastructure-ca`.
+For remote PostgreSQL, the connection string in `signer-postgresql` must use
+`SSL Mode=VerifyFull;Root Certificate=/run/fleetory-signer/infrastructure-ca`
+with the actual approved database hostname. Its runtime login retains only the
+documented signer journal privileges. The Transit origin must use HTTPS and a
+certificate valid for its hostname under the approved trust configuration.
+
+After provisioning the dedicated `signer-management` network and credentials,
+the following profile starts the service with a local management port. Substitute
+the approved Transit origin and key version; do not put credentials in arguments:
+
+```powershell
+docker run --detach --name fleetory-command-signer `
+  --network signer-management --publish 127.0.0.1:9443:9443 `
+  --read-only --cap-drop ALL --security-opt no-new-privileges:true `
+  --pids-limit 64 --memory 256m `
+  --mount type=volume,source=fleetory-signer-secrets,target=/run/fleetory-signer,readonly `
+  --env SSL_CERT_FILE=/run/fleetory-signer/infrastructure-ca `
+  fleetory-command-signer:approved-release `
+  --Signer:SecretsDirectory=/run/fleetory-signer --Signer:Port=9443 `
+  --Signer:TransitAddress=https://transit.example --Signer:TransitKey=agent-command --Signer:TransitKeyVersion=2
+```
+
+These runtime flags are required; the Dockerfile alone does not enforce them.
+Do not mount the Docker socket, Server directories, signing private keys or
+unrelated host paths. Attach one network with one container IP: the entrypoint
+resolves that concrete IP and refuses an empty or multiple-address result,
+preserving the host's wildcard-listener prohibition. The listener certificate
+must match the hostname used by the approval client. The localhost port is a
+starting management profile; production routing/firewall rules, capacity limits,
+protected log collection and secret-volume custody need their own deployment
+evidence. A Docker administrator controls containers and volumes and remains
+outside this process-isolation boundary.
+
+`SignerProcessIsolationTests` builds this image and executes the actual host in
+a separate restricted Linux process. It checks UID, effective capabilities,
+no-new-privileges, read-only root and secret mount, absence of the Docker socket,
+Server binary and secrets in an unrelated process, and denial of journal reads
+to an unrelated database login. It signs over real mTLS with verified PostgreSQL
+TLS, verifies the returned signature, restarts the host, rejects the same RequestId
+without a second signing call and checks sanitized TLS-failure logging. Its HTTPS
+Transit endpoint is a disposable test implementation with a real P-256 key held
+outside the signer container; it does not establish production OpenBao/HSM custody.
+The earlier real OpenBao lab check remains separate evidence. Full tests now
+require Docker even when an external PostgreSQL test database is configured.
+
+## TLS failures before HTTP
+
+The signer listener now emits a structured warning when a connection leaves TLS
+admission without reaching the accepted HTTPS stage. This covers missing,
+unregistered or foreign client certificates, malformed/plaintext traffic,
+disconnects and the existing five-second handshake deadline. HTTP requests over
+successfully established TLS continue to use the PostgreSQL rejection journal;
+an HTTP 400/403 is not reclassified as a TLS failure.
+
+Collect JSON console events with category
+`Fleetory.CommandSigner.Host.SigningTlsHandshakeAudit` and EventId `701`
+(`SignerTlsHandshakeNotEstablished`). Their `State` contains:
+
+| Field | Meaning |
+| --- | --- |
+| `Schema` | `fleetory.signer-tls-failure.v1` |
+| `AuditEventId` | New UUID for this connection observation |
+| `ObservedAt` | Server UTC timestamp when the failed admission returns |
+| `ConnectionId` | Bounded, sanitized server transport correlation ID |
+| `RemoteAddress`, `RemotePort` | Actual IP socket peer, or `unknown`/0 for a non-IP transport |
+| `ElapsedMilliseconds` | Monotonic elapsed time of the rejected admission |
+| `Reason` | Fixed `TlsNotEstablished` classification |
+
+This classification does not assert an authenticated caller or distinguish a
+bad certificate from a timeout. A client retry may create multiple distinct
+connection observations. The event contains no exception text, certificate
+subject/PEM, raw handshake bytes, attempted HTTP headers, tokens or private keys.
+Forwarded headers cannot supply its peer address or connection identity.
+The audit category retains warning-level output even when generic console
+logging is disabled. Byte-level Kestrel connection logging is not enabled.
+
+Capture stdout under the dedicated service identity into the approved protected
+collector, configure retention/rotation and capacity, monitor collector health,
+and retain the required incident records outside the signer host. The events are
+operational logs, not rows in the authenticated signing journal, and console
+emission alone does not establish durable storage, WORM custody or delivery.
+Connections rejected before entering the endpoint middleware still require
+transport/Kestrel resource-limit monitoring. Production collector provisioning,
+retention and independent custody remain open deployment controls.
+
+## Implemented Transit client contract
+
+`Fleetory.CommandSigning` currently signs only an argument-free, one-minute
+`Inventory.Refresh` envelope for an explicit DeviceId. It pins the Transit key
+version and P-256 public key and verifies each returned signature locally.
+
+The client has a ten-second total deadline covering connection, response
+headers, body buffering, JSON parsing and the final cancellation check before
+releasing an envelope. Caller cancellation shares this lifetime; an already
+cancelled call sends no request. Responses are limited to 4 KiB. Invalid JSON,
+missing or incorrectly typed signature fields, unexpected key versions and
+invalid signatures fail closed.
+
+Production requires a credential-free HTTPS origin. Redirects, cookies and
+inherited proxies are disabled; provide a direct route to the approved Transit
+origin. The sign-only token must contain at most 8192 visible ASCII characters
+with no whitespace or control characters. HTTP status failures retain the
+status code but omit the remote reason phrase and body; JSON and signature
+encoding errors also use fixed messages. Do not log request headers or tokens.
+
+Unit tests cover rejected credentials and malformed responses. Real loopback
+HTTP tests verify stalled headers, stalled bodies and caller cancellation;
+their explicit test-only HTTP setting does not permit production HTTP. These
+client checks are combined with the host's mTLS and journal controls described
+above; production approval deployment remains a separate requirement.
+
+## Implemented caller authorization component
+
+`SigningClientAuthorizationPolicy` and `AuthorizedCommandSigner` provide the
+input authorization layer for the standalone host. The host must first
+prove possession of the client key through an actual mTLS handshake and pass
+that connection's certificate. A certificate supplied in JSON, an HTTP header
+or a forwarded-certificate header is not authentication and must not be used.
+
+Each protected `SigningClientGrant` binds a configured caller ID to one exact
+DER SHA-256 fingerprint, explicit DeviceIds and a UTC half-open validity window
+`[NotBefore, ExpiresAt)`, at most 24 hours long. Policy creation rejects duplicate
+fingerprints, duplicate/empty DeviceIds and malformed grants. It copies public
+CA certificates and target sets, so later mutation or disposal of input objects
+does not widen trust. Limits are two roots, three intermediates, 64 grants and
+1024 explicit DeviceIds per grant; there is no wildcard target.
+
+Authorization requires the pinned leaf, digital-signature usage, explicit
+client-authentication EKU, a currently valid chain to an approved custom root,
+a current grant and the exact target. System roots and downloaded intermediates
+do not grant trust. Each approved root is checked separately so rollover also
+works when the old and new CAs have the same subject name and different keys.
+An unregistered Server or Agent certificate is denied even
+when its chain is trusted. The wrapper checks authorization before Transit
+access and again before releasing the signed envelope, and returns the configured
+caller identity for the durable request record. Its only operation remains empty
+`Inventory.Refresh`; high-risk and bulk signing are unavailable.
+
+This component performs no CRL/OCSP lookup. Rotation may allow two explicit leaf
+grants during overlap. The required `ISigningClientRevocations` additionally reads
+the exact leaf denylist, without caching, before reservation, after reservation,
+after Transit and after the result commit. The host also checks it on each HTTP
+request, including health probes and requests on an already established TLS
+connection. Read failure withholds the signature; HTTP returns 503 with a durable
+denial record when that journal remains available. A revoked leaf returns 403.
+TLS admission still uses the protected static CA/grant policy; revocation denial
+happens at HTTP authorization and does not terminate every idle TLS connection.
+Atomic host reload, authenticated approval integration and production deployment
+still require independent evidence. The host supplies the actual mTLS connection
+certificate and request limits; the library alone does not prove key possession.
+
+## Revoke a signer client certificate
+
+Use an independently approved incident/evidence bundle and exact DER SHA-256.
+In the separate signer database, give the operator a dedicated login with CONNECT,
+schema USAGE, table SELECT and column INSERT on `certificate_sha256`,
+`incident_reference`, `operator_reference`, `approver_reference` and `evidence_sha256`
+in `signer.client_certificate_revocations` only. Do not grant table-wide INSERT:
+the operator must not supply database-generated event ID, session identity or time.
+It needs no ownership, memberships, UPDATE, DELETE, TRUNCATE or signing-journal
+write privileges. The signer runtime must have SELECT only on this table;
+startup rejects both table and individual-column write grants. The three signing
+journal tables also reject individual-column UPDATE/REFERENCES and table TRIGGER rights.
+Upgrade existing deployments with the idempotent schema v3 provisioning script
+and explicit SELECT grant before replacing the host binary; an old schema or
+missing/excessive denylist permissions fail startup.
+
+In one operator session, set the five `fleetory.signer_revoke.*` settings documented
+in `eng/revoke-signing-client.sql`, then execute that script with `ON_ERROR_STOP`.
+Inputs are `certificate_sha256`, `incident_reference`, `operator_reference`,
+`approver_reference` and `evidence_sha256`. Fingerprint and evidence digest must
+be uppercase 64-character SHA-256; references are bounded, nonempty, control-free
+and operator/approver must differ after trimming and case normalization.
+
+The single statement forces `synchronous_commit=on` and atomically appends the
+certificate fingerprint, event UUID, evidence pointers, database `session_user`
+and recording time. Read back that row and retain its event UUID with the approved
+bundle. Duplicate revocation refuses to replace the first record. Reference
+strings do not authenticate people or verify the evidence bundle; independent
+approval, digest/custody validation and WORM/SIEM retention remain operator duties.
+
+After commit, make an authenticated probe with the revoked leaf and verify 403
+with its denial audit ID, then use a separately authorized replacement leaf to
+verify continued scoped service. There is no unrevocation operation: replacement
+requires a newly issued and explicitly granted certificate. Revocation during
+Transit or result commit withholds the envelope on the following current read;
+pending/completed journal rows remain for reconciliation. A completed row alone
+does not prove delivery. Revocation cannot recall an envelope already returned
+or a response that has passed the final check; stop downstream dispatch and
+rotate affected Agent trust separately when the incident requires it.
+
+## Implemented durable request journal
+
+`AuthorizedCommandSigner` requires an `ISigningRequestJournal`, current
+`ISigningClientRevocations` and a nonempty
+RequestId. `PostgreSqlSigningRequestJournal` uses the independent `signer` schema;
+provision it with `eng/provision-signing-journal.sql` under a deployment owner in
+the separate signer database. Supply its data source from the protected signer
+secret configuration. Fleetory Server must not receive these database credentials.
+Do not point this component at Platform/Core tables or use the Server account.
+Use local protected PostgreSQL transport or a verified TLS data source; production
+host transport enforcement remains part of the host integration.
+
+The runtime role needs only CONNECT to that database, USAGE on `signer`, and
+SELECT/INSERT on `signer.signing_requests`, `signer.signing_results` and
+`signer.signing_rejections`. Do not
+grant table/schema ownership, UPDATE, DELETE, TRUNCATE or schema CREATE. The
+provisioning script does not create a login or embed a password; record runtime
+role provisioning separately. PostgreSQL must retain its durable fsync/WAL and
+backup configuration. Each journal transaction explicitly sets
+`synchronous_commit=on`, including when the connection's default is off.
+
+Before Transit access, a unique RequestId reservation commits the configured
+caller identity, client certificate SHA-256, target DeviceId, fixed command type
+and database acceptance time. Concurrent or later attempts with that RequestId
+are rejected, including attempts with changed caller/target metadata. A failure
+after reservation leaves a pending row; it is never removed or retried by the
+signer. An operator must reconcile the incident and request before authorizing
+any new RequestId. A new RequestId must not be used blindly to bypass this state.
+
+After local signature verification, the journal commits CommandId, signing key
+ID, database recording time and SHA-256 over canonical signing bytes followed
+by the 64-byte signature. It stores no bearer credential, private key, payload
+or raw signature. Completion is bound to every reservation identity field;
+repeated identical completion is idempotent and conflicting completion fails.
+The signer rechecks authorization and cancellation after this commit and only
+then returns the envelope. A completion row proves signing was journaled, not
+that an Agent received or executed the command. Lost acknowledgements, database
+errors and cancellation require reconciliation rather than another signature.
+
+This implements durable records for authorized signing attempts. The host also
+records HTTP denials in `signing_rejections`; TLS negotiation failures happen
+before HTTP and require retained TLS operational diagnostics. The read-only
+operator reconciliation described below is implemented; delivery acknowledgement
+correlation remains open. The
+separate WORM/SIEM export, immutable retention and independent administrator
+custody remain deployment/integration requirements; database append permissions
+alone do not establish those controls.
+
+## Reconcile a signing request after a lost response
+
+Use `eng/reconcile-signing-request.sql` in the independent signer database, under
+an approved incident. Give the reconciliation operator a separate direct login
+with CONNECT, schema USAGE and SELECT on `signer.signing_requests` and
+`signer.signing_results` only. No signer/Transit credential, schema ownership,
+role membership or journal write privileges are needed. Keep the PostgreSQL
+service profile/password file protected outside Fleetory Server and the repository;
+never put a database password in the command line.
+
+Stop further upstream dispatch for the affected request and confirm the approved
+database/restore lineage first. In a **fresh** PostgreSQL session, set the known
+canonical nonzero UUID:
+
+```sql
+SET fleetory.signer_reconcile.request_id = '9ade91ca-6ec3-48e6-886f-2396fde9549a';
+```
+
+Then execute `eng/reconcile-signing-request.sql` with stop-on-error enabled.
+For psql, use the approved service profile with `-X -q -A -t -v ON_ERROR_STOP=1`
+and load the file using `\i`. Retain its single JSON result in a new protected
+incident artifact. Record the exact artifact hash in the independently retained
+incident/evidence bundle. The script sets a read-only transaction, UTC output,
+a five-second statement timeout and two-second lock timeout. It rejects role
+switching and any already assigned transaction, so it cannot accidentally commit
+earlier writes. Do not run it inside an existing transaction.
+
+The observation records schema `fleetory.signing-reconciliation.v1`, RequestId,
+database name, actual operator login, observation time, the authorized request
+metadata and any committed CommandId/key ID/envelope SHA-256. A single SELECT
+joins the reservation/result under one database snapshot. It returns no raw
+signature, private key, bearer token or signing credential and changes no rows.
+
+| Status | Meaning and incident action |
+| --- | --- |
+| `NotFound` | No reservation is visible in this snapshot. Check pending work, the exact RequestId and database/restore freshness; absence does not authorize a retry. |
+| `Pending` | Reservation exists without a committed result. Transit may already have signed; reconcile independently and preserve the row. |
+| `SigningRecorded` | A signing result was committed. The host may still have withheld it or lost the response; correlate with independent delivery evidence. |
+
+Every observation reports `automaticRetryAllowed`, `deliveryVerified` and
+`executionVerified` as false. A permission failure, lock timeout or database
+failure produces an error, not `NotFound`. A later observation may see a newly
+committed result; observation time is not an immutable global cutoff.
+
+If an envelope was actually retained, compare its DeviceId, CommandId and key ID
+with this record and compare SHA-256 of its canonical `GetSigningBytes()` followed
+by the 64-byte signature with `envelopeSha256`. Also verify its signature using
+the approved device-bound public key. This comparison does not authorize delivery,
+re-signing or bypassing Agent expiry/replay checks. The tool neither regenerates
+a signature nor authorizes a new RequestId. Production operator approvals, latest
+database custody, delivery acknowledgements and WORM retention remain separate
+controls.
+
+## Export a bounded signer journal observation
+
+`eng/export-signing-journal.sql` produces one JSON observation containing all
+visible request, result, HTTP-rejection and client-revocation records from the
+independent signer database. This supplies an extract for reviewed evidence
+retention; it is not an incremental delivery worker or a WORM acknowledgement.
+
+Use a dedicated direct login with CONNECT, USAGE on `signer` and SELECT on exactly
+`signer.signing_requests`, `signer.signing_results`, `signer.signing_rejections`
+and `signer.client_certificate_revocations`. It needs no ownership, memberships,
+journal mutation rights, Transit credential or access to Fleetory Server tables.
+Keep its PostgreSQL service/password files protected outside Git and the Server
+deployment. Run the script in a fresh session with stop-on-error enabled; for
+psql use the approved service profile with `-X -q -A -t -v ON_ERROR_STOP=1`
+and load the script with `--file` or `\i`. Credentials must not appear in arguments.
+
+The script explicitly selects UTF-8 client output for its transaction. Native
+psql tests reproduce failures with inherited `LATIN1` and `WIN1251` when incident
+references contain Cyrillic, accented Latin or CJK characters; the export now
+preserves those references and emits exactly one parseable JSON observation.
+These tests use the real psql client in disposable PostgreSQL Linux containers;
+their local socket trust is not a production authentication profile.
+
+Capture the single JSON result through the operator's approved mechanism into
+a new private incident artifact. Refuse an existing output path: psql's `--output`
+alone can overwrite a file and is not a no-overwrite capture mechanism. On any
+error discard an incomplete capture; do not archive it as a successful extract.
+Hash the exact retained UTF-8 bytes, including any final newline, and retain that
+digest and the actual object/version identifier in the independent incident
+record. Verify the received bytes and approved retention/object-lock controls
+at the external destination; the SQL script does not contact that destination.
+Do not use Windows PowerShell 5.1's `>` redirection for this capture: it can
+transcode native output to UTF-16. Use a reviewed capture that retains UTF-8 bytes
+and enforces a new private destination before computing the retained hash.
+
+The `fleetory.signer-journal-snapshot.v1` observation includes database/operator
+identity, UTC observation time, `readOnly`, `snapshotComplete` and the four arrays
+`requests`, `results`, `rejections` and `revocations`. Row fields use their database
+column names. UUID/fingerprint/digest, scope, reason and revocation-evidence
+metadata are retained; private keys, bearer credentials, raw signatures and
+command payloads are not selected. Explicit column lists prevent a future schema
+column from silently entering the export. Treat identity and incident references
+as protected operational data.
+
+The script requires a fresh repeatable-read, read-only transaction. All four
+arrays share the same database snapshot even if another connection commits
+while the export is running. Each table is limited to 5000 visible rows and the
+rendered UTF-8 JSON to 8 MiB. Exceeding either bound fails without returning a
+truncated observation. Statement and lock deadlines are five and two seconds.
+The payload exists only in transaction-local memory, with no new database object
+or persistent setting. Previously pending writes or switched roles are refused.
+
+`snapshotComplete` refers only to the four tables visible in this one snapshot;
+it is not a freshness or historical-integrity guarantee. A later commit can appear
+in a later observation. This tool has no cursor and must not be used as an
+exactly-once incremental exporter. If the bounded snapshot cannot fit, use a
+separately reviewed scalable export/backup procedure; do not truncate or delete
+journal rows to make the limit pass. `deliveryVerified`, `executionVerified` and
+`independentCustodyVerified` remain false. Trusted database/restore lineage,
+independent retention and WORM/SIEM delivery remain deployment controls.
+
+## Independently verify a retained signer snapshot
+
+Use PowerShell 7.2 or later on the receiving/review host:
+
+```powershell
+./eng/verify-signing-journal-snapshot.ps1 -SnapshotPath '<absolute retained JSON path>' -ExpectedSha256 '<independently approved SHA-256>'
+```
+
+Obtain the expected digest from the independently retained approval/incident
+record. The verifier reads one bounded byte buffer and checks that exact buffer's
+SHA-256 before parsing UTF-8 JSON. The retained hash includes any final LF/CRLF;
+the JSON payload remains bounded to 8 MiB plus those native newline bytes.
+No reserialization or second file read supplies the approved hash.
+
+It checks exact case-sensitive top-level and row field sets, rejects duplicate
+properties, enforces typed confirmation/non-custody flags, four arrays of at most
+5000 rows, string fields, canonical UUID/digest shapes and UTC timestamp syntax.
+Nullable target/request fields remain allowed for HTTP rejections. Unsupported
+schemas, unknown fields, UTF-16 captures, invalid UTF-8 and malformed JSON fail.
+The result reports `fleetory.signer-snapshot-verification.v1`, the actual byte
+count/SHA-256, database/operator metadata, observation time and four row counts.
+It emits no incident references or row contents and leaves the input unchanged.
+
+`approvedDigestMatched` means the supplied expected digest matched the captured
+bytes. The tool cannot authenticate the approval record, original database,
+operator identity or restore lineage, and does not validate every database
+business constraint or cross-row relationship. Without checkpoint mode, an old
+artifact with its old approved digest can pass; independent latest-evidence
+selection remains required.
+Delivery, execution and independent-custody flags remain false. File verification
+does not create external retention, an object lock or a WORM acknowledgement.
+
+For a restore/continuity review, also supply `-CheckpointPath` and
+`-CheckpointSha256` together, identifying the latest independently retained and
+approved earlier snapshot. Both files undergo the same bounded digest/schema
+verification. The candidate must use the same database name, have an equal or
+later UTC observation time and preserve every known request, result, rejection
+and revocation row under its primary identity. A removed row or changed known
+row fails, even when the candidate has its own matching digest and a fresh
+observation timestamp. Duplicate primary identities are rejected in either mode.
+
+New rows are allowed, including a result completing an earlier pending request.
+A rotated export login, array/property order, equivalent UTC spelling and UUID
+letter case do not change the retained row meaning. Comparison normalizes those
+representations; other string metadata remains exact. The summary adds
+`checkpointVerified` and the actual `checkpointSha256`. It never replaces either
+input file or advances a trust anchor automatically.
+
+This checks preservation of the known row set. It does not prove authenticity of
+new rows, identify a database server from its name, establish physical backup
+lineage or ensure that the supplied checkpoint is the latest approved one. Keep
+that checkpoint and its digest outside the potentially restored/compromised
+database. After validation, retain the result in the independent recovery record
+before approving any restored signer startup. An operator decision and the
+remaining production recovery controls still apply.
+
+The bounded reader is shared with immudb receipt tools; their PowerShell 5.1
+compatibility and existing size limit remain unchanged. The signer verifier uses
+PowerShell 7.2+ for strict JSON enumeration. Tests cover received-byte tampering,
+duplicate/coerced fields, schema/encoding/size limits, native newline boundaries
+and read-only behavior. Real psql output with legacy client encodings also passes
+through this verifier in the PostgreSQL integration tests.
+
+## Key and service isolation
+
+1. Create a non-exportable P-256 signing key in the approved HSM or Transit
+   engine. Disable plaintext backup and record the key ID and version in the
+   change record. The private key must never be present in Fleetory Server,
+   Agent trust directories, CI artifacts or operator workstations.
+2. Deploy the signer on a separate service identity and network segment. Accept
+   requests only over authenticated mTLS from the approved approval service;
+   deny Server, Agent and public web networks by default.
+3. Issue a short-lived sign-only credential with no secret-read, key-create,
+   key-delete or policy-admin capability. Store it in the deployment secret
+   manager and rotate it independently of the signing key.
+4. Log every request with signer key version, command ID, DeviceId, approval
+   correlation ID, requester and outcome. Never log private key material,
+   bearer tokens or command payload secrets.
+
+## Two-person approval
+
+- The requester and approver must be distinct authenticated identities. Both
+  must approve the exact command type, target DeviceId, canonical payload hash,
+  expiry and incident/change reference.
+- The signer must reject missing, expired, replayed, mismatched or single-person
+  approvals. A changed payload or target requires a new approval record.
+- High-risk and bulk command classes remain disabled until this gate and the
+  future Agent execution host are deployed and independently tested.
+- Keep approval, signing and delivery records for the approved retention
+  period in the independent audit/WORM system. A lost acknowledgement is
+  resolved by correlation ID; never retry a signature blindly.
+
+## Agent trust distribution and rotation
+
+1. Publish only the signer public key and version to the device-scoped Agent
+   trust directory through the protected provisioning channel. The directory
+   and files must be owned by the Agent identity, LocalSystem or Administrators
+   and must reject broad ACLs, symbolic links and unauthorized writes.
+2. During key rotation, distribute the new public key, verify overlap, sign a
+   test command for an approved DeviceId, then retire the old key after the
+   recorded overlap deadline. Archive the old fingerprint and approval record.
+3. A trust-file mismatch, unknown key version, replay or revoked DeviceId must
+   fail closed before a command reaches the future execution handler.
+
+The local OpenBao Transit smoke test validates non-exportable key use, replay
+rejection and Server-token denial. It is not production signer custody or an
+approval deployment; those require the independent service, mTLS, HSM/Transit
+records and retained approval evidence described here.

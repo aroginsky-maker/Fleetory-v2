@@ -1,0 +1,22 @@
+{
+  admin off
+  servers {
+    protocols h1 h2
+  }
+}
+__FLEETORY_HOST__ {
+  encode zstd gzip
+  header X-Content-Type-Options nosniff
+  header Referrer-Policy no-referrer
+  @private path /admin /admin/* /agent /agent/* /api/admin /api/admin/* /api/agent /api/agent/*
+  respond @private 404
+  reverse_proxy 127.0.0.1:5088
+}
+__FLEETORY_AUTH_HOST__ {
+  encode zstd gzip
+  header X-Content-Type-Options nosniff
+  header Referrer-Policy no-referrer
+  @private path /admin /admin/* /realms/master /realms/master/* /health /health/* /metrics
+  respond @private 404
+  reverse_proxy 127.0.0.1:18080
+}

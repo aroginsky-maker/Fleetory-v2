@@ -1,0 +1,245 @@
+#!/usr/bin/env python3
+"""Read-only byte preflight of an explicitly pinned six-component recovery set."""
+import argparse
+from contextlib import contextmanager
+import ctypes
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import stat
+import sys
+
+import audit_archive as archive
+
+SCHEMA = 'fleetory.recovery-files.v1'
+KINDS = {'application-postgres', 'signer-postgres', 'audit-export',
+         'audit-immudb', 'identity-postgres', 'provider-raft'}
+MAX_MANIFEST = 64 * 1024
+MAX_ARTIFACT = 64 * 1024 * 1024
+SEGMENT = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z')
+RESERVED = re.compile(r'(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?\Z', re.I)
+
+
+def relative_parts(value):
+    archive.require(type(value) is str and 0 < len(value) <= 512)
+    parts = value.split('/')
+    archive.require(1 <= len(parts) <= 4)
+    for part in parts:
+        archive.require(SEGMENT.fullmatch(part) and not part.endswith('.') and not RESERVED.fullmatch(part))
+    return parts
+
+
+def ordinary_directory(path):
+    info = path.lstat()
+    archive.require(stat.S_ISDIR(info.st_mode) and not stat.S_ISLNK(info.st_mode)
+                    and not getattr(info, 'st_file_attributes', 0) & 0x400)
+    if os.name == 'posix':
+        archive.require(info.st_uid in (0, os.geteuid()))
+        writable = info.st_mode & 0o022
+        archive.require(not writable or (info.st_uid == 0 and info.st_mode & stat.S_ISVTX))
+
+
+def regular_single_file(info):
+    return stat.S_ISREG(info.st_mode) and info.st_nlink == 1 and not getattr(info, 'st_file_attributes', 0) & 0x400
+
+
+def windows_file_api():
+    """Shared typed Win32 file-handle primitives; callers select their own access flags."""
+    from ctypes import wintypes
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    create = kernel.CreateFileW
+    create.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+                       wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    create.restype = wintypes.HANDLE
+    final = kernel.GetFinalPathNameByHandleW
+    final.argtypes = [wintypes.HANDLE, wintypes.LPWSTR, wintypes.DWORD, wintypes.DWORD]
+    final.restype = wintypes.DWORD
+    close = kernel.CloseHandle
+    close.argtypes = [wintypes.HANDLE]
+    close.restype = wintypes.BOOL
+    return kernel
+
+
+def _windows_descriptor(path, new_file=False):
+    """Checked final handle: existing read-only input or exclusive new ledger."""
+    import msvcrt
+    kernel = windows_file_api()
+    create, final, close = kernel.CreateFileW, kernel.GetFinalPathNameByHandleW, kernel.CloseHandle
+    access, sharing, disposition, flags = (0xC0000000, 0, 1, 0x80200080) if new_file else (0x80000000, 1, 3, 0x08200000)
+    handle = create(str(path), access, sharing, None, disposition, flags, None)
+    if handle == ctypes.c_void_p(-1).value:
+        raise OSError('Recovery input cannot be opened.')
+    try:
+        buffer = ctypes.create_unicode_buffer(32768)
+        length = final(handle, buffer, len(buffer), 0)
+        archive.require(0 < length < len(buffer))
+        name = buffer.value
+        if name.startswith('\\\\?\\UNC\\'):
+            name = '\\\\' + name[8:]
+        elif name.startswith('\\\\?\\'):
+            name = name[4:]
+        archive.require(os.path.normcase(name) == os.path.normcase(str(path)))
+        mode = os.O_RDWR if new_file else os.O_RDONLY
+        fd = msvcrt.open_osfhandle(handle, mode | os.O_BINARY)
+        handle = None
+        return fd
+    finally:
+        if handle is not None:
+            close(handle)
+
+
+def windows_open(path):
+    """Deny write/delete sharing, refuse a reparse leaf and check the final path before reading."""
+    return _windows_descriptor(path)
+
+
+def windows_create_new(path):
+    """Never overwrite or share a new purpose ledger; keep its checked handle open."""
+    return _windows_descriptor(path, new_file=True)
+
+
+@contextmanager
+def rooted(root):
+    root = Path(root).absolute()
+    for ancestor in reversed([root, *root.parents]):
+        ordinary_directory(ancestor)
+    if os.name == 'nt':
+        # CI TEMP may use RUNNER~1. Expand names without resolving reparse targets.
+        root = windows_long_root(root)
+        for ancestor in reversed([root, *root.parents]):
+            ordinary_directory(ancestor)
+    if os.name == 'posix':
+        fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            yield root, fd
+        finally:
+            os.close(fd)
+    else:
+        yield root, None
+
+
+def windows_long_root(root):
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    convert = kernel.GetLongPathNameW
+    convert.argtypes = [ctypes.c_wchar_p, ctypes.c_wchar_p, ctypes.c_uint32]
+    convert.restype = ctypes.c_uint32
+    buffer = ctypes.create_unicode_buffer(32768)
+    length = convert(str(root), buffer, len(buffer))
+    archive.require(0 < length < len(buffer))
+    return Path(buffer.value)
+
+
+def relative_open(root, root_fd, name):
+    # Enforce lexical scope at the open boundary, including direct library callers.
+    parts = relative_parts(name)
+    root = Path(root).absolute()
+    parent = root
+    for part in parts[:-1]:
+        parent /= part
+        ordinary_directory(parent)
+    candidate = parent / parts[-1]
+    if not regular_single_file(candidate.lstat()):
+        raise archive.ArchiveError('Recovery input must be an ordinary single-link file.')
+    canonical_root = root.resolve(strict=True)
+    canonical_file = candidate.resolve(strict=True)
+    if canonical_root != root or not canonical_file.is_relative_to(canonical_root) or canonical_file != candidate:
+        raise archive.ArchiveError('Recovery path boundary validation failed.')
+    parts = canonical_file.relative_to(canonical_root).parts
+    if os.name == 'nt':
+        archive.require(root_fd is None)
+        descriptor = windows_open(canonical_file)
+    else:
+        archive.require(os.name == 'posix')
+        expected = root.stat(follow_symlinks=False)
+        held = os.fstat(root_fd)
+        if not stat.S_ISDIR(held.st_mode) or (held.st_dev, held.st_ino) != (expected.st_dev, expected.st_ino):
+            raise archive.ArchiveError('Recovery root descriptor does not match.')
+        parent = os.dup(root_fd)
+        try:
+            for part in parts[:-1]:
+                child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+                os.close(parent)
+                parent = child
+            descriptor = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        finally:
+            os.close(parent)
+    try:
+        info = os.fstat(descriptor)
+        archive.require(regular_single_file(info))
+        return descriptor
+    except Exception:
+        os.close(descriptor)
+        raise
+
+
+def file_state(info):
+    return info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns, info.st_ctime_ns
+
+
+def inspect_file(root, root_fd, name, limit, retain=False):
+    with os.fdopen(relative_open(root, root_fd, name), 'rb') as stream:
+        before = os.fstat(stream.fileno())
+        archive.require(regular_single_file(before) and 0 < before.st_size <= limit)
+        digest, count, data = hashlib.sha256(), 0, bytearray()
+        while True:
+            packet = stream.read(min(64 * 1024, limit + 1 - count))
+            if not packet:
+                break
+            count += len(packet)
+            archive.require(count <= limit)
+            digest.update(packet)
+            if retain:
+                data.extend(packet)
+        archive.require(count == before.st_size and file_state(os.fstat(stream.fileno())) == file_state(before))
+    return digest.hexdigest(), count, bytes(data)
+
+
+def verify(root, manifest, expected):
+    archive.require(type(expected) is str and re.fullmatch(r'[A-Fa-f0-9]{64}', expected))
+    with rooted(root) as (directory, root_fd):
+        digest, _, packet = inspect_file(directory, root_fd, manifest, MAX_MANIFEST, retain=True)
+        archive.require(digest == expected.lower())
+        record = archive.parse(packet, MAX_MANIFEST)
+        archive.fields(record, ('schema', 'artifacts'))
+        archive.require(record['schema'] == SCHEMA)
+        archive.fields(record['artifacts'], KINDS)
+        paths, total = {manifest.casefold()}, 0
+        # Validate the whole schema/path set before opening any artifact.
+        for entry in record['artifacts'].values():
+            archive.fields(entry, ('path', 'bytes', 'sha256'))
+            relative_parts(entry['path'])
+            archive.require(entry['path'].casefold() not in paths)
+            paths.add(entry['path'].casefold())
+            archive.require(type(entry['bytes']) is int and 0 < entry['bytes'] <= MAX_ARTIFACT)
+            archive.require(type(entry['sha256']) is str and archive.HEX.fullmatch(entry['sha256']))
+        for kind in sorted(KINDS):
+            entry = record['artifacts'][kind]
+            actual, size, _ = inspect_file(directory, root_fd, entry['path'], entry['bytes'])
+            archive.require(size == entry['bytes'] and actual == entry['sha256'])
+            total += size
+    return {'schema': 'fleetory.recovery-files-verification.v1', 'manifestSha256': digest,
+            'verifiedArtifacts': len(KINDS), 'verifiedBytes': total,
+            'fullSystemRecoveryVerified': False, 'independentCustodyVerified': False,
+            'globalAtomicSnapshotClaimed': False, 'phase7Complete': False}
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--manifest', required=True)
+    parser.add_argument('--expected-sha256', required=True)
+    args = parser.parse_args()
+    try:
+        # The invoking operator selects the private working directory; CLI names
+        # have no authority to replace it with an unrelated filesystem root.
+        result = verify(Path.cwd(), args.manifest, args.expected_sha256)
+    except Exception:
+        print('Recovery files verification failed; no input contents logged.', file=sys.stderr)
+        return 1
+    print(json.dumps(result, sort_keys=True))
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
