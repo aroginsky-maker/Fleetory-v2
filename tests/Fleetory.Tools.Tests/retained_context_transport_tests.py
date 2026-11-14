@@ -3,12 +3,14 @@ from contextlib import ExitStack
 import copy
 import json
 import os
+import shutil
 from pathlib import Path
 import sys
 import tempfile
 import time
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 
 import audit_probe_image_tests as vectors
 from historical_audit_restore_tests import fixture as native_plan
@@ -159,6 +161,23 @@ class RetainedContextContracts(unittest.TestCase):
         for nonce in ('../x','AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA'):
             with self.assertRaises(REFUSALS):policy.ledger_name(nonce)
         with self.assertRaises(REFUSALS):policy.ledger_name(self.plan['nonce'],ready=1)
+
+
+    def test_private_runtime_directories_precede_interpreter_directory(self):
+        system=self.root/'system-interpreter-directory';system.mkdir(mode=0o700)
+        names={role:('pwsh' if role=='powershell' else role)+('.exe' if os.name=='nt' else '')
+            for role in ('python','powershell','git','dotnet')}
+        pins={'python':SimpleNamespace(path=system/names['python'])}
+        for role,name in names.items():
+            (system/name).write_bytes(b'public system-directory decoy');(system/name).chmod(0o700)
+            if role!='python':
+                directory=self.root/('private-'+role);directory.mkdir(mode=0o700)
+                path=directory/name;path.write_bytes(b'public pinned private runtime');path.chmod(0o700)
+                pins[role]=SimpleNamespace(path=path)
+        env=policy._environment(pins)
+        for role in policy.ROLES:
+            selected=Path(shutil.which(names[role],path=env['PATH']) or '').resolve(strict=True)
+            self.assertEqual(selected,pins[role].path)
 
 
 if __name__=='__main__':

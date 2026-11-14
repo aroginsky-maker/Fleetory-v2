@@ -26,6 +26,11 @@ and ready records retain nonce consumption across replay/failure. Source, runtim
 reference and actual process identity checks bracket data admission. The parent
 keeps the accepted context usable only while the actual child is live.
 
+Private pinned PowerShell, Git and .NET directories precede the interpreter
+directory in the child lookup order. A system interpreter under `/usr/bin` must
+not select shared tools instead of the parent's pinned private copies. A real
+filesystem decoy contract checks this order; executable hashes remain mandatory.
+
 The fixed close frame closes all child publication descriptors before a bounded
 closure receipt and normal process exit. The parent checks its own process fence
 and exact output closure. Killing the actual controller after its offer prevents

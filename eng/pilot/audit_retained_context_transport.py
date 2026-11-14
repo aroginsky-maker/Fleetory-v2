@@ -38,6 +38,11 @@ def frame_size(prefix,bound):
 def source_measurement(repository):return publication.prep._measure_sources(repository,SOURCES)
 
 
+def _environment(runtimes):
+    # Interpreter directories such as /usr/bin must not shadow the pinned private tools.
+    return dict(process.environment(runtimes['powershell'],tuple(runtimes[n] for n in ('git','dotnet','python'))))
+
+
 def ledger_name(nonce,*,ready=False):
     packet.require(type(ready) is bool)
     return ('retained-context-ready-' if ready else 'retained-context-start-')+packet.identity(nonce)+'.json'
@@ -137,7 +142,7 @@ class RetainedContextTransport:
                 allowed=('pwsh','pwsh.exe') if role=='powershell' else (role,role+'.exe')
                 packet.require(self._runtimes[role].path.name.lower() in allowed)
             self._parent=guard.identity.current_identity(self._runtimes['python'])
-            env=dict(process.environment(self._runtimes['python'],tuple(self._runtimes[n] for n in ROLES)))
+            env=_environment(self._runtimes)
             command=SimpleNamespace(executable=self._runtimes['python'],arguments=('-I','-B',str(self._repo/'eng/pilot/RetainedContextController.py')),
                 directory=self._repo,env=env)
             self._check_pins()
