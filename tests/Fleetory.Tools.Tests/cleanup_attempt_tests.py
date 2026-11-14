@@ -168,6 +168,11 @@ class CleanupAttemptContracts(unittest.TestCase):
             with patch.object(policy.os,'getpid',return_value=os.getpid()+1),self.assertRaises(ValueError):attempt.report()
         with self.assertRaises(ValueError):attempt.report()
 
+    def test_close_during_namespace_recheck_refuses_without_none_attribute_access(self):
+        with self.assertRaises(ValueError):
+            with self.claim() as attempt:
+                with patch.object(attempt._directory,'check',side_effect=attempt.close):attempt.report()
+
     def test_returned_record_cannot_rearm_or_change_the_binding(self):
         with self.claim() as attempt:
             changed=attempt.report();changed['controller']['pid']+=1;changed['status']='NEW'

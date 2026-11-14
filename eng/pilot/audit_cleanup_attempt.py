@@ -42,28 +42,37 @@ class ConsumedAttempt:
         self._identity=self._file_identity()
         packet.require(0<len(self._bytes)<=MAX_RECORD)
 
+    def _checked_stream(self):
+        stream=self._stream
+        if stream is None:raise ValueError('Consumed attempt is closed.')
+        packet.require(os.getpid()==self._pid and not stream.closed)
+        return stream
+
     def _file_identity(self):
-        packet.require(self._stream is not None and os.getpid()==self._pid)
+        stream=self._checked_stream()
         self._directory.check()
-        held=os.fstat(self._stream.fileno());current=(self._directory.path/self._name).lstat()
+        packet.require(self._stream is stream)
+        held=os.fstat(stream.fileno());current=(self._directory.path/self._name).lstat()
         packet.require(files.regular_single_file(held) and files.regular_single_file(current) and
-            (held.st_dev,held.st_ino)==(current.st_dev,current.st_ino) and not os.get_inheritable(self._stream.fileno()))
+            (held.st_dev,held.st_ino)==(current.st_dev,current.st_ino) and not os.get_inheritable(stream.fileno()))
         if os.name=='posix':
             packet.require(held.st_uid==os.geteuid() and stat.S_IMODE(held.st_mode)==0o600)
         return held.st_dev,held.st_ino
 
     def _seal(self):
+        stream=self._checked_stream()
         packet.require(not self._sealed and self._file_identity()==self._identity)
-        packet.require(self._stream.write(self._bytes)==len(self._bytes))
-        os.fsync(self._stream.fileno())
+        packet.require(stream.write(self._bytes)==len(self._bytes))
+        os.fsync(stream.fileno())
         if os.name=='posix':os.fsync(self._directory.fd)
         self._sealed=True
         self.check()
 
     def check(self):
+        stream=self._checked_stream()
         packet.require(self._sealed and self._file_identity()==self._identity)
-        self._stream.seek(0)
-        packet.require(self._stream.read(MAX_RECORD+1)==self._bytes)
+        stream.seek(0)
+        packet.require(stream.read(MAX_RECORD+1)==self._bytes and self._stream is stream)
 
     def report(self):
         self.check()

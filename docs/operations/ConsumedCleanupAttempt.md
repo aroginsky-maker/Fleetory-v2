@@ -38,11 +38,11 @@ attempt. Closing the observer does not remove or reset the record. A fresh
 process with the same nonce is refused while the record remains in place,
 including when it supplies a different otherwise valid ticket.
 
-Seventeen generated filesystem contracts cover one winner among eight concurrent
+Eighteen generated filesystem contracts cover one winner among eight concurrent
 claimants, separate-process replays after normal and abrupt process exit, wrong
 packets, mutable input races, lost responses, short writes, flush failure,
 changed bytes/directories, hardlinks, malformed
-existing records, closure/fork guards, returned-record mutation and OS-specific
+existing records, closure/fork guards, closure during namespace recheck, returned-record mutation and OS-specific
 mode/exclusive-sharing checks. Windows and Linux CI require the suite without
 soft failure or skipped methods.
 
@@ -55,3 +55,7 @@ origin, connected lifetime enforcement, immutable-ID resource reobservation,
 expiry/controller/supervisor-death cleanup and a full service recovery remain
 open. No original input, secret, private PKI, provider or VPS is used. Phase 7
 and draft PR #2 remain open.
+
+The stream reference is retained locally and explicitly checked for closure. A
+close during the directory recheck is a controlled refusal before descriptor
+access; it cannot turn into a None attribute error or a successful report.
