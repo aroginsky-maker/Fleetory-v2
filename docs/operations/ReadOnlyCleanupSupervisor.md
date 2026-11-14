@@ -50,3 +50,7 @@ provider or VPS is accessed. Independent supervisor lifetime, actual create
 receipt origin, durable attempt consumption before action, immutable-ID resource
 reobservation, expiry/controller-death cleanup and cleanup after supervisor death
 remain open. Operational leases, full recovery, Phase 7 and PR #2 remain open.
+
+The next [consumed-attempt preparation](ConsumedCleanupAttempt.md) preserves a
+local nonce claim across process restart without adding an executor or upgrading
+this handoff to independent cleanup.

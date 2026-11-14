@@ -1,6 +1,12 @@
 # Fleetory v2 — PHASE 7 Security Foundation progress report
 
-**Status:** IN PROGRESS, 5 November 2026. PHASE 6 is complete; PHASE 8 has not started. Draft [PR #2](https://github.com/aroginsky-maker/Fleetory-v2/pull/2) contains the current implementation. The detailed controls and limits are maintained in [SecurityFoundation](docs/architecture/SecurityFoundation.md) and the [local lab guide](docs/architecture/SecurityLab.md).
+**Status:** IN PROGRESS, 14 November 2026. PHASE 6 is complete; PHASE 8 has not started. Draft [PR #2](https://github.com/aroginsky-maker/Fleetory-v2/pull/2) contains the current implementation. The detailed controls and limits are maintained in [SecurityFoundation](docs/architecture/SecurityFoundation.md) and the [local lab guide](docs/architecture/SecurityLab.md).
+
+The [closure evidence checklist](docs/operations/Phase7Closure.md) distinguishes
+implemented checks from the actual independent deployment, custody, PKI/Agent
+and full recovery evidence still needed. The [read-only supervisor](docs/operations/ReadOnlyCleanupSupervisor.md)
+and [consumed attempt](docs/operations/ConsumedCleanupAttempt.md) preparations
+do not grant cleanup authority or complete those controls.
 
 ## Implemented
 
