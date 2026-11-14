@@ -92,7 +92,11 @@ sonar.cs.vscoveragexml.reportsPaths=artifacts/coverage/coverage.xml
 
 Test projects remain part of Sonar analysis as test code. Production projects are not excluded from coverage to inflate percentages.
 
-The `eng/**` verification and packaging scripts and `tests/Fleetory.Tools.Tests/**` PowerShell tests remain in Sonar analysis, including duplication and issue checks. They are excluded only from Sonar's coverage denominator because `dotnet-coverage` instruments .NET assemblies and cannot measure PowerShell or shell execution. Their behavior is checked by the phase verification scripts, package smoke tests and the dedicated CI step. No production `src/**` code is excluded from coverage.
+The `eng/**` verification and packaging scripts, runtime/fixture helpers and compatibility entrypoints in `tests/Fleetory.Tools.Tests/**` remain main code in Sonar analysis, including duplication and issue checks. They are excluded only from Sonar's coverage denominator because `dotnet-coverage` instruments .NET assemblies and cannot measure PowerShell or shell execution. No production `src/**` code is excluded from coverage.
+
+Six pure CLI assertion suites are physically held in `tests/Fleetory.Tooling.Tests`: dependency audit, quality orchestration, Phase 7 readiness, immudb signed-state, receipt-export verification and the Sonar issue gate. Their metadata-only project sets `SonarQubeTestProject=true` and contains no hand-written C# compilation input. `IsTestProject=false` keeps VSTest from trying to run PowerShell. The existing CI commands still execute every suite through the original path: a compatibility entrypoint invokes the same PowerShell engine with its effective execution policy and arguments, and preserves the actual exit status. Missing targets, exceptions and explicit nonzero exits fail the entrypoint.
+
+The test-owner project is built explicitly between scanner begin and end; it does not enter `Fleetory.sln` or the runtime build graph. The scanner must report the six assertion files as TEST, while all operational Python/PowerShell code, native fixtures and old entrypoints remain MAIN. This follows Sonar's [main/test analysis model](https://github.com/SonarSource/sonar-scanner-msbuild/wiki/Analysis-of-product-projects-vs.-test-projects): test-specific rules still apply, but test code contributes no LOC, coverage or copy/paste metrics. That metric scope change is stated explicitly; it is not evidence that the assertion source became less duplicated. The working controls and thresholds, multi-language analysis and coverage exclusions are unchanged. No `sonar.exclusions` or test-project exclusion is added.
 
 `eng/verify-quality.ps1` also calculates a local overall production line-coverage value from Fleetory production modules in `coverage.xml`. This local figure is diagnostic; the authoritative new-code coverage result remains the Sonar server Quality Gate result.
 
@@ -164,9 +168,9 @@ standalone verify-sonar.ps1. The working coverage target remains about 90%.
 Run tests/Fleetory.Tools.Tests/QualityOrchestration.Tests.ps1 with PowerShell 7.3+
 and the pinned .NET toolchain. It copies the real entrypoints into generated
 fixtures and runs fresh PowerShell children, substituting only external dotnet
-and Docker commands to record the requested protocol. Twenty-eight CLI cases
+and Docker commands to record the requested protocol. Twenty-nine CLI cases
 check suite counts, exact unfiltered Release/coverage calls, strict/scanner
-ordering, architecture, audit options, failure propagation, stale/malformed/low
+ordering, the fixed test-owner build and its failure, architecture, audit options, failure propagation, stale/malformed/low
 coverage, preserved output and unconfigured/partial configuration results.
 The pinned real collector also runs a separate disposable child that writes a
 marker and exits 17; the test requires that exact nonzero status to propagate.
@@ -343,7 +347,7 @@ green. Do not purchase a plan, change visibility, split uploads to pretend the
 organization's total is smaller, or suppress working recovery code to fit the
 quota. Test classification must be proved from the scanner's actual generated
 inputs; adding an out-of-directory MSBuild link alone is insufficient with the
-pinned scanner. No assertion file is reclassified by this change.
+pinned scanner. The later physical separation of six pure suites above requires actual scanner input proof; runtime helpers and the other suites are not reclassified.
 
 The official [LOC rules](https://docs.sonarsource.com/sonarqube-cloud/administering-sonarcloud/managing-subscription/subscription-plans)
 describe the organization-wide count. Any later correction must preserve the

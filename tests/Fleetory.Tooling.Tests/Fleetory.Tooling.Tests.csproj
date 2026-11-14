@@ -1,0 +1,9 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <!-- Existing PowerShell CI entrypoints execute these tests; VSTest does not. -->
+    <IsTestProject>false</IsTestProject>
+    <SonarQubeTestProject>true</SonarQubeTestProject>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+  </PropertyGroup>
+</Project>

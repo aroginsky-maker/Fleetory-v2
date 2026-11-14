@@ -110,6 +110,12 @@ try {
         '--no-incremental', '--disable-build-servers'
     )
 
+    # These CLI assertion files have an explicit test owner without entering the runtime solution.
+    Invoke-Dotnet @(
+        'build', 'tests/Fleetory.Tooling.Tests/Fleetory.Tooling.Tests.csproj', '-c', 'Release',
+        '--no-incremental', '--disable-build-servers'
+    )
+
     $testCommand = 'dotnet test Fleetory.sln -c Release --no-build --no-restore'
     Invoke-Dotnet @(
         'tool', 'run', 'dotnet-coverage', '--allow-roll-forward', '--',
