@@ -212,6 +212,10 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/retained_context_transport_tests.py
 
+      - name: Verify retained own cleanup contracts on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/retained_cleanup_guard_tests.py
+
       - name: Verify held publication continuation contracts on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/publication_continuation_tests.py
@@ -688,6 +692,10 @@ jobs:
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/retained_context_transport_tests.py
 
+      - name: Verify retained own cleanup contracts
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/retained_cleanup_guard_tests.py
+
       - name: Verify held publication continuation contracts
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/publication_continuation_tests.py
@@ -698,7 +706,7 @@ jobs:
 
       - name: Verify actual native publication faults
         shell: pwsh
-        run: python3 -B ./tests/Fleetory.Tools.Tests/native_publication_faults.py --continuation-image
+        run: python3 -B ./tests/Fleetory.Tools.Tests/native_publication_faults.py --continuation-image --owned-cleanup
 
       - name: Verify native probe create contracts
         shell: pwsh

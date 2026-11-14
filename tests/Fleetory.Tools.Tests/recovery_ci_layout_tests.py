@@ -76,6 +76,7 @@ def validate(text):
                 ('retained publication runtime contracts', 'retained_runtime_tests.py'),
                 ('retained guardian preparation contracts', 'retained_guard_preparation_tests.py'),
                 ('retained public context transport contracts', 'retained_context_transport_tests.py'),
+                ('retained own cleanup contracts', 'retained_cleanup_guard_tests.py'),
                 ('public cleanup protocol contracts', 'cleanup_protocol_tests.py'),
                 ('read-only supervisor identity contracts', 'supervisor_identity_tests.py'),
                 ('actual read-only supervisor handoff', 'native_supervisor_observation.py'),
@@ -85,7 +86,7 @@ def validate(text):
                 ('native create fault contracts', 'native_create_faults_tests.py'),
                 ('public probe owner fault contracts', 'public_probe_faults_tests.py'),
                 ('actual native probe receipt acknowledgement', 'native_probe_receipt_ack.py')):
-            suffix = (' --continuation-image' if key=='quality' else ' --continuation') if filename=='native_publication_faults.py' else ''
+            suffix = (' --continuation-image --owned-cleanup' if key=='quality' else ' --continuation') if filename=='native_publication_faults.py' else ''
             step = ('      - name: Verify ' + title + platform + '\n'
                 '        shell: pwsh\n'
                 '        run: ' + executable + ' -B ./tests/Fleetory.Tools.Tests/' + filename + suffix + '\n')
@@ -492,6 +493,18 @@ class RecoveryCiLayoutTests(unittest.TestCase):
             self.refused(self.text.replace(command,'omitted',1))
             self.refused(self.text.replace('run: '+command,'continue-on-error: true\n        run: '+command,1))
             self.refused(self.text.replace(command,command+'\n          '+command,1))
+
+
+    def test_retained_owned_cleanup_contracts_cannot_be_omitted_or_softened(self):
+        for executable in ('python','python3'):
+            command=executable+' -B ./tests/Fleetory.Tools.Tests/retained_cleanup_guard_tests.py'
+            self.refused(self.text.replace(command,'omitted',1))
+            self.refused(self.text.replace('run: '+command,'continue-on-error: true\n        run: '+command,1))
+            self.refused(self.text.replace(command,command+'\n          '+command,1))
+
+    def test_actual_owned_cleanup_flag_cannot_be_removed_or_duplicated(self):
+        self.refused(self.text.replace(' --owned-cleanup','',1))
+        self.refused(self.text.replace(' --owned-cleanup',' --owned-cleanup --owned-cleanup',1))
 
 
 if __name__ == '__main__':

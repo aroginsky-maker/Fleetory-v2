@@ -63,6 +63,8 @@ SOURCES=(
     'eng/pilot/audit_publication_namespace.py',
     'eng/pilot/audit_retained_runtime.py',
     'eng/pilot/audit_retained_context_transport.py',
+    'eng/pilot/audit_retained_guard_protocol.py',
+    'eng/pilot/audit_retained_cleanup_guard.py',
     'eng/pilot/audit_supervisor_identity.py',
     'eng/pilot/audit_use_admission.py',
     'eng/pilot/audit_use_transaction.py',

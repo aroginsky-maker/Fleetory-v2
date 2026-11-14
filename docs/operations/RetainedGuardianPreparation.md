@@ -15,7 +15,7 @@ hashes. Even coordinated changes to an object's in-memory intent/bytes/hash
 cannot replace the original persisted intent. Unknown outcomes, flush errors,
 expired admission or lost responses retain consumption; no reset is provided.
 
-All 61 fixed public Python/profile inputs from the accepted public guardian
+All 63 fixed public Python/profile inputs from the accepted public guardian
 inventory are held and checked. The existing forty native-publication inputs
 and four retained-runtime inputs remain held by the original capabilities;
 their exact-type/schema guards and sixty-second windows are unchanged. The

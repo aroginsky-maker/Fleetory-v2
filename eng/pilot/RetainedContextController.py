@@ -45,7 +45,9 @@ def run():
         parent=held.enter_context(transport.guard.identity.HeldLocalPeer('parent',python,value['parent']))
         own=held.enter_context(transport.guard.identity.HeldLocalPeer('self',python,value['controller']))
         runtimes={}
-        for role,name in (('powershell','pwsh'),('git','git'),('dotnet','dotnet')):
+        roles=(('powershell','pwsh'),('git','git'),('dotnet','dotnet'))
+        if value['schema']==transport.GUARDIAN_HEADER:roles+= (('docker','docker'),)
+        for role,name in roles:
             path=Path(shutil.which(name) or '').resolve(strict=True)
             runtimes[role]=held.enter_context(transport.process.PinnedFile(path,value['runtimes'][role],True))
         root=repository/'artifacts'/('retained-context-controller-'+plan['nonce']);root.mkdir(mode=0o700,exist_ok=False)
@@ -68,11 +70,15 @@ def run():
                 nativeOwnerExited=report['nativeOwnerExited'],nativeOwnedMembersAbsent=retained.native_result['fence']['noRunningMembersVerified'],
                 retainedOpenedNs=retained.opened,retainedExpiresNs=retained.expires)
             _write(transport.frame(offer,transport.MAX_OFFER));_write(context)
-            box={'done':False};threading.Thread(target=_close_input,args=(box,),daemon=True).start()
-            while not box['done']:
-                retained.check();packet.require(parent.snapshot()['state']=='live');time.sleep(0.05)
-            packet.require(not box.get('error') and packet.strict_json(box['raw'],transport.MAX_CLOSE)==transport.close_request(plan['nonce'],H(context)))
-            retained.check();packet.require(descriptors=={name:pin.fd for name,pin in retained._bundle.pins.items()})
+            if value['schema']==transport.GUARDIAN_HEADER:
+                import audit_retained_guard_protocol as guardian
+                guardian.serve(retained,image,parent,session,repository,runtimes,root,raw,offer,descriptors,_write)
+            else:
+                box={'done':False};threading.Thread(target=_close_input,args=(box,),daemon=True).start()
+                while not box['done']:
+                    retained.check();packet.require(parent.snapshot()['state']=='live');time.sleep(0.05)
+                packet.require(not box.get('error') and packet.strict_json(box['raw'],transport.MAX_CLOSE)==transport.close_request(plan['nonce'],H(context)))
+                retained.check();packet.require(descriptors=={name:pin.fd for name,pin in retained._bundle.pins.items()})
         for fd in descriptors.values():
             try:os.fstat(fd)
             except OSError:pass

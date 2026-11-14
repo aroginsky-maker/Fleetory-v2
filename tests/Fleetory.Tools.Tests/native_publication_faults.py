@@ -153,8 +153,9 @@ def reference_fixture():
     shutil.rmtree(root,onexc=readonly_file);packet.require(not root.exists())
 
 
-def run(*, continuation=False, with_image=False):
-    packet.require(type(continuation) is bool and type(with_image) is bool and (not with_image or continuation))
+def run(*, continuation=False, with_image=False, with_cleanup=False):
+    packet.require(type(continuation) is bool and type(with_image) is bool and type(with_cleanup) is bool and
+        (not with_image or continuation) and (not with_cleanup or with_image))
     with reference_fixture() as prepared:
         root,repository,copied=prepared.root,prepared.repository,prepared.copied
         powershell,python,git,dotnet=prepared.powershell,prepared.python,prepared.git,prepared.dotnet
@@ -196,13 +197,17 @@ def run(*, continuation=False, with_image=False):
         if continuation:
             from native_publication_continuation import exercise
             continued = exercise(repository,root,powershell,python,git,dotnet,published,with_image=with_image)
-        transported=None
+        transported=owned_cleanup=None
         if with_image:
             from native_retained_context_transport import exercise
             transported=exercise(prepared)
+        if with_cleanup:
+            from native_retained_cleanup_guard import exercise as cleanup_exercise
+            owned_cleanup=cleanup_exercise(prepared)
+            packet.require(owned_cleanup['verified'] and owned_cleanup['actualRetainedControllers']==8 and owned_cleanup['positiveGuardianCleanupCases']==4 and owned_cleanup['fullTypedHandoffCleanupCases']==3)
         copied.check()
         tree=copied.tree_id;revision=copied.revision
-    return dict(schema='fleetory.generated-native-publication-faults.v1',verified=True,cases=outcomes,continuationProof=continued,retainedContextTransport=transported,
+    return dict(schema='fleetory.generated-native-publication-faults.v1',verified=True,cases=outcomes,continuationProof=continued,retainedContextTransport=transported,retainedOwnedCleanup=owned_cleanup,
         referencePublication=published,revision=revision,tree=tree,selectedSourceFilesPinned=36,nativeSeconds=30,
         ownPublicFixtureDisposed=True,actualCompilerChildObservedAndExited=True,compilerChildObservationSource='owned Job or process group plus held process handle/pidfd and pinned dotnet image',
         controllerDeathCleanupVerified=False,operationalLeaseAuthorized=False,nativeImageBuildVerified=False,
@@ -211,8 +216,8 @@ def run(*, continuation=False, with_image=False):
 
 if __name__=='__main__':
     args=sys.argv[1:]
-    packet.require(args in ([],['--continuation'],['--continuation-image']))
-    result=run(continuation=bool(args),with_image=args==['--continuation-image'])
+    packet.require(args in ([],['--continuation'],['--continuation-image'],['--continuation-image','--owned-cleanup']))
+    result=run(continuation=bool(args),with_image='--continuation-image' in args,with_cleanup='--owned-cleanup' in args)
     continued=result.pop('continuationProof')
     print('NATIVE PUBLICATION FAULTS PASS: '+json.dumps(result,sort_keys=True))
     if continued is not None:

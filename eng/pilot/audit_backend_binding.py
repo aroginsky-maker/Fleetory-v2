@@ -83,20 +83,32 @@ OBSERVATION_FIELDS = ('schema id name imageId created labels configImage user en
 
 
 def _container_identity(data, intent, returned_id, now, schema, fields):
+    value,created=_container_observation(data,intent,returned_id,schema,fields)
+    packet.require(intent['openedNs'] <= created <= now < intent['expiresNs'])
+    return value,created
+
+
+def _container_observation(data,intent,returned_id,schema,fields):
+    """Shape/identity only. Admission additionally checks time; this parser grants no cleanup authority."""
     packet.require(type(returned_id) is str and re.fullmatch('[a-f0-9]{64}', returned_id))
     value = packet.strict_json(data, MAX_OBSERVATION)
     packet.keys(value, fields)
     packet.require(value['schema'] == schema and value['id'] == returned_id and value['name'] == '/' + intent['name'] and
         value['imageId'] == intent['imageId'] and value['labels'] == intent['labels'])
     created = timestamp_ns(value['created'])
-    packet.require(intent['openedNs'] <= created <= now < intent['expiresNs'])
     return value, created
 
 
 def _container_sandbox(value):
-    packet.require(value['running'] is True and all(value[n] is False for n in ('paused', 'restarting', 'dead', 'privileged', 'publishAllPorts')))
-    packet.require(value['networkMode'] == 'none' and type(value['networks']) is dict and set(value['networks']) == {'none'})
-    packet.require(value['readonly'] is True and value['autoRemove'] is True and value['capDrop'] == ['ALL'] and
+    packet.require(value['running'] is True and value['autoRemove'] is True)
+    packet.require(type(value['networks']) is dict and set(value['networks']) == {'none'})
+    _container_common_sandbox(value)
+
+
+def _container_common_sandbox(value):
+    packet.require(all(value[n] is False for n in ('paused', 'restarting', 'dead', 'privileged', 'publishAllPorts')))
+    packet.require(value['networkMode'] == 'none')
+    packet.require(value['readonly'] is True and value['capDrop'] == ['ALL'] and
         value['securityOpt'] == ['no-new-privileges:true'])
     packet.require(value['mounts'] == [] and all(value[n] is None or value[n] == [] for n in
         ('capAdd', 'binds', 'volumesFrom', 'devices', 'deviceRequests')))

@@ -115,7 +115,14 @@ class ProbeImageBinding(image.ImageBinding):
         return self._context
 
     @staticmethod
-    def _observe(data, intent, returned_id, now):
+    def _observe(data,intent,returned_id,now):
+        value,created=ProbeImageBinding._profile_observation(data,intent,returned_id)
+        packet.require(intent['openedNs'] <= created <= now < intent['expiresNs'])
+        return value,created
+
+    @staticmethod
+    def _profile_observation(data,intent,returned_id):
+        """Fixed profile only. Caller ownership and admission windows remain separate requirements."""
         image.image_id(returned_id)
         value = packet.strict_json(data, container.MAX_OBSERVATION)
         packet.keys(value, 'schema id tags digests created labels rootfs layers os architecture user')
@@ -127,7 +134,6 @@ class ProbeImageBinding(image.ImageBinding):
         prefix = intent['bases'][2]['layers']
         packet.require(actual[:len(prefix)] == prefix and len(actual) == len(prefix) + 3)
         created = image.timestamp_ns(value['created'])
-        packet.require(intent['openedNs'] <= created <= now < intent['expiresNs'])
         return value, created
 
     def _record(self, value, created, now, frozen):

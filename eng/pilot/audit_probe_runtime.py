@@ -73,6 +73,11 @@ def prepare(session, source):
 def _observe_runtime(data, intent, returned_id, now, schema):
     value, created = container._container_identity(data, intent, returned_id, now, schema,
         container.OBSERVATION_FIELDS + ' environment ulimits')
+    _runtime_profile(value,intent)
+    return value,created
+
+
+def _runtime_profile(value,intent):
     packet.require(value['configImage'] == intent['imageId'] and value['user'] == PROFILE['user'] and
         value['entrypoint'] == PROFILE['entrypoint'] and value['command'] == COMMAND and value['environment'] == ENVIRONMENT)
     container._container_sandbox(value)
@@ -80,7 +85,6 @@ def _observe_runtime(data, intent, returned_id, now, schema):
         (('memory', PROFILE['memoryBytes']), ('nanoCpus', PROFILE['nanoCpus']), ('pidsLimit', PROFILE['pidsLimit']))))
     packet.require(value['tmpfs'] == TMPFS and value['ulimits'] == PROFILE['ulimits'])
     packet.require(all(type(value['ulimits'][0][key]) is int for key in ('Soft', 'Hard')))
-    return value, created
 
 
 class ProbeRuntimeBinding(linked.LinkedContainerBinding):

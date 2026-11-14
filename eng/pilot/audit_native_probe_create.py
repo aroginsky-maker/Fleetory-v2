@@ -116,19 +116,29 @@ class _Docker:
         packet.require(re.fullmatch(r'linux:[0-9]+\.[0-9]+\.[0-9]+(?:[-+][A-Za-z0-9_.-]+)?', version) and int(version.split(':')[1].split('.')[0]) >= 28)
 
     def _call(self, args):
+        return self._execute(args,b'',8,process.MAX_STDOUT)
+
+    def _execute(self,args,data,seconds,limit):
+        packet.require(type(args) is list and all(type(v) is str for v in args) and type(data) is bytes and
+            len(data)<=16*1024*1024 and type(seconds) is int and 1<=seconds<=25 and type(limit) is int and 0<limit<=16*1024*1024)
         self.pinned.check()
         env = dict(process.environment(self.pinned))
-        env.update(DOCKER_API_VERSION='1.48', COMPOSE_DISABLE_ENV_FILE='1')
+        env.update(DOCKER_API_VERSION='1.48', COMPOSE_DISABLE_ENV_FILE='1',DOCKER_BUILDKIT='0')
         with subprocess.Popen([str(self.pinned.path), '--context', self.context, *args], stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=0, env=env, shell=False) as child:
-            pumps = process._Pumps(child, b'');pumps.start()
+            pumps=process._Pumps(child,data)
+            for target,values in ((pumps._read,(child.stdout,pumps.stdout,limit,'stdout-bound')),
+                    (pumps._read,(child.stderr,pumps.stderr,process.MAX_STDERR,'stderr-bound')),(pumps._write,())):
+                thread=threading.Thread(target=target,args=values,daemon=True);pumps.threads.append(thread);thread.start()
+            deadline=time.monotonic()+seconds
             try:
-                child.wait(timeout=8)
+                while child.poll() is None:
+                    packet.require(not pumps.errors and time.monotonic()<deadline);time.sleep(0.01)
             finally:
                 if child.poll() is None:child.kill();child.wait(timeout=3)
                 pumps.finish()
-            packet.require(child.returncode == 0 and not pumps.errors)
-            result = bytes(pumps.stdout)
+            packet.require(child.returncode==0 and not pumps.errors and pumps.input_written==len(data))
+            result=bytes(pumps.stdout)
         self.pinned.check()
         return result
 

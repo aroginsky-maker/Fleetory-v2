@@ -55,14 +55,12 @@ full service recovery remain open. Linux process-group fencing does not prove
 containment of escaped sessions. Unknown outcomes retain records and are never
 reported as a completed image build, worker create or cleanup.
 
-Next, keep this actual controller alive while the independent parent performs
-the fixed verified public-context build, owns its complete immutable image and
-stopped-copy receipts, returns checked readback for the retained typed bindings,
-and creates the fixed sleep worker from its own image. Independent expiry/death
-cleanup must then use only the guardian's own creation facts and fresh full-ID
-inspection. Serialized preparation/transport reports are descriptive metadata,
-not authority tokens. The retained 660-second sleep profile has no proven
-thirty-second fallback; that fallback belongs only to the separate Python proof.
+The separate [retained own cleanup profile](RetainedOwnedCleanup.md) extends the
+fixed channel with image/readback and runtime binding stages. It uses a distinct
+header requiring a pinned Docker executable and keeps the original context-only
+profile fixed. Only the independent parent executes Docker; its own successful
+RPC replies and fresh immutable-ID inspections establish resource ownership.
+The serialized context/preparation records remain descriptive metadata.
 
 No original inputs, private PKI, provider, issuer, production token or VPS access
 is added. Phase 7 and draft PR #2 remain open, including independent WORM/custody,

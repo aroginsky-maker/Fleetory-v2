@@ -139,7 +139,7 @@ class RetainedContextContracts(unittest.TestCase):
         self.assertIn('eng/pilot/RetainedContextController.py',policy.SOURCES)
         self.assertIn('eng/pilot/audit_retained_context_transport.py',policy.SOURCES)
         self.assertEqual(len(policy.SOURCES),len(set(policy.SOURCES)))
-        self.assertEqual(len(policy.guard.SOURCES),61)
+        self.assertEqual(len(policy.guard.SOURCES),63)
 
     def test_source_pin_or_input_failure_consumes_start_before_spawn(self):
         paths={'python':Path(sys.executable).resolve()}

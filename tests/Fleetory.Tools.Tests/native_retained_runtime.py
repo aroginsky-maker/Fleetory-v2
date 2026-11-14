@@ -31,7 +31,7 @@ class RetainedRuntimeFixture(RuntimeFixture):
             report=prepared.report()
             packet.require(report['publicationDescriptorsHeld']==len(descriptors)==58 and
                 report['controller']['pid']==guard.os.getpid() and report['actualPreparingControllerIdentityVerified'] is True and
-                report['sourceFilesPinned']==len(guard.SOURCES)==61 and report['sourcePinsSha256']==H(C(sources)))
+                report['sourceFilesPinned']==len(guard.SOURCES)==63 and report['sourcePinsSha256']==H(C(sources)))
             packet.require(report['lineage']['heldDescriptorsSha256']==retained.descriptor_pin and
                 descriptors=={name:pin.fd for name,pin in retained._bundle.pins.items()})
         packet.require(target.report()['observationAttemptConsumed'] is False)

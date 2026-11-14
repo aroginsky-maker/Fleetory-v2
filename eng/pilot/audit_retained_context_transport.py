@@ -18,6 +18,7 @@ MAX_HEADER,MAX_OFFER,MAX_CLOSE=65536,32768,4096
 SECONDS=55
 SOURCES=tuple(dict.fromkeys((*publication.SOURCES,*guard.SOURCES)))
 SCHEMA='fleetory.retained-context-offer.v1'
+GUARDIAN_HEADER='fleetory.retained-guardian-header.v1'
 ROLES=('powershell','git','dotnet')
 
 
@@ -40,7 +41,8 @@ def source_measurement(repository):return publication.prep._measure_sources(repo
 
 def _environment(runtimes):
     # Interpreter directories such as /usr/bin must not shadow the pinned private tools.
-    return dict(process.environment(runtimes['powershell'],tuple(runtimes[n] for n in ('git','dotnet','python'))))
+    roles=('git','dotnet','docker','python') if 'docker' in runtimes else ('git','dotnet','python')
+    return dict(process.environment(runtimes['powershell'],tuple(runtimes[n] for n in roles)))
 
 
 def ledger_name(nonce,*,ready=False):
@@ -51,9 +53,9 @@ def ledger_name(nonce,*,ready=False):
 def _header(raw):
     value=packet.strict_json(raw,MAX_HEADER)
     packet.keys(value,'schema parent controller runtimes sourcePins nativePlanBase64 nativePlanSha256 manifestBase64 manifestSha256 bases')
-    packet.require(value['schema']=='fleetory.retained-context-header.v1')
+    packet.require(value['schema'] in ('fleetory.retained-context-header.v1',GUARDIAN_HEADER))
     guard.identity.protocol._identity(value['parent']);guard.identity.protocol._identity(value['controller'])
-    packet.keys(value['runtimes'],'python powershell git dotnet')
+    packet.keys(value['runtimes'],'python powershell git dotnet'+(' docker' if value['schema']==GUARDIAN_HEADER else ''))
     for digest in value['runtimes'].values():packet.hex_value(digest)
     packet.require(type(value['sourcePins']) is dict and set(value['sourcePins'])==set(SOURCES))
     for digest in value['sourcePins'].values():packet.hex_value(digest)
@@ -116,6 +118,8 @@ def close_request(nonce,context_pin):
 
 class RetainedContextTransport:
     """The independent parent owns the controller fence and expected public source bytes."""
+    _guardian=False
+
     def __init__(self,repository,operator_root,native_plan,reference,bases,*,runtime_paths,runtime_pins,source_pins):
         self._held=ExitStack();self._child=self._fence=self._pumps=None
         self._admitted,self._closed,self._result=False,False,None
@@ -133,12 +137,13 @@ class RetainedContextTransport:
             packet.require(type(source_pins) is dict and set(source_pins)==set(SOURCES))
             sources=dict(source_pins)
             self._sources=tuple(self._held.enter_context(publication.prep._RootInputPin(self._repo/name,sources[name])) for name in SOURCES)
-            packet.keys(runtime_paths,'python powershell git dotnet');packet.keys(runtime_pins,'python powershell git dotnet')
+            roles='python powershell git dotnet'+(' docker' if self._guardian else '')
+            packet.keys(runtime_paths,roles);packet.keys(runtime_pins,roles)
             runtime_paths,runtime_pins=dict(runtime_paths),dict(runtime_pins)
             bases=packet.strict_json(C(bases),MAX_OFFER)
             self._runtimes={name:self._held.enter_context(process.PinnedFile(runtime_paths[name],runtime_pins[name],True)) for name in runtime_paths}
             packet.require(self._runtimes['python'].path==Path(sys.executable).resolve(strict=True))
-            for role in ROLES:
+            for role in (*ROLES,*(('docker',) if self._guardian else ())):
                 allowed=('pwsh','pwsh.exe') if role=='powershell' else (role,role+'.exe')
                 packet.require(self._runtimes[role].path.name.lower() in allowed)
             self._parent=guard.identity.current_identity(self._runtimes['python'])
@@ -148,12 +153,12 @@ class RetainedContextTransport:
             self._check_pins()
             self._child=process._spawn(command);self._fence=process._create_fence(self._child)
             self._controller=guard._process_identity(self._fence.identity(self._child,self._runtimes['python']))
-            self._header=C(dict(schema='fleetory.retained-context-header.v1',parent=self._parent,controller=self._controller,
+            self._header=C(dict(schema=GUARDIAN_HEADER if self._guardian else 'fleetory.retained-context-header.v1',parent=self._parent,controller=self._controller,
                 runtimes={n:p.digest for n,p in self._runtimes.items()},sourcePins=sources,nativePlanBase64=encode(bytes(native_plan)),
                 nativePlanSha256=H(native_plan),manifestBase64=encode(reference.raw),manifestSha256=reference.pin,bases=probe.bases(bases)))
             packet.require(len(self._header)<=MAX_HEADER)
             self._pumps=process._Pumps(self._child,b'')
-            limit=bundle.MAX_CONTEXT+MAX_OFFER+MAX_CLOSE+8
+            limit=bundle.MAX_CONTEXT+MAX_OFFER+MAX_CLOSE+8+(65544 if self._guardian else 0)
             for stream,target,bound in ((self._child.stdout,self._pumps.stdout,limit),(self._child.stderr,self._pumps.stderr,4096)):
                 thread=threading.Thread(target=self._pumps._read,args=(stream,target,bound,'context-output-bound'),daemon=True)
                 self._pumps.threads.append(thread);thread.start()
@@ -161,14 +166,18 @@ class RetainedContextTransport:
             self._receive()
         except BaseException:self.close();raise
 
-    def _check_pins(self):
-        packet.require(not self._closed and os.getpid()==self._caller)
+    def _clock_check(self):
         process._check_deadline(self._mono,SECONDS)
         packet.require(0<=time.time_ns()-self._wall<SECONDS*1_000_000_000)
+
+    def _check_pins(self):
+        packet.require(not self._closed and os.getpid()==self._caller)
+        self._clock_check()
         self._start.check();self._reference.check()
         for source in self._sources:source.check()
         for runtime_pin in self._runtimes.values():runtime_pin.check()
         packet.require(guard.identity.current_identity(self._runtimes['python'])==self._parent)
+        self._clock_check()
 
     def _exited(self):return self._child.poll() is not None if os.name=='nt' else self._fence.exited()
 
@@ -179,9 +188,8 @@ class RetainedContextTransport:
 
     def _progress(self):
         packet.require(not self._closed and os.getpid()==self._caller)
-        process._check_deadline(self._mono,SECONDS)
-        packet.require(0<=time.time_ns()-self._wall<SECONDS*1_000_000_000 and
-            not self._pumps.errors and not self._pumps.stderr and not self._exited())
+        self._clock_check()
+        packet.require(not self._pumps.errors and not self._pumps.stderr and not self._exited())
 
     def _wait_bytes(self,count):
         while len(self._pumps.stdout)<count:
