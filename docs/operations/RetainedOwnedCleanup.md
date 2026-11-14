@@ -65,16 +65,16 @@ same wall/monotonic windows. Static profile parsers grant no authority. The
 ready guardian can finish cleanup during its separate 75-second cleanup window
 after the child/admission has expired; no child capability is revived. Controller closure always requires all owned process members absent. If the original source admission expired before closure, forced own-fence closure is recorded separately from graceful descriptor acknowledgement; the fixture does not demand an expired channel remain live.
 
-Contract fixtures close retained capabilities before removing their checked temporary source directories on both operating systems. Only typed lineage/resource tests construct the full publication fixture; timer, framing and lifecycle assertions use their own small generated setup. All 47 test methods and their assertions remain included.
+Contract fixtures close retained capabilities before removing their checked temporary source directories on both operating systems. Only typed lineage/resource tests construct the full publication fixture; timer, framing and lifecycle assertions use their own small generated setup. The original 47 test methods and their assertions remain included. Four additional small contracts check the test-only paused observation comparison, including changed identity/profile, extra fields and wrong original state.
 
 Portable contracts require positive typed bindings and refuse altered lineage,
 foreign IDs/observations, arbitrary fields, malformed/partial replies, changed
 persisted/held facts, expired admission, unsafe profiles, foreign creator objects
 and replay. Linux CI reuses the existing public publication/reference fixture
-for eight actual controllers: lease expiry, controller death while the parent
+for nine actual controllers: lease expiry, controller death while the parent
 waits, death after the own complete create reply before runtime binding, a real
 original admission expiry, foreign observation, lost create reply,
-partial create reply and CLI inspection failure. A standalone fixture supports
+partial create reply, CLI inspection failure and a paused own runtime. A standalone fixture supports
 only those fixed cases for Windows Docker Desktop validation. No original input
 or restored process is involved.
 
@@ -85,7 +85,16 @@ its own test resources under fresh profile checks. This test-only disposal does
 not reset or authorize the consumed guardian attempt. CLI/foreign-observation
 failures likewise refuse deletion and retain consumption before fixture disposal.
 
-Guardian/daemon/host death, paused or altered resources, pre-receipt crashes,
+The paused case uses only its own complete live creator reply and fixed full ID.
+It pauses that worker, requires the observed profile to differ only in
+`paused=true` and `status=paused`, and requires guardian refusal with zero removal
+calls and no closed/success receipt. A separate own fixture sentinel must remain
+unchanged. Only the live test creator unpauses its own exact observed object,
+then rechecks the original complete profile before separate fixture disposal.
+The consumed guardian start/delete is refused both before and after disposal;
+the fixture never normalizes an observation presented to the guardian.
+
+Guardian/daemon/host death, other altered resources, pre-receipt crashes,
 general bootstrap/compiler escaped sessions and independent rollback-resistant
 custody remain open. The separate Python worker's thirty-second passive fallback
 does not apply to this 660-second retained worker. There is no full RPO/RTO,

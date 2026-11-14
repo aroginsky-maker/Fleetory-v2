@@ -324,3 +324,27 @@ Increase `SONAR_QUALITYGATE_TIMEOUT` only when the Sonar server legitimately nee
 ### Quality Gate fails
 
 Read the server findings and fix the actual issues. Do not alter the gate or exclusions merely to obtain PASS.
+
+
+## SonarCloud quota refusal
+
+At commit `74cf81a2e8a867a2633d30a5cd912b6287f8acb8`, the official
+compute task `AaHbXTJGgdnaIrRUmdpk` rejected 50,255 main-code LOC against the
+organization's 50,000 limit. This is a backend quota failure, not a passed
+Quality Gate. CI #368's selected Windows retry passed; its Linux code/tests
+passed but the configured scanner gate and the aggregate remained failed.
+Printed previous project measures after that failed compute task are not
+current-commit official results.
+
+Keep the full existing analysis scope, thresholds and test execution. A local
+server analysis may be recorded separately with its exact revision, coverage
+source, metrics and limitations. It does not make the failed official check
+green. Do not purchase a plan, change visibility, split uploads to pretend the
+organization's total is smaller, or suppress working recovery code to fit the
+quota. Test classification must be proved from the scanner's actual generated
+inputs; adding an out-of-directory MSBuild link alone is insufficient with the
+pinned scanner. No assertion file is reclassified by this change.
+
+The official [LOC rules](https://docs.sonarsource.com/sonarqube-cloud/administering-sonarcloud/managing-subscription/subscription-plans)
+describe the organization-wide count. Any later correction must preserve the
+real main/test boundary and state the resulting metric scope explicitly.

@@ -15,7 +15,7 @@ from historical_audit_restore_tests import fixture
 
 C,H,packet=policy.C,policy.H,policy.packet
 CASES=('lease-expired','controller-exited','source-admission-expired','controller-exited-before-handoff','foreign-observation',
-    'lost-create-reply','partial-create-reply','cli-inspection-failure')
+    'lost-create-reply','partial-create-reply','cli-inspection-failure','own-runtime-paused')
 REFUSED=(OSError,ValueError,policy.context.process.LaunchError)
 
 
@@ -118,11 +118,16 @@ def _lost_reply(owner,case,captured):
         fixtureCreatorDisposedItsCapturedWorker=True,capturedWorkerId=captured[0].identifier,guardianCleanupAccepted=False)
 
 
-def _foreign(owner,captured):
+def _sentinel(owner,captured):
     intent=copy.deepcopy(owner._intent);nonce=str(uuid.uuid4())
     intent.update(nonce=nonce,name=policy.runtime.name(nonce),labels=dict(intent['labels'],**{'fleetory.audit.control.nonce':nonce}))
     opened=time.time_ns();raw=owner._docker._execute(policy.guard.native._arguments(intent),b'',8,16384);finished=time.time_ns()
     foreign=CapturedFixtureWorker(owner._docker,intent,raw,opened,finished);captured.append(foreign)
+    return foreign
+
+
+def _foreign(owner,captured):
+    foreign=_sentinel(owner,captured)
     original=owner._docker.inspect;execute=owner._docker._execute;deletions=[]
     def inspection(kind,identifier):
         if kind=='runtime':return foreign.observation
@@ -136,6 +141,40 @@ def _foreign(owner,captured):
     packet.require(not _absent(owner._docker,owner._resources['runtime'].reply.identifier))
     return dict(guardCleanupRefused=True,foreignContainerId=foreign.identifier,foreignContainerUntouched=True,
         ownContainerUntouchedBeforeFixtureDisposal=True,guardianDeleteCalls=0,guardianCleanupAccepted=False)
+
+
+def paused_fixture_observation(raw,original):
+    """Pure test comparison, not a capability or authorization to normalize a guard observation."""
+    expected=packet.strict_json(original,policy.container.MAX_OBSERVATION)
+    packet.require(expected['paused'] is False and expected['status']=='running')
+    expected.update(paused=True,status='paused')
+    packet.require(C(packet.strict_json(raw,policy.container.MAX_OBSERVATION))==C(expected))
+
+
+def _paused(owner,captured):
+    sentinel=_sentinel(owner,captured);resource=owner._resources['runtime'];resource.fresh()
+    client=owner._docker;identifier=resource.reply.identifier;original=resource.observation
+    packet.require(client._call(['container','pause',identifier])==identifier.encode('ascii')+b'\n')
+    try:
+        observed=client.inspect('runtime',identifier);paused_fixture_observation(observed,original)
+        execute=client._execute;deletions=[]
+        def tracked(args,data,seconds,limit):
+            if args[:2] in (['container','rm'],['image','rm']):deletions.append(args)
+            return execute(args,data,seconds,limit)
+        with patch.object(client,'_execute',side_effect=tracked):_refused_cleanup(owner)
+        packet.require(deletions==[] and 'runtime-closed' not in owner._records)
+        paused_fixture_observation(client.inspect('runtime',identifier),original)
+        packet.require(client.inspect('runtime',sentinel.identifier)==sentinel.observation)
+        result=dict(guardCleanupRefused=True,actualOwnRuntimePaused=True,pausedObservationSha256=H(observed),
+            pausedOwnContainerId=identifier,foreignContainerId=sentinel.identifier,foreignContainerUntouched=True,
+            ownContainerUntouchedBeforeFixtureDisposal=True,guardianDeleteCalls=0,guardianCleanupAccepted=False)
+    finally:
+        # Only the separate live test creator restores its exact own paused object for disposal.
+        paused_fixture_observation(client.inspect('runtime',identifier),original)
+        packet.require(client._call(['container','unpause',identifier])==identifier.encode('ascii')+b'\n')
+        resource.fresh()
+    result['fixtureOnlyUnpauseBeforeFreshDisposalVerified']=True
+    return result
 
 
 def _cli_failure(owner):
@@ -248,6 +287,7 @@ def exercise(prepared,cases=CASES):
                     packet.require(descriptors=={n:p.fd for n,p in reference.pins.items()})
                     if case=='foreign-observation':result=_foreign(owner,captured)
                     elif case=='cli-inspection-failure':result=_cli_failure(owner)
+                    elif case=='own-runtime-paused':result=_paused(owner,captured)
                     else:result=_positive(owner,case)
                 _replay(owner,prepared,raw,reference,paths,pins,sources,None if closed_capture is None else closed_capture['snapshot'])
             finally:
