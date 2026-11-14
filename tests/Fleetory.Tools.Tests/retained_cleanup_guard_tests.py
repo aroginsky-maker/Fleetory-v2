@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import tarfile
 import time
+from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -23,8 +24,10 @@ REFUSED=(OSError,ValueError,policy.guard.attempts.files.archive.ArchiveError,tar
 
 class RetainedCleanupContracts(unittest.TestCase):
     def setUp(self):
-        self.held=ExitStack();self.addCleanup(self.held.close)
-        self.fixture=vectors.RetainedRuntimeContracts();self.fixture.setUp();self.addCleanup(self.fixture.doCleanups)
+        self.held=ExitStack();self.fixture=vectors.RetainedRuntimeContracts()
+        # Close retained capabilities while their checked source directories still exist.
+        self.addCleanup(self.fixture.doCleanups);self.addCleanup(self.held.close)
+        self.fixture.setUp()
         self.opened=time.time_ns();self.source,self.image=self.fixture.source()
         self.repo=self.fixture.fixture.repo;self.root=self.fixture.fixture.root
         for name in policy.context.SOURCES:
@@ -161,13 +164,6 @@ class RetainedCleanupContracts(unittest.TestCase):
             with self.assertRaises(REFUSED):policy._Resource(owner,reply,self.target.intent,b'{}')
         self.assertEqual(calls,[])
 
-    def test_complete_creator_reply_is_required_without_trimming_or_id_adoption(self):
-        client=object.__new__(policy._Docker)
-        invalid=(b'',b'b'*63+b'\n',b'b'*64,b' '+b'b'*64+b'\n',b'B'*64+b'\n',b'b'*64+b'\nextra\n')
-        for raw in invalid:
-            with patch.object(client,'_execute',return_value=raw,create=True),self.assertRaises(REFUSED):client._created('runtime',[],'a'*64)
-        with patch.object(client,'_execute',return_value=b'b'*64+b'\n',create=True):reply=client._created('runtime',[],'a'*64)
-        self.assertIs(reply.token,policy._TOKEN);self.assertEqual(reply.identifier,'b'*64)
 
     def test_own_worker_cleanup_does_not_recheck_expired_child_admission(self):
         _,resource,_,calls=self.owner_resource()
@@ -221,10 +217,6 @@ class RetainedCleanupContracts(unittest.TestCase):
                 runtime_paths=paths,runtime_pins=pins,source_pins=self.pins)
             docker.assert_not_called();child.assert_not_called()
 
-    def test_ledger_names_have_only_fixed_kinds_and_canonical_uuid(self):
-        for kind in policy.KINDS:self.assertEqual(policy.ledger_name(kind,self.plan['nonce']),'retained-owned-'+kind+'-'+self.plan['nonce']+'.json')
-        for kind,nonce in (('../x',self.plan['nonce']),('start','../x')):
-            with self.assertRaises(REFUSED):policy.ledger_name(kind,nonce)
 
     def test_guardian_header_is_distinct_and_requires_docker_pin(self):
         value=json.loads(self.header);self.assertEqual(value['schema'],P.HEADER)
@@ -264,13 +256,6 @@ class RetainedCleanupContracts(unittest.TestCase):
         with self.assertRaises(REFUSED):other.cleanup()
         self.assertEqual(calls,[])
 
-    def test_binary_docker_input_output_and_deadline_bounds_precede_dispatch(self):
-        client=object.__new__(policy.guard.native._Docker)
-        invalid=(((),b'',8,1),([],bytearray(),8,1),([],b'',True,1),([],b'',26,1),([],b'',8,0),([],b'',8,16*1024*1024+1))
-        with patch.object(policy.guard.native.subprocess,'Popen') as spawn:
-            for args,data,seconds,limit in invalid:
-                with self.assertRaises(REFUSED):client._execute(args,data,seconds,limit)
-            spawn.assert_not_called()
 
     def test_failed_post_create_inspection_keeps_unknown_outcome(self):
         owner,resource,client,calls=self.owner_resource();owner._unknown=False;owner._resources={}
@@ -301,40 +286,11 @@ class RetainedCleanupContracts(unittest.TestCase):
         with self.assertRaises(REFUSED):owner._check_ready()
 
 
-    def test_original_context_profile_keeps_its_fixed_55_second_clock(self):
-        item=object.__new__(policy.context.RetainedContextTransport);item._wall=100;item._mono=200
-        with patch.object(policy.time,'time_ns',return_value=100+55_000_000_000-1),patch.object(policy.time,'monotonic_ns',return_value=200+55_000_000_000-1):item._clock_check()
-        for wall,mono in ((100+55_000_000_000,200+55_000_000_000-1),(100+55_000_000_000-1,200+55_000_000_000)):
-            with patch.object(policy.time,'time_ns',return_value=wall),patch.object(policy.time,'monotonic_ns',return_value=mono),self.assertRaises(REFUSED+(policy.context.process.LaunchError,)):item._clock_check()
 
-    def source_clock(self):
-        item=object.__new__(policy._Transport);item._wall=0;item._mono=0;item._plan=self.plan
-        item._offer=dict(retainedOpenedNs=20_000_000_000,retainedExpiresNs=80_000_000_000,
-            imageIntentBase64=policy.context.encode(C(dict(openedNs=21_000_000_000,expiresNs=81_000_000_000))))
-        with patch.object(policy.time,'time_ns',return_value=25_000_000_000),patch.object(policy.time,'monotonic_ns',return_value=30_000_000_000):item._start_source_clock()
-        return item
 
-    def test_extended_handoff_honors_original_source_end_and_monotonic_bound(self):
-        item=self.source_clock()
-        with patch.object(policy.time,'time_ns',return_value=70_000_000_000),patch.object(policy.time,'monotonic_ns',return_value=75_000_000_000):item._clock_check()
-        for wall,mono in ((80_000_000_000,84_000_000_000),(79_000_000_000,85_000_000_000),(20_000_000_000,31_000_000_000),(30_000_000_000,29_000_000_000)):
-            with patch.object(policy.time,'time_ns',return_value=wall),patch.object(policy.time,'monotonic_ns',return_value=mono),self.assertRaises(REFUSED):item._clock_check()
-        self.assertEqual(item.clock_snapshot()['expiresNs'],80_000_000_000)
 
-    def test_source_clock_cannot_be_renewed_or_extended_by_offer_mutation(self):
-        item=self.source_clock();before=item.clock_snapshot();item._offer['retainedExpiresNs']+=60_000_000_000
-        with self.assertRaises(REFUSED):item._start_source_clock()
-        self.assertEqual(item.clock_snapshot(),before)
 
-    def test_source_clock_is_bound_to_its_persisted_admission_record(self):
-        item=self.source_clock();item._source_clock_record=self.held.enter_context(policy.guard.attempts._claim_record(self.operator,
-            policy.ledger_name('admission',self.plan['nonce']),item.clock_snapshot()))
-        item._check_source_clock();opened,end,mono,origin=item._source_clock;item._source_clock=(opened,end+1,mono+1,origin)
-        with self.assertRaises(REFUSED):item._check_source_clock()
 
-    def test_handoff_clock_before_source_opening_is_refused(self):
-        item=self.source_clock();del item._source_clock
-        with patch.object(policy.time,'time_ns',return_value=20_000_000_000),patch.object(policy.time,'monotonic_ns',return_value=30_000_000_000),self.assertRaises(REFUSED):item._start_source_clock()
 
 
     def test_replay_snapshot_uses_retained_descriptors_when_fresh_open_is_denied(self):
@@ -352,15 +308,101 @@ class RetainedCleanupContracts(unittest.TestCase):
         self.assertEqual(foreign.read_bytes(),b'public untouched')
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+def source_clock(plan):
+    item=object.__new__(policy._Transport);item._wall=0;item._mono=0;item._plan=plan
+    item._offer=dict(retainedOpenedNs=20_000_000_000,retainedExpiresNs=80_000_000_000,
+        imageIntentBase64=policy.context.encode(C(dict(openedNs=21_000_000_000,expiresNs=81_000_000_000))))
+    with patch.object(policy.time,'time_ns',return_value=25_000_000_000),patch.object(policy.time,'monotonic_ns',return_value=30_000_000_000):item._start_source_clock()
+    return item
+
+
+
+class RetainedCleanupLifecycleContracts(unittest.TestCase):
+    def setUp(self):
+        self.held=ExitStack();self.addCleanup(self.held.close)
+        self.operator=Path(self.held.enter_context(TemporaryDirectory(prefix='fleetory-cleanup-clock-')))
+        self.plan,_=native_fixture()
+
+    def test_complete_creator_reply_is_required_without_trimming_or_id_adoption(self):
+        client=object.__new__(policy._Docker)
+        invalid=(b'',b'b'*63+b'\n',b'b'*64,b' '+b'b'*64+b'\n',b'B'*64+b'\n',b'b'*64+b'\nextra\n')
+        for raw in invalid:
+            with patch.object(client,'_execute',return_value=raw,create=True),self.assertRaises(REFUSED):client._created('runtime',[],'a'*64)
+        with patch.object(client,'_execute',return_value=b'b'*64+b'\n',create=True):reply=client._created('runtime',[],'a'*64)
+        self.assertIs(reply.token,policy._TOKEN);self.assertEqual(reply.identifier,'b'*64)
+
+
+    def test_ledger_names_have_only_fixed_kinds_and_canonical_uuid(self):
+        for kind in policy.KINDS:self.assertEqual(policy.ledger_name(kind,self.plan['nonce']),'retained-owned-'+kind+'-'+self.plan['nonce']+'.json')
+        for kind,nonce in (('../x',self.plan['nonce']),('start','../x')):
+            with self.assertRaises(REFUSED):policy.ledger_name(kind,nonce)
+
+
+    def test_binary_docker_input_output_and_deadline_bounds_precede_dispatch(self):
+        client=object.__new__(policy.guard.native._Docker)
+        invalid=(((),b'',8,1),([],bytearray(),8,1),([],b'',True,1),([],b'',26,1),([],b'',8,0),([],b'',8,16*1024*1024+1))
+        with patch.object(policy.guard.native.subprocess,'Popen') as spawn:
+            for args,data,seconds,limit in invalid:
+                with self.assertRaises(REFUSED):client._execute(args,data,seconds,limit)
+            spawn.assert_not_called()
+
+
+    def test_original_context_profile_keeps_its_fixed_55_second_clock(self):
+        item=object.__new__(policy.context.RetainedContextTransport);item._wall=100;item._mono=200
+        with patch.object(policy.time,'time_ns',return_value=100+55_000_000_000-1),patch.object(policy.time,'monotonic_ns',return_value=200+55_000_000_000-1):item._clock_check()
+        for wall,mono in ((100+55_000_000_000,200+55_000_000_000-1),(100+55_000_000_000-1,200+55_000_000_000)):
+            with patch.object(policy.time,'time_ns',return_value=wall),patch.object(policy.time,'monotonic_ns',return_value=mono),self.assertRaises(REFUSED+(policy.context.process.LaunchError,)):item._clock_check()
+
+
+    def test_extended_handoff_honors_original_source_end_and_monotonic_bound(self):
+        item=source_clock(self.plan)
+        with patch.object(policy.time,'time_ns',return_value=70_000_000_000),patch.object(policy.time,'monotonic_ns',return_value=75_000_000_000):item._clock_check()
+        for wall,mono in ((80_000_000_000,84_000_000_000),(79_000_000_000,85_000_000_000),(20_000_000_000,31_000_000_000),(30_000_000_000,29_000_000_000)):
+            with patch.object(policy.time,'time_ns',return_value=wall),patch.object(policy.time,'monotonic_ns',return_value=mono),self.assertRaises(REFUSED):item._clock_check()
+        self.assertEqual(item.clock_snapshot()['expiresNs'],80_000_000_000)
+
+
+    def test_source_clock_cannot_be_renewed_or_extended_by_offer_mutation(self):
+        item=source_clock(self.plan);before=item.clock_snapshot();item._offer['retainedExpiresNs']+=60_000_000_000
+        with self.assertRaises(REFUSED):item._start_source_clock()
+        self.assertEqual(item.clock_snapshot(),before)
+
+
+    def test_source_clock_is_bound_to_its_persisted_admission_record(self):
+        item=source_clock(self.plan);item._source_clock_record=self.held.enter_context(policy.guard.attempts._claim_record(self.operator,
+            policy.ledger_name('admission',self.plan['nonce']),item.clock_snapshot()))
+        item._check_source_clock();opened,end,mono,origin=item._source_clock;item._source_clock=(opened,end+1,mono+1,origin)
+        with self.assertRaises(REFUSED):item._check_source_clock()
+
+
+    def test_handoff_clock_before_source_opening_is_refused(self):
+        item=source_clock(self.plan);del item._source_clock
+        with patch.object(policy.time,'time_ns',return_value=20_000_000_000),patch.object(policy.time,'monotonic_ns',return_value=30_000_000_000),self.assertRaises(REFUSED):item._start_source_clock()
+
+
     def test_context_exit_cleans_known_failed_preparation_before_closing_controller(self):
         owner=object.__new__(policy.RetainedCleanupGuard);owner._closed=False;owner._cleanup_started=False;owner._prepared=False;owner._failed=True
         calls=[];owner.cleanup=lambda:calls.append('cleanup');owner.close=lambda:calls.append('close')
         owner.__exit__(OSError,None,None);self.assertEqual(calls,['cleanup','close'])
 
+
     def test_context_exit_does_not_replay_consumed_cleanup(self):
         owner=object.__new__(policy.RetainedCleanupGuard);owner._closed=False;owner._cleanup_started=True;owner._prepared=True;owner._failed=False
         with patch.object(owner,'cleanup') as cleanup,patch.object(owner,'close') as close:
             owner.__exit__(None,None,None);cleanup.assert_not_called();close.assert_called_once()
+
 
     def test_context_exit_closes_controller_even_if_own_rollback_fails(self):
         owner=object.__new__(policy.RetainedCleanupGuard);owner._closed=False;owner._cleanup_started=False;owner._prepared=False;owner._failed=True
@@ -379,6 +421,7 @@ class RetainedCleanupContracts(unittest.TestCase):
             self.assertEqual(owner._state(),'exited')
         self.assertEqual(owner._transport._exited.call_count,4)
 
+
     def test_live_process_identity_failure_is_refused_after_fixed_wait(self):
         owner=object.__new__(policy.RetainedCleanupGuard)
         from unittest.mock import Mock
@@ -388,6 +431,7 @@ class RetainedCleanupContracts(unittest.TestCase):
         with patch.object(policy.time,'monotonic_ns',side_effect=[0,3_000_000_000]),patch.object(policy.time,'sleep') as sleep:
             with self.assertRaises(OSError):owner._state()
             sleep.assert_not_called()
+
 
     def test_changed_live_controller_identity_never_becomes_death(self):
         owner=object.__new__(policy.RetainedCleanupGuard)
@@ -406,11 +450,13 @@ class RetainedCleanupContracts(unittest.TestCase):
             gracefulDescriptorClosureVerified=False,controllerDeathObserved=True)
         verify_closure(value,'lease-expired',True)
 
+
     def test_native_closure_refuses_unexpected_non_graceful_live_source(self):
         from native_retained_cleanup_guard import verify_closure
         value=dict(ownedControllerMembersAbsent=True,publicationDescriptorsHeld=58,
             gracefulDescriptorClosureVerified=False,controllerDeathObserved=True)
         with self.assertRaises(REFUSED):verify_closure(value,'lease-expired',False)
+
 
     def test_source_expiry_never_waives_actual_owned_process_disposal(self):
         from native_retained_cleanup_guard import verify_closure
@@ -420,7 +466,7 @@ class RetainedCleanupContracts(unittest.TestCase):
 
 
 if __name__=='__main__':
-    result=unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromTestCase(RetainedCleanupContracts))
+    result=unittest.TextTestRunner().run(unittest.TestSuite(unittest.defaultTestLoader.loadTestsFromTestCase(case) for case in (RetainedCleanupContracts,RetainedCleanupLifecycleContracts)))
     if not result.wasSuccessful() or result.skipped:raise SystemExit(1)
     print('RETAINED OWNED CLEANUP CONTRACT PASS: '+json.dumps(dict(tests=result.testsRun,skipped=0,generatedOnly=True,
         actualDockerOperationsPerformed=0,actualNativePublicationUsed=False,sourceFiles=len(policy.context.SOURCES),

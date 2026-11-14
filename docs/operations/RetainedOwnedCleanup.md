@@ -65,6 +65,8 @@ same wall/monotonic windows. Static profile parsers grant no authority. The
 ready guardian can finish cleanup during its separate 75-second cleanup window
 after the child/admission has expired; no child capability is revived. Controller closure always requires all owned process members absent. If the original source admission expired before closure, forced own-fence closure is recorded separately from graceful descriptor acknowledgement; the fixture does not demand an expired channel remain live.
 
+Contract fixtures close retained capabilities before removing their checked temporary source directories on both operating systems. Only typed lineage/resource tests construct the full publication fixture; timer, framing and lifecycle assertions use their own small generated setup. All 47 test methods and their assertions remain included.
+
 Portable contracts require positive typed bindings and refuse altered lineage,
 foreign IDs/observations, arbitrary fields, malformed/partial replies, changed
 persisted/held facts, expired admission, unsafe profiles, foreign creator objects
