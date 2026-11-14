@@ -65,16 +65,16 @@ same wall/monotonic windows. Static profile parsers grant no authority. The
 ready guardian can finish cleanup during its separate 75-second cleanup window
 after the child/admission has expired; no child capability is revived. Controller closure always requires all owned process members absent. If the original source admission expired before closure, forced own-fence closure is recorded separately from graceful descriptor acknowledgement; the fixture does not demand an expired channel remain live.
 
-Contract fixtures close retained capabilities before removing their checked temporary source directories on both operating systems. Only typed lineage/resource tests construct the full publication fixture; timer, framing and lifecycle assertions use their own small generated setup. The original 47 test methods and their assertions remain included. Four additional small contracts check the test-only paused observation comparison, including changed identity/profile, extra fields and wrong original state.
+Contract fixtures close retained capabilities before removing their checked temporary source directories on both operating systems. Only typed lineage/resource tests construct the full publication fixture; timer, framing and lifecycle assertions use their own small generated setup. The original 47 test methods and their assertions remain included. Four additional small contracts check the test-only paused observation comparison, including changed identity/profile, extra fields and wrong original state. Eleven removal contracts additionally require consumed failures, complete inner replies, actual absence, unchanged live creator objects and bounded cleanup without replay or forged closure.
 
 Portable contracts require positive typed bindings and refuse altered lineage,
 foreign IDs/observations, arbitrary fields, malformed/partial replies, changed
 persisted/held facts, expired admission, unsafe profiles, foreign creator objects
 and replay. Linux CI reuses the existing public publication/reference fixture
-for nine actual controllers: lease expiry, controller death while the parent
+for eleven actual controllers: lease expiry, controller death while the parent
 waits, death after the own complete create reply before runtime binding, a real
 original admission expiry, foreign observation, lost create reply,
-partial create reply, CLI inspection failure and a paused own runtime. A standalone fixture supports
+partial create reply, CLI inspection failure, a paused own runtime, removal failure before Docker execution and loss of a complete successful removal reply. A standalone fixture supports
 only those fixed cases for Windows Docker Desktop validation. No original input
 or restored process is involved.
 
@@ -93,6 +93,22 @@ unchanged. Only the live test creator unpauses its own exact observed object,
 then rechecks the original complete profile before separate fixture disposal.
 The consumed guardian start/delete is refused both before and after disposal;
 the fixture never normalizes an observation presented to the guardian.
+
+Two additional test interceptions affect only the guardian's exact own full-ID
+runtime removal. A CLI failure before execution leaves the worker present and
+the attempt consumed, with no closed/success receipt. Restoring transport permits
+fresh checked fixture-only disposal; the guardian itself cannot retry.
+
+For a lost removal reply, a separate in-process test creator fact holds the
+original live resource, exact client/reply/record objects and unchanged cleanup
+clock. Its trusted inner call captures the complete own removal reply and fresh
+full-ID absence, then withholds the reply. The guardian refuses without closing
+its runtime record or reporting success. Fixture disposal accepts that bounded
+live fact for the already-absent worker and disposes other resources normally;
+it never sets the guardian's closed flag or writes a substitute receipt. Absence
+is checked again and no second worker removal is executed. Strings, serialized
+records, changed creator objects, expiry, replay and a reappeared ID refuse.
+If the removal witness was never attempted, ordinary fresh checked fixture disposal remains available; a failure before injection cannot strand a known own worker. These are injected CLI/response failures, not Docker daemon-death proofs.
 
 Guardian/daemon/host death, other altered resources, pre-receipt crashes,
 general bootstrap/compiler escaped sessions and independent rollback-resistant

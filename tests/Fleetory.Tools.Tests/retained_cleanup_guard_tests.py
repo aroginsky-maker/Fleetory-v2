@@ -320,6 +320,116 @@ class RetainedCleanupContracts(unittest.TestCase):
 
 
 
+    def removal_fixture(self):
+        owner=self.ready_owner();owner._cleanup_started=False;owner._result=None;owner._failed=False;owner._unknown=False
+        resource=owner._resources['runtime'];client=owner._docker;calls=[];present=[True]
+        owner._state=lambda:'exited';owner._bases=copy.deepcopy(images.BASE_VALUES)
+        client.base=lambda ref:next(v for v in owner._bases if v['reference']==ref)
+        def execute(args,data,seconds,limit):
+            calls.append(list(args))
+            if args==['container','rm','--force',resource.reply.identifier]:present[0]=False;return resource.reply.raw
+            if args[:2]==['container','ls']:return resource.reply.raw if present[0] else b''
+            raise AssertionError('Unexpected generated Docker command')
+        client._execute=execute;client._call=lambda args:client._execute(args,b'',8,policy.guard.process.MAX_STDOUT)
+        return owner,resource,client,calls,present
+
+    def test_remove_failure_consumes_attempt_before_execution_and_refuses_retry(self):
+        from native_retained_cleanup_guard import _fixture_dispose,_refused_cleanup
+        owner,resource,client,calls,present=self.removal_fixture()
+        with patch.object(client,'_execute',side_effect=OSError('Before execution')):_refused_cleanup(owner)
+        self.assertTrue(present[0]);self.assertEqual(calls,[]);self.assertFalse(resource._closed)
+        self.assertNotIn('runtime-closed',owner._records)
+        with self.assertRaises(REFUSED):owner.cleanup()
+        self.assertEqual(calls,[])
+        _fixture_dispose(owner,[])
+        self.assertFalse(present[0]);self.assertTrue(resource._closed);self.assertIsNone(owner._result)
+
+    def test_lost_removal_reply_uses_live_fixture_fact_without_forging_guardian_closure(self):
+        from native_retained_cleanup_guard import CapturedFixtureRemoval,_dispose_after_lost_removal,_refused_cleanup
+        owner,resource,client,calls,present=self.removal_fixture();witness=CapturedFixtureRemoval(resource)
+        execute=client._execute
+        def intercepted(args,data,seconds,limit):
+            return witness.remove_and_withhold(args,data,seconds,limit) if args[:2]==['container','rm'] else execute(args,data,seconds,limit)
+        with patch.object(client,'_execute',side_effect=intercepted):_refused_cleanup(owner)
+        self.assertFalse(present[0]);self.assertEqual(witness.raw,resource.reply.raw)
+        before=list(calls)
+        with self.assertRaises(REFUSED):witness.remove_and_withhold(['container','rm','--force',resource.reply.identifier],b'',8,policy.guard.process.MAX_STDOUT)
+        with self.assertRaises(REFUSED):owner.cleanup()
+        self.assertEqual(calls,before)
+        _dispose_after_lost_removal(owner,[],[witness]);witness.verify(resource)
+        self.assertEqual(sum(c[:2]==['container','rm'] for c in calls),1)
+        self.assertFalse(resource._closed);self.assertNotIn('runtime-closed',owner._records);self.assertIsNone(owner._result)
+
+    def test_removal_fact_refuses_serialized_metadata_and_foreign_live_creator(self):
+        from native_retained_cleanup_guard import CapturedFixtureRemoval,_fixture_dispose
+        owner,resource,_,calls,_=self.removal_fixture()
+        with self.assertRaises(REFUSED):CapturedFixtureRemoval(dict(resource.facts()))
+        with self.assertRaises(REFUSED):_fixture_dispose(owner,[],[dict(id=resource.reply.identifier,absenceVerified=True)])
+        owner._resources['runtime']=object()
+        with self.assertRaises(REFUSED):CapturedFixtureRemoval(resource)
+        self.assertEqual(calls,[])
+
+    def test_live_removal_fact_refuses_changed_creator_before_any_dispatch(self):
+        from native_retained_cleanup_guard import CapturedFixtureRemoval
+        owner,resource,client,calls,_=self.removal_fixture();witness=CapturedFixtureRemoval(resource)
+        owner._cleanup_started=True;owner._record('delete',dict(status='ATTEMPT_CONSUMED'))
+        original=resource.reply
+        resource.reply=policy._Reply(policy._TOKEN,client,'runtime',original.raw,original.identifier,original.started,original.finished,original.input_pin)
+        with self.assertRaises(REFUSED):witness.remove_and_withhold(['container','rm','--force',original.identifier],b'',8,policy.guard.process.MAX_STDOUT)
+        self.assertEqual(calls,[])
+
+    def test_live_removal_fact_cannot_extend_original_cleanup_deadline(self):
+        from native_retained_cleanup_guard import CapturedFixtureRemoval
+        owner,resource,_,calls,_=self.removal_fixture();witness=CapturedFixtureRemoval(resource)
+        owner._cleanup_started=True;owner._record('delete',dict(status='ATTEMPT_CONSUMED'))
+        with patch.object(policy.time,'monotonic_ns',return_value=owner._mono+policy.CLEANUP_NS):
+            with self.assertRaises(REFUSED):witness.remove_and_withhold(['container','rm','--force',resource.reply.identifier],b'',8,policy.guard.process.MAX_STDOUT)
+        self.assertEqual(calls,[])
+
+    def test_live_removal_fact_rechecks_absence_and_never_removes_a_reappeared_id(self):
+        from native_retained_cleanup_guard import CapturedFixtureRemoval
+        owner,resource,_,calls,present=self.removal_fixture();witness=CapturedFixtureRemoval(resource)
+        owner._cleanup_started=True;owner._record('delete',dict(status='ATTEMPT_CONSUMED'))
+        self.assertEqual(witness.remove_and_withhold(['container','rm','--force',resource.reply.identifier],b'',8,policy.guard.process.MAX_STDOUT),b'')
+        present[0]=True
+        with self.assertRaises(REFUSED):witness.verify(resource)
+        self.assertEqual(sum(c[:2]==['container','rm'] for c in calls),1)
+
+
+    def test_missing_inner_reply_never_becomes_fixture_absence_authority(self):
+        from native_retained_cleanup_guard import CapturedFixtureRemoval,_fixture_dispose
+        owner,resource,client,calls,present=self.removal_fixture()
+        execute=client._execute
+        def lost(args,data,seconds,limit):execute(args,data,seconds,limit);return b''
+        client._execute=lost;witness=CapturedFixtureRemoval(resource)
+        owner._cleanup_started=True;owner._record('delete',dict(status='ATTEMPT_CONSUMED'))
+        with self.assertRaises(REFUSED):witness.remove_and_withhold(['container','rm','--force',resource.reply.identifier],b'',8,policy.guard.process.MAX_STDOUT)
+        self.assertTrue(witness.attempted);self.assertFalse(witness.captured);self.assertFalse(present[0])
+        with self.assertRaises(REFUSED):_fixture_dispose(owner,[],[witness])
+        self.assertEqual(sum(c[:2]==['container','rm'] for c in calls),1);self.assertFalse(resource._closed)
+
+    def test_complete_inner_reply_without_actual_absence_cannot_close_fixture_or_guardian(self):
+        from native_retained_cleanup_guard import CapturedFixtureRemoval,_fixture_dispose
+        owner,resource,client,calls,present=self.removal_fixture();execute=client._execute
+        def still_present(args,data,seconds,limit):
+            if args[:2]==['container','rm']:calls.append(list(args));return resource.reply.raw
+            return execute(args,data,seconds,limit)
+        client._execute=still_present;witness=CapturedFixtureRemoval(resource)
+        owner._cleanup_started=True;owner._record('delete',dict(status='ATTEMPT_CONSUMED'))
+        with self.assertRaises(REFUSED):witness.remove_and_withhold(['container','rm','--force',resource.reply.identifier],b'',8,policy.guard.process.MAX_STDOUT)
+        self.assertTrue(present[0]);self.assertFalse(witness.captured)
+        with self.assertRaises(REFUSED):_fixture_dispose(owner,[],[witness])
+        self.assertFalse(resource._closed);self.assertIsNone(owner._result)
+
+
+    def test_unattempted_live_removal_witness_does_not_prevent_checked_fixture_disposal(self):
+        from native_retained_cleanup_guard import CapturedFixtureRemoval,_dispose_after_lost_removal
+        owner,resource,_,calls,present=self.removal_fixture();witness=CapturedFixtureRemoval(resource)
+        self.assertFalse(_dispose_after_lost_removal(owner,[],[witness]))
+        self.assertFalse(witness.attempted);self.assertFalse(present[0]);self.assertTrue(resource._closed)
+        self.assertIsNone(owner._result);self.assertEqual(sum(c[:2]==['container','rm'] for c in calls),1)
+
+
 def source_clock(plan):
     item=object.__new__(policy._Transport);item._wall=0;item._mono=0;item._plan=plan
     item._offer=dict(retainedOpenedNs=20_000_000_000,retainedExpiresNs=80_000_000_000,
@@ -487,6 +597,18 @@ class RetainedCleanupLifecycleContracts(unittest.TestCase):
         from native_retained_cleanup_guard import paused_fixture_observation
         paused=dict(id='b'*64,paused=True,running=True,memory=402653184)
         with self.assertRaises(REFUSED):paused_fixture_observation(C(paused),C(paused))
+
+
+    def test_fixture_removal_reply_requires_complete_exact_bytes_and_full_id(self):
+        from native_retained_cleanup_guard import fixture_removal_reply
+        identifier='b'*64;fixture_removal_reply(identifier.encode()+b'\n',identifier)
+        for raw in (b'',identifier.encode(),('c'*64+'\n').encode(),b' '+identifier.encode()+b'\n',bytearray(identifier.encode()+b'\n'),True):
+            with self.subTest(raw=raw),self.assertRaises(REFUSED):fixture_removal_reply(raw,identifier)
+
+    def test_fixture_removal_reply_refuses_names_truncated_ids_and_noncanonical_identifiers(self):
+        from native_retained_cleanup_guard import fixture_removal_reply
+        for identifier in ('worker-name','b'*63,'B'*64,'../container'):
+            with self.subTest(identifier=identifier),self.assertRaises(REFUSED):fixture_removal_reply(identifier.encode()+b'\n',identifier)
 
 
 if __name__=='__main__':

@@ -15,7 +15,8 @@ from historical_audit_restore_tests import fixture
 
 C,H,packet=policy.C,policy.H,policy.packet
 CASES=('lease-expired','controller-exited','source-admission-expired','controller-exited-before-handoff','foreign-observation',
-    'lost-create-reply','partial-create-reply','cli-inspection-failure','own-runtime-paused')
+    'lost-create-reply','partial-create-reply','cli-inspection-failure','own-runtime-paused',
+    'remove-cli-fails-before-execution','remove-reply-lost-after-own-execution')
 REFUSED=(OSError,ValueError,policy.context.process.LaunchError)
 
 
@@ -41,6 +42,54 @@ class CapturedFixtureWorker:
         packet.require(_absent(self.client,self.identifier));self.closed=True
 
 
+def fixture_removal_reply(raw,identifier):
+    """Pure comparison only; a reply string does not recreate a live fixture removal."""
+    policy.guard._identifier(identifier)
+    packet.require(type(raw) is bytes and raw==identifier.encode('ascii')+b'\n')
+
+
+class CapturedFixtureRemoval:
+    """Test-only live creator/remover fact. It never closes or repairs the guardian's unknown outcome."""
+    def __init__(self,resource):
+        packet.require(type(resource) is policy._Resource and type(resource.owner) is policy.RetainedCleanupGuard)
+        owner=resource.owner
+        packet.require(owner._prepared and not owner._cleanup_started and owner._resources.get('runtime') is resource)
+        resource.fresh()
+        self.resource,self.owner,self.client=resource,owner,owner._docker
+        self.reply,self.record,self.snapshot=resource.reply,resource._record,resource._snapshot
+        self.clock=(owner._mono,owner._wall,owner._expiry)
+        self.execute=self.client._execute
+        self.attempted,self.captured=False,False
+        self.raw=None
+        self._check()
+
+    def _check(self):
+        owner,resource=self.owner,self.resource
+        packet.require(resource.owner is owner and owner._resources.get('runtime') is resource and owner._docker is self.client and
+            resource.reply is self.reply and resource._record is self.record and resource._snapshot==self.snapshot and
+            self.reply.client is self.client and self.reply.kind=='runtime' and self.clock==(owner._mono,owner._wall,owner._expiry) and
+            not resource._closed and owner._result is None and 'runtime-closed' not in owner._records and 'result' not in owner._records)
+        owner._check_owned();resource.check();owner._elapsed()
+
+    def remove_and_withhold(self,args,data,seconds,limit):
+        self._check()
+        packet.require(self.owner._cleanup_started and 'delete' in self.owner._records and not self.attempted and
+            args==['container','rm','--force',self.reply.identifier] and data==b'' and
+            type(seconds) is int and seconds==8 and type(limit) is int and limit==policy.guard.process.MAX_STDOUT)
+        self.attempted=True
+        raw=self.execute(args,data,seconds,limit)
+        fixture_removal_reply(raw,self.reply.identifier)
+        packet.require(_absent(self.client,self.reply.identifier))
+        self._check();self.raw=bytes(raw);self.captured=True
+        return b''
+
+    def verify(self,resource):
+        self._check()
+        packet.require(resource is self.resource and self.attempted and self.captured)
+        fixture_removal_reply(self.raw,self.reply.identifier)
+        packet.require(_absent(self.client,self.reply.identifier))
+
+
 def _records(owner):
     saved={}
     for kind,item in owner._records.items():
@@ -50,12 +99,33 @@ def _records(owner):
     return saved
 
 
-def _fixture_dispose(owner,captured):
+def _fixture_dispose(owner,captured,removals=()):
+    packet.require(type(removals) in (tuple,list) and len(removals)<=1)
+    absent=set()
+    for removal in removals:
+        packet.require(type(removal) is CapturedFixtureRemoval and removal.owner is owner)
+        removal.verify(removal.resource);absent.add(removal.resource)
     for worker in captured:worker.dispose()
     for kind in ('runtime','copy','image'):
         resource=owner._resources.get(kind)
-        if resource is not None and not resource._closed:resource.dispose()
-    packet.require(all(v._closed for v in owner._resources.values()) and all(v.closed for v in captured))
+        if resource is not None and not resource._closed and resource not in absent:resource.dispose()
+    packet.require(all(v._closed or v in absent for v in owner._resources.values()) and all(v.closed for v in captured))
+
+
+def _dispose_after_lost_removal(owner,captured,removals):
+    packet.require(len(removals)==1 and type(removals[0]) is CapturedFixtureRemoval and removals[0].owner is owner)
+    if not removals[0].attempted:
+        _fixture_dispose(owner,captured);return False
+    client=owner._docker;execute=client._execute;identifier=removals[0].reply.identifier;repeated=[]
+    def tracked(args,data,seconds,limit):
+        if args[:2]==['container','rm'] and args[-1]==identifier:
+            repeated.append(list(args));raise ValueError('Fixture tried a second runtime removal.')
+        return execute(args,data,seconds,limit)
+    with patch.object(client,'_execute',side_effect=tracked):
+        _fixture_dispose(owner,captured,removals)
+        removals[0].verify(owner._resources['runtime'])
+    packet.require(repeated==[])
+    return True
 
 
 def _refused_cleanup(owner):
@@ -190,6 +260,31 @@ def _cli_failure(owner):
         ownContainerUntouchedBeforeFixtureDisposal=True,guardianCleanupAccepted=False)
 
 
+def _removal_failure(owner,case,removals):
+    client=owner._docker;resource=owner._resources['runtime'];identifier=resource.reply.identifier
+    witness=CapturedFixtureRemoval(resource) if case=='remove-reply-lost-after-own-execution' else None
+    if witness is not None:removals.append(witness)
+    execute=client._execute;deletions=[]
+    def intercepted(args,data,seconds,limit):
+        if args[:2] in (['container','rm'],['image','rm']):
+            deletions.append(list(args))
+            packet.require(args==['container','rm','--force',identifier] and len(deletions)==1)
+            if witness is None:raise OSError('Generated own removal failure before Docker execution')
+            return witness.remove_and_withhold(args,data,seconds,limit)
+        return execute(args,data,seconds,limit)
+    with patch.object(client,'_execute',side_effect=intercepted):_refused_cleanup(owner)
+    packet.require(len(deletions)==1 and not resource._closed and 'runtime-closed' not in owner._records)
+    absent=_absent(client,identifier)
+    packet.require(absent is (witness is not None))
+    if witness is not None:witness.verify(resource)
+    else:resource.fresh()
+    return dict(guardCleanupRefused=True,guardianCleanupAccepted=False,guardianDeleteCalls=1,
+        actualDockerRemovalCalls=0 if witness is None else 1,removeFailureBeforeExecution=witness is None,
+        completeRemovalReplyWithheld=witness is not None,completeInnerRemovalReplySha256=None if witness is None else H(witness.raw),
+        unknownRemovalOutcomeRetained=True,guardianRuntimeClosedReceiptAbsent=True,ownContainerId=identifier,
+        ownContainerAbsentBeforeFixtureDisposal=absent,fixtureOnlyLiveRemovalFactUsed=witness is not None)
+
+
 def _handoff_death(owner):
     record,close=owner._record,owner.close;captured={};killed=False
     def create_record(kind,value):
@@ -277,7 +372,7 @@ def exercise(prepared,cases=CASES):
                 print('NATIVE RETAINED OWNED STAGE: '+json.dumps(dict(case=case,stage=kind,elapsedNs=time.monotonic_ns()-began)),flush=True)
                 return item
             owner._record=tracked
-            captured=[];result=None;ready=None;transport=None;closed_capture=None
+            captured=[];removals=[];result=None;ready=None;transport=None;closed_capture=None
             try:
                 if case=='controller-exited-before-handoff':result,closed_capture=_handoff_death(owner)
                 elif case in ('lost-create-reply','partial-create-reply'):result=_lost_reply(owner,case,captured)
@@ -288,11 +383,18 @@ def exercise(prepared,cases=CASES):
                     if case=='foreign-observation':result=_foreign(owner,captured)
                     elif case=='cli-inspection-failure':result=_cli_failure(owner)
                     elif case=='own-runtime-paused':result=_paused(owner,captured)
+                    elif case in CASES[-2:]:result=_removal_failure(owner,case,removals)
                     else:result=_positive(owner,case)
                 _replay(owner,prepared,raw,reference,paths,pins,sources,None if closed_capture is None else closed_capture['snapshot'])
             finally:
                 try:
-                    _fixture_dispose(owner,captured)
+                    if removals:
+                        removed=_dispose_after_lost_removal(owner,captured,removals)
+                        if result is not None:
+                            packet.require(removed and not owner._resources['runtime']._closed)
+                            result['noSecondRuntimeRemovalVerified']=True
+                            result['guardianRuntimeStillUnclosedAfterFixtureDisposal']=True
+                    else:_fixture_dispose(owner,captured)
                     if result is not None and not result['guardianCleanupAccepted']:_replay(owner,prepared,raw,reference,paths,pins,sources)
                 finally:
                     records=_records(owner) if closed_capture is None else closed_capture['records']
