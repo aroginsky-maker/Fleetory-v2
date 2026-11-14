@@ -146,8 +146,8 @@ def _foreign(owner,captured):
 def paused_fixture_observation(raw,original):
     """Pure test comparison, not a capability or authorization to normalize a guard observation."""
     expected=packet.strict_json(original,policy.container.MAX_OBSERVATION)
-    packet.require(expected['paused'] is False and expected['status']=='running')
-    expected.update(paused=True,status='paused')
+    packet.require(expected['paused'] is False and expected['running'] is True)
+    expected['paused']=True
     packet.require(C(packet.strict_json(raw,policy.container.MAX_OBSERVATION))==C(expected))
 
 

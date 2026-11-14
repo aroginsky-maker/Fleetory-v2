@@ -465,27 +465,27 @@ class RetainedCleanupLifecycleContracts(unittest.TestCase):
         with self.assertRaises(REFUSED):verify_closure(value,'lease-expired',True)
 
 
-    def test_test_only_paused_comparison_allows_only_the_two_actual_state_fields(self):
+    def test_test_only_paused_comparison_allows_only_the_actual_paused_field(self):
         from native_retained_cleanup_guard import paused_fixture_observation
-        original=dict(id='b'*64,paused=False,status='running',running=True,pid=321)
-        paused_fixture_observation(C(dict(original,paused=True,status='paused')),C(original))
+        original=dict(id='b'*64,paused=False,running=True,memory=402653184)
+        paused_fixture_observation(C(dict(original,paused=True)),C(original))
 
     def test_test_only_paused_comparison_refuses_changed_identity_and_profile(self):
         from native_retained_cleanup_guard import paused_fixture_observation
-        original=dict(id='b'*64,paused=False,status='running',running=True,pid=321)
-        expected=dict(original,paused=True,status='paused')
-        for key,value in (('id','c'*64),('running',False),('pid',322),('paused',1),('status','running')):
+        original=dict(id='b'*64,paused=False,running=True,memory=402653184)
+        expected=dict(original,paused=True)
+        for key,value in (('id','c'*64),('running',False),('memory',402653185),('paused',1),('status','running')):
             with self.subTest(key=key),self.assertRaises(REFUSED):paused_fixture_observation(C(dict(expected,**{key:value})),C(original))
 
     def test_test_only_paused_comparison_refuses_extra_fields_and_unpaused_input(self):
         from native_retained_cleanup_guard import paused_fixture_observation
-        original=dict(id='b'*64,paused=False,status='running',running=True,pid=321)
-        for changed in (original,dict(original,paused=True,status='paused',extra=True)):
+        original=dict(id='b'*64,paused=False,running=True,memory=402653184)
+        for changed in (original,dict(original,paused=True,extra=True)):
             with self.assertRaises(REFUSED):paused_fixture_observation(C(changed),C(original))
 
     def test_test_only_paused_comparison_requires_an_original_running_snapshot(self):
         from native_retained_cleanup_guard import paused_fixture_observation
-        paused=dict(id='b'*64,paused=True,status='paused',running=True,pid=321)
+        paused=dict(id='b'*64,paused=True,running=True,memory=402653184)
         with self.assertRaises(REFUSED):paused_fixture_observation(C(paused),C(paused))
 
 

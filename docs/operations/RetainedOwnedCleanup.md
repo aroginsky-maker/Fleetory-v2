@@ -87,7 +87,7 @@ failures likewise refuse deletion and retain consumption before fixture disposal
 
 The paused case uses only its own complete live creator reply and fixed full ID.
 It pauses that worker, requires the observed profile to differ only in
-`paused=true` and `status=paused`, and requires guardian refusal with zero removal
+`paused=true` (the runtime observation has no `status` field), and requires guardian refusal with zero removal
 calls and no closed/success receipt. A separate own fixture sentinel must remain
 unchanged. Only the live test creator unpauses its own exact observed object,
 then rechecks the original complete profile before separate fixture disposal.
