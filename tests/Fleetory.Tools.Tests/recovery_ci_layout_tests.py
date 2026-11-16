@@ -192,7 +192,7 @@ def validate(text):
     for command in ('./eng/verify-quality.ps1', './eng/verify-sonar-issues.ps1', './eng/report-sonar-metrics.ps1'):
         assert text.count(command) == 1 and command in blocks['quality']
     assert '    timeout-minutes: 30\n' in blocks['quality']
-    assert '    timeout-minutes: 15\n' in blocks['windows-tls-chain']
+    assert '    timeout-minutes: 20\n' in blocks['windows-tls-chain']
     aggregate = blocks['quality-gate']
     assert '    name: Strict build, tests, coverage and Sonar\n' in aggregate
     assert '    needs: [quality, windows-tls-chain, native-data-recovery, native-provider-recovery]\n' in aggregate
@@ -236,6 +236,9 @@ class RecoveryCiLayoutTests(unittest.TestCase):
 
     def test_deadlines_or_sonar_ownership_cannot_change_silently(self):
         self.refused(self.text.replace('timeout-minutes: 30', 'timeout-minutes: 60'))
+        for minutes in (15, 60):
+            self.refused(self.text.replace('runs-on: windows-latest\n    timeout-minutes: 20',
+                f'runs-on: windows-latest\n    timeout-minutes: {minutes}'))
         self.refused(self.text.replace('./eng/verify-sonar-issues.ps1', './eng/omitted.ps1'))
         self.refused(self.text.replace('  native-data-recovery:\n', '  native-data-recovery:\n    env:\n      SONAR_TOKEN: copied\n'))
 

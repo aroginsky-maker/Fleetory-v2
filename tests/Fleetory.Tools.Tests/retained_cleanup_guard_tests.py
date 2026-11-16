@@ -320,6 +320,31 @@ class RetainedCleanupContracts(unittest.TestCase):
 
 
 
+
+
+class RetainedRemovalContracts(unittest.TestCase):
+    """One immutable generated source vector; live owner/records/client are fresh per test."""
+    @classmethod
+    def setUpClass(cls):
+        shared=RetainedCleanupContracts()
+        cls.addClassCleanup(shared.doCleanups)
+        shared.setUp()
+        cls._source_fixture=shared
+
+    def setUp(self):
+        shared=type(self)._source_fixture
+        self.held=ExitStack();self.addCleanup(self.held.close)
+        # Register the directory first so live record handles close before removal.
+        self.root=Path(self.held.enter_context(TemporaryDirectory()))
+        self.plan=copy.deepcopy(shared.plan);self.offer=copy.deepcopy(shared.offer)
+        self.pins=dict(shared.pins)
+        self.header=bytes(shared.header)
+        self.target=SimpleNamespace(intent=copy.deepcopy(shared.target.intent))
+        self.fixture=SimpleNamespace(observation=vectors.RetainedRuntimeContracts.observation)
+
+    owner_resource=RetainedCleanupContracts.owner_resource
+    ready_owner=RetainedCleanupContracts.ready_owner
+
     def removal_fixture(self):
         owner=self.ready_owner();owner._cleanup_started=False;owner._result=None;owner._failed=False;owner._unknown=False
         resource=owner._resources['runtime'];client=owner._docker;calls=[];present=[True]
@@ -428,6 +453,7 @@ class RetainedCleanupContracts(unittest.TestCase):
         self.assertFalse(_dispose_after_lost_removal(owner,[],[witness]))
         self.assertFalse(witness.attempted);self.assertFalse(present[0]);self.assertTrue(resource._closed)
         self.assertIsNone(owner._result);self.assertEqual(sum(c[:2]==['container','rm'] for c in calls),1)
+
 
 
 def source_clock(plan):
@@ -612,7 +638,7 @@ class RetainedCleanupLifecycleContracts(unittest.TestCase):
 
 
 if __name__=='__main__':
-    result=unittest.TextTestRunner().run(unittest.TestSuite(unittest.defaultTestLoader.loadTestsFromTestCase(case) for case in (RetainedCleanupContracts,RetainedCleanupLifecycleContracts)))
+    result=unittest.TextTestRunner().run(unittest.TestSuite(unittest.defaultTestLoader.loadTestsFromTestCase(case) for case in (RetainedCleanupContracts,RetainedRemovalContracts,RetainedCleanupLifecycleContracts)))
     if not result.wasSuccessful() or result.skipped:raise SystemExit(1)
     print('RETAINED OWNED CLEANUP CONTRACT PASS: '+json.dumps(dict(tests=result.testsRun,skipped=0,generatedOnly=True,
         actualDockerOperationsPerformed=0,actualNativePublicationUsed=False,sourceFiles=len(policy.context.SOURCES),
