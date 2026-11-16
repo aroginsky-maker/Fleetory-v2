@@ -174,10 +174,12 @@ no unknown create outcome. It is consumed independently of peer admission, never
 retries a consumed Docker removal and records no validated request digest. It
 cannot be constructed from a serialized report or a caller-selected process.
 
-All 90 accepted contract methods/assertions remain included. Another 34 generated
+All 90 accepted contract methods/assertions remain included. Another 35 generated
 contracts check fixed launch/input, identity and ready binding, bounded frames,
 original clocks, normal closure and creator-only dispatch after modeled peer
-failure. These models perform no OS fault injection or Docker operations. Native
+failure. The modeled pipe writer uses only captured public context bytes; it
+cannot read live creator records concurrently with the creator. These models
+perform no OS fault injection or Docker operations. Native
 normal lifecycle cases require a distinct policy birth identity, ready record,
 successful own-fence closure and validated request. They are separate evidence
 from these generated models. Actual policy-child death/transport-loss injections

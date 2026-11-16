@@ -870,7 +870,7 @@ class RetainedPolicyChildContracts(unittest.TestCase):
         # Platform fences return imageSha256; the trusted adapter forms the protocol identity.
         fence.identity=lambda *_:{('imageSha256' if k=='executableSha256' else k):v for k,v in identity.items()}
         fence.exited=lambda:child.returncode is not None
-        events=[];commands=[];ended=[]
+        events=[];commands=[];ended=[];context_pin=H(owner._policy_binding.context_bytes())
         class Pumps:
             def __init__(p,process,data):
                 self.assertIs(process,child);self.assertEqual(data,b'')
@@ -886,10 +886,11 @@ class RetainedPolicyChildContracts(unittest.TestCase):
                     if ready_change:ready_change(ready)
                     p.stdout.extend(policy.context.frame(ready,policy.MAX_POLICY))
                 else:
-                    event=policy.admit_policy_event(raw[4:],H(owner._policy_binding.context_bytes()))
+                    event=policy.admit_policy_event(raw[4:],context_pin)
                     if event=='cancel':child.returncode=0
                     else:
-                        p.stdout.extend(policy.context.frame(json.loads(self.request_bytes(owner,'controller-exited')),policy.MAX_POLICY));child.returncode=0
+                        request=dict(schema=policy.POLICY_REQUEST,contextSha256=context_pin,reason='controller-exited')
+                        p.stdout.extend(policy.context.frame(request,policy.MAX_POLICY));child.returncode=0
             def finish(p):
                 if p.finish_action:
                     action,p.finish_action=p.finish_action,None;action()
@@ -1009,6 +1010,17 @@ class RetainedPolicyChildContracts(unittest.TestCase):
         self.assertEqual(policy.admit_policy_event(model.events[-1][4:],H(model.peer._context)),'controller-exited')
         model.owner._test_state='live'
         with self.assertRaises(REFUSED):model.owner._policy_binding.admit(raw)
+        self.assertEqual(model.owner._generated_calls,[])
+
+    def test_modeled_pipe_writer_cannot_read_live_creator_records(self):
+        model=self.peer_fixture();creator_thread=policy.threading.get_ident();read=model.owner._policy_binding.context_bytes
+        def creator_read():
+            self.assertEqual(policy.threading.get_ident(),creator_thread)
+            return read()
+        model.owner._policy_binding.context_bytes=creator_read
+        model.peer=policy._PolicyProcess(model.owner);self.addCleanup(model.peer.close)
+        model.owner._test_state='exited';raw=model.peer.request()
+        self.assertEqual(model.owner._policy_binding.admit(raw),('controller-exited','exited'))
         self.assertEqual(model.owner._generated_calls,[])
 
     def test_complete_output_is_drained_after_observed_exit(self):
