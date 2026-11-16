@@ -744,34 +744,35 @@ class RetainedPolicyRequestContracts(unittest.TestCase):
 
     def test_late_request_cannot_restart_original_cleanup_clock(self):
         for elapsed in (-1,True,policy.CLEANUP_NS,policy.CLEANUP_NS+1):
-            owner=self.owner();owner._test_elapsed=elapsed
-            with self.subTest(elapsed=elapsed),self.assertRaises(REFUSED):owner._policy_binding.admit(self.request(owner))
+            owner=self.owner();owner._test_elapsed=elapsed;owner._test_state='exited'
+            with self.subTest(elapsed=elapsed),self.assertRaises(REFUSED):owner._policy_binding.admit(self.request(owner,'controller-exited'))
             self.assertEqual(owner._generated_calls,[])
 
     def test_pid_change_cannot_transfer_live_binding(self):
-        owner=self.owner();raw=self.request(owner)
+        owner=self.owner();self.expired(owner);raw=self.request(owner)
         with patch.object(policy.os,'getpid',return_value=owner._caller+1),self.assertRaises(REFUSED):owner._policy_binding.admit(raw)
 
     def test_original_clock_fields_cannot_be_rewritten(self):
         for key in ('_mono','_wall','_expiry'):
             owner=self.owner();raw=self.request(owner);setattr(owner,key,getattr(owner,key)+1)
+            self.expired(owner)
             with self.subTest(key=key),self.assertRaises(REFUSED):owner._policy_binding.admit(raw)
 
     def test_live_client_and_transport_cannot_be_replaced_by_equivalent_metadata(self):
         for key in ('_docker','_transport','_records'):
-            owner=self.owner();raw=self.request(owner)
+            owner=self.owner();self.expired(owner);raw=self.request(owner)
             setattr(owner,key,dict(owner._records) if key=='_records' else SimpleNamespace())
             with self.subTest(key=key),self.assertRaises(REFUSED):owner._policy_binding.admit(raw)
             self.assertEqual(owner._generated_calls,[])
 
     def test_cloned_reply_cannot_replace_creator_retained_reply_object(self):
-        owner=self.owner();raw=self.request(owner);resource=owner._resources['runtime'];reply=resource.reply
+        owner=self.owner();self.expired(owner);raw=self.request(owner);resource=owner._resources['runtime'];reply=resource.reply
         resource.reply=policy._Reply(reply.token,reply.client,reply.kind,reply.raw,reply.identifier,reply.started,reply.finished,reply.input_pin)
         with self.assertRaises(REFUSED):owner._policy_binding.admit(raw)
 
     def test_foreign_resource_or_bound_handle_cannot_replace_original_live_objects(self):
         for key in ('runtime','bound'):
-            owner=self.owner();raw=self.request(owner)
+            owner=self.owner();self.expired(owner);raw=self.request(owner)
             if key=='runtime':owner._resources['runtime']=object()
             else:owner._records['bound']=SimpleNamespace(_bytes=owner._records['bound']._bytes)
             with self.subTest(key=key),self.assertRaises(REFUSED):owner._policy_binding.admit(raw)
@@ -815,9 +816,13 @@ class RetainedPolicyRequestContracts(unittest.TestCase):
             with self.subTest(state=state,elapsed=elapsed),self.assertRaises(REFUSED):policy.policy_request(raw,state,elapsed)
 
     def test_coordinated_owner_and_policy_deadline_rewrite_cannot_replace_held_record(self):
-        owner=self.owner();raw=self.request(owner);owner._intent['expiresNs']+=1;owner._expiry+=1
-        value=json.loads(owner._policy_binding._context);value['runtimeExpiresNs']+=1;value['leaseExpiresNs']+=1
+        owner=self.owner();owner._intent['expiresNs']+=1
+        for key in ('_wall','_mono','_expiry'):setattr(owner,key,getattr(owner,key)+1)
+        value=json.loads(owner._policy_binding._context)
+        for key in ('runtimeExpiresNs','leaseOpenedNs','cleanupMonotonicOriginNs','leaseExpiresNs'):value[key]+=1
         owner._policy_binding._context=C(value)
+        policy.policy_context(C(value));self.expired(owner)
+        raw=C(dict(schema=policy.POLICY_REQUEST,contextSha256=H(C(value)),reason='lease-expired'))
         with self.assertRaises(REFUSED):owner._policy_binding.admit(raw)
 
     def test_policy_functions_cannot_add_ids_or_dispatch_docker(self):

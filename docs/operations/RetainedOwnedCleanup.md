@@ -135,6 +135,8 @@ validated request digest, while an interrupted pre-handoff rollback has no polic
 request. The existing 62 contract methods and assertions remain; 28 generated
 contracts exercise this new boundary. Native controller tests check the actual
 request result separately from these generated models.
+Mutation counterexamples establish a valid expiry or exit first, so an unrelated
+early-lease refusal cannot hide a missing live-object or clock check.
 
 This is the clock/custody protocol prerequisite for a fixed policy child. Policy
 execution still shares the creator process (`policyProcessSeparated=false`). No
