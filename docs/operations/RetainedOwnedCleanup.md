@@ -119,3 +119,5 @@ production deployment claim. Phase 7 and draft PR #2 stay open, including WORM,
 independent people, post-restore human login, physical Agent and revocation.
 
 The Windows CI job has a 20-minute overall limit after two runs exhausted 15 minutes. This runner limit covers the full validation workload; every test and the aggregate gate remain mandatory. Source admission remains 60 seconds, the ready cleanup lease 5 seconds, cleanup 75 seconds and the retained worker 660 seconds. The Linux 30-minute and provider/data job bounds remain unchanged.
+
+The disposable pilot provisioning regression rejects PostgreSQL's socket-only temporary initialization server. A bounded fixture-only initialization gate keeps that listener available while the shared readiness function must refuse it; the gate is then released and final TCP readiness is required before provisioning. SQL diagnostics and generated passwords remain suppressed, and the fixture removes only its own container and volumes. This does not change original database restore or role/login evidence.

@@ -19,9 +19,14 @@ function Assert-Rejected([scriptblock]$Action, [string]$Message) {
     try { & $Action | Out-Null } catch { $rejected = $true }
     Assert-True $rejected $Message
 }
+function Test-DisposablePostgresReady {
+    # The image starts a socket-only temporary server before final initialization.
+    $captured = & docker exec $containerId pg_isready -h 127.0.0.1 -U postgres 2>&1
+    return $LASTEXITCODE -eq 0
+}
 function Invoke-DisposableSql([string]$Database, [string]$Sql) {
     # Native error text can contain SQL/passwords: retain no diagnostics in output.
-    $captured = $Sql | & docker exec -i $containerId psql -X -U postgres -d $Database -v ON_ERROR_STOP=1 -q 2>&1
+    $captured = $Sql | & docker exec -i $containerId psql -X -h 127.0.0.1 -U postgres -d $Database -v ON_ERROR_STOP=1 -q 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Disposable PostgreSQL assertion failed; SQL diagnostics suppressed.' }
 }
 function Assert-Leaf([string]$Relative, [string]$RootName, [string]$Purpose) {
@@ -132,20 +137,47 @@ try {
     & $databaseGenerator @dbArgs | Out-Null
     Assert-Rejected { & $databaseGenerator @dbArgs } 'Existing database SQL output was overwritten.'
     # Trust is exclusively inside this disposable container: no network, ports or host data mounts.
-    $runResult = & docker run --detach --network none --memory 384m --cpus 1 --env POSTGRES_HOST_AUTH_METHOD=trust postgres:18.6 2>&1
+    $runResult = & docker create --network none --memory 384m --cpus 1 --env POSTGRES_HOST_AUTH_METHOD=trust postgres:18.6 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Disposable PostgreSQL container could not start.' }
     $containerId = [string]($runResult | Select-Object -Last 1)
     Assert-True ($containerId -cmatch '\A[0-9a-f]{64}\z') 'Docker returned an invalid container identity.'
-    $ready = $false
+    # Hold only this fresh fixture in temporary-server initialization until the
+    # readiness refusal is observed. No host mount, external endpoint or secret.
+    $initGate = Join-Path $work '010-readiness-regression.sh'
+    $gateScript = @'
+#!/usr/bin/env bash
+fleetory_gate_attempt=0
+while [ ! -f /tmp/fleetory-pilot-init-release ] && [ "$fleetory_gate_attempt" -lt 300 ]; do
+    sleep 0.1
+    fleetory_gate_attempt=$((fleetory_gate_attempt + 1))
+done
+test -f /tmp/fleetory-pilot-init-release
+'@
+    [IO.File]::WriteAllText($initGate,($gateScript -replace "`r`n","`n")+"`n",[Text.UTF8Encoding]::new($false))
+    $captured = & docker cp $initGate "${containerId}:/docker-entrypoint-initdb.d/010-readiness-regression.sh" 2>&1
+    if ($LASTEXITCODE -ne 0) { throw 'Disposable initialization gate copy failed.' }
+    $captured = & docker start $containerId 2>&1
+    if ($LASTEXITCODE -ne 0) { throw 'Disposable PostgreSQL container could not start.' }
+    $temporaryReady = $false
     for ($attempt=0;$attempt -lt 30;$attempt++) {
         $captured = & docker exec $containerId pg_isready -U postgres 2>&1
-        if ($LASTEXITCODE -eq 0) { $ready=$true; break }
+        if ($LASTEXITCODE -eq 0) { $temporaryReady=$true; break }
+        Start-Sleep -Seconds 1
+    }
+    Assert-True $temporaryReady 'Disposable temporary PostgreSQL did not become ready.'
+    Assert-True (-not (Test-DisposablePostgresReady)) 'Temporary socket-only initialization was admitted as final readiness.'
+    $captured = & docker exec $containerId touch /tmp/fleetory-pilot-init-release 2>&1
+    if ($LASTEXITCODE -ne 0) { throw 'Disposable initialization gate release failed.' }
+
+    $ready = $false
+    for ($attempt=0;$attempt -lt 30;$attempt++) {
+        if (Test-DisposablePostgresReady) { $ready=$true; break }
         Start-Sleep -Seconds 1
     }
     Assert-True $ready 'Disposable PostgreSQL did not become ready.'
     $captured = & docker cp $initSql "${containerId}:/tmp/pilot-init.sql" 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Disposable SQL copy failed.' }
-    $captured = & docker exec $containerId psql -X -U postgres -d postgres -v ON_ERROR_STOP=1 -q -f /tmp/pilot-init.sql 2>&1
+    $captured = & docker exec $containerId psql -X -h 127.0.0.1 -U postgres -d postgres -v ON_ERROR_STOP=1 -q -f /tmp/pilot-init.sql 2>&1
     if ($LASTEXITCODE -ne 0) { throw 'Fresh-cluster provisioning failed; SQL diagnostics suppressed.' }
     Invoke-DisposableSql fleetory @'
 DO $$ BEGIN
@@ -178,7 +210,7 @@ DO $$ DECLARE t text; BEGIN
  IF NOT has_table_privilege('fleetory_signer','signer.client_certificate_revocations','SELECT') OR has_table_privilege('fleetory_signer','signer.client_certificate_revocations','INSERT') OR has_table_privilege('fleetory_signer','signer.client_certificate_revocations','UPDATE') OR has_table_privilege('fleetory_signer','signer.client_certificate_revocations','DELETE') THEN RAISE EXCEPTION 'denylist'; END IF;
 END $$;
 '@
-    Write-Output 'Pilot provisioning regression PASS: disposable PKI, negative inputs, actual EF exports, fresh PostgreSQL and runtime grants.'
+    Write-Output 'Pilot provisioning regression PASS: disposable PKI, negative inputs, actual EF exports, temporary initialization refusal, final TCP PostgreSQL and runtime grants.'
 } finally {
     [Environment]::SetEnvironmentVariable('FLEETORY_MIGRATION_CONNECTION_STRING',$oldMigrationConnection)
     foreach ($resource in $resources) { $resource.Dispose() }
