@@ -461,8 +461,7 @@ class _PolicyProcess:
             packet.require(C(value)==self._ready_raw and value==dict(schema=POLICY_READY,contextSha256=H(self._context),
                 parent=self._transport._parent,policy=self._identity,sourcePinsSha256=self._source_pin,noDockerInterface=True,clocksReset=False))
             if self._exited():
-                self._child.wait(timeout=3);self._pumps.finish()
-                packet.require(self._child.returncode==0 and len(self._pumps.stdout)>self._total)
+                packet.require(self._drain_exit()==0 and len(self._pumps.stdout)>self._total)
             else:packet.require(guard._process_identity(self._fence.identity(self._child,self._python))==self._identity)
             self._ready=True;owner._check_owned()
             owner._record('policy-ready',dict(schema='fleetory.retained-policy-ready.v1',nonce=owner._nonce,contextSha256=H(self._context),
@@ -479,6 +478,12 @@ class _PolicyProcess:
 
     def _exited(self):return self._child.poll() is not None if os.name=='nt' else self._fence.exited()
 
+    def _drain_exit(self):
+        packet.require(self._exited())
+        code=self._child.wait(timeout=3) if os.name=='nt' else self._fence.exit_code()
+        self._pumps.finish()
+        return code
+
     def _frame(self,start):
         self._wait_bytes(start+4)
         size=context.frame_size(bytes(self._pumps.stdout[start:start+4]),MAX_POLICY);end=start+4+size
@@ -489,7 +494,7 @@ class _PolicyProcess:
         while len(self._pumps.stdout)<count:
             self._check();packet.require(not self._pumps.errors and not self._pumps.stderr)
             if self._exited():
-                self._child.wait(timeout=3);self._pumps.finish();packet.require(len(self._pumps.stdout)>=count)
+                self._drain_exit();packet.require(len(self._pumps.stdout)>=count)
                 break
             time.sleep(0.01)
         self._check();packet.require(not self._pumps.errors and not self._pumps.stderr)
@@ -521,8 +526,8 @@ class _PolicyProcess:
         end,raw=self._frame(self._total)
         while not self._exited():
             self._check();packet.require(not self._pumps.errors and not self._pumps.stderr);time.sleep(0.01)
-        self._child.wait(timeout=3);self._pumps.finish();self._check()
-        packet.require(self._child.returncode==0 and not self._pumps.errors and not self._pumps.stderr and len(self._pumps.stdout)==end)
+        code=self._drain_exit();self._check()
+        packet.require(code==0 and not self._pumps.errors and not self._pumps.stderr and len(self._pumps.stdout)==end)
         return raw
 
     def close(self,failed=False):

@@ -174,7 +174,7 @@ no unknown create outcome. It is consumed independently of peer admission, never
 retries a consumed Docker removal and records no validated request digest. It
 cannot be constructed from a serialized report or a caller-selected process.
 
-All 90 accepted contract methods/assertions remain included. Another 35 generated
+All 90 accepted contract methods/assertions remain included. Another 37 generated
 contracts check fixed launch/input, identity and ready binding, bounded frames,
 original clocks, normal closure and creator-only dispatch after modeled peer
 failure. The modeled pipe writer uses only captured public context bytes; it
@@ -187,5 +187,8 @@ remain next, after this implementation's preparatory tests and CI/Sonar gates.
 `guardianDeathCleanupVerified` remains false. Surviving-creator/daemon/host loss
 and full original recovery stay open. The original 58 publication descriptors,
 81/63 source inventories and source, lease, cleanup and worker durations remain
-unchanged. Three existing source files change and remain explicitly pinned;
-no new source inventory entry is adopted.
+unchanged. Four existing source files change and remain explicitly pinned;
+no new source inventory entry is adopted. On Linux, exit status is observed with
+`WNOWAIT`: the owned leader remains unreaped and reserves its process group ID
+until the fence checks that whole group. Only the existing fenced close then
+reaps it. Windows continues to use its held job object and process handle.

@@ -37,6 +37,13 @@ class GroupFence:
         value = os.waitid(os.P_PID, self.process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
         return value is not None
 
+    def exit_code(self):
+        # Keep the owned leader unreaped until terminate() has checked its whole group.
+        value = os.waitid(os.P_PID, self.process.pid, os.WEXITED | os.WNOHANG | os.WNOWAIT)
+        require(value is not None and value.si_pid == self.process.pid and
+            value.si_code in (os.CLD_EXITED, os.CLD_KILLED, os.CLD_DUMPED))
+        return value.si_status if value.si_code == os.CLD_EXITED else -value.si_status
+
     def identity(self, process, pinned):
         info = process_fields(process.pid)
         require(info['birth'] == self.birth and info['group'] == info['session'] == process.pid)

@@ -856,11 +856,15 @@ class RetainedPolicyChildContracts(unittest.TestCase):
         owner._transport._repo=ROOT
         python=SimpleNamespace(path=Path(sys.executable),digest=json.loads(self.header)['runtimes']['python'])
         owner._transport._runtimes={'python':python};owner._transport._header=self.header
-        child=SimpleNamespace(returncode=None,stdout=object(),stderr=object(),pid=owner._caller+200000)
+        child=SimpleNamespace(returncode=None,observed_code=None,reaped=False,stdout=object(),stderr=object(),pid=owner._caller+200000)
         def wait(timeout):
-            self.assertIsNotNone(child.returncode)
+            self.assertIsNotNone(child.observed_code)
+            child.returncode=child.observed_code;child.reaped=True
             return child.returncode
-        child.wait=wait;child.poll=lambda:child.returncode
+        def poll():
+            if child.observed_code is not None:child.returncode=child.observed_code;child.reaped=True
+            return child.returncode
+        child.wait=wait;child.poll=poll
         stdin=SimpleNamespace(closed=False)
         stdin.close=lambda:setattr(stdin,'closed',True)
         child.stdin=stdin
@@ -869,7 +873,10 @@ class RetainedPolicyChildContracts(unittest.TestCase):
         fence=SimpleNamespace()
         # Platform fences return imageSha256; the trusted adapter forms the protocol identity.
         fence.identity=lambda *_:{('imageSha256' if k=='executableSha256' else k):v for k,v in identity.items()}
-        fence.exited=lambda:child.returncode is not None
+        def exited():
+            if child.reaped:raise ChildProcessError('Generated leader reaped before group closure')
+            return child.observed_code is not None
+        fence.exited=exited;fence.exit_code=lambda:child.observed_code
         events=[];commands=[];ended=[];context_pin=H(owner._policy_binding.context_bytes())
         class Pumps:
             def __init__(p,process,data):
@@ -887,10 +894,10 @@ class RetainedPolicyChildContracts(unittest.TestCase):
                     p.stdout.extend(policy.context.frame(ready,policy.MAX_POLICY))
                 else:
                     event=policy.admit_policy_event(raw[4:],context_pin)
-                    if event=='cancel':child.returncode=0
+                    if event=='cancel':child.observed_code=0
                     else:
                         request=dict(schema=policy.POLICY_REQUEST,contextSha256=context_pin,reason='controller-exited')
-                        p.stdout.extend(policy.context.frame(request,policy.MAX_POLICY));child.returncode=0
+                        p.stdout.extend(policy.context.frame(request,policy.MAX_POLICY));child.observed_code=0
             def finish(p):
                 if p.finish_action:
                     action,p.finish_action=p.finish_action,None;action()
@@ -902,8 +909,10 @@ class RetainedPolicyChildContracts(unittest.TestCase):
         def finish(process,owned,pumps):
             if process is None:return None,None
             self.assertIs(process,child);self.assertIs(owned,fence)
-            if child.returncode is None:child.returncode=0
+            if os.name=='posix':self.assertFalse(child.reaped)
+            if child.observed_code is None:child.observed_code=0
             if pumps:pumps.finish()
+            child.wait(3)
             ended.append(process)
             return dict(noRunningMembersVerified=True),None
         for name,value in (('_spawn',spawn),('_create_fence',lambda actual:fence),('_Pumps',Pumps),('_finish_owned',finish)):
@@ -922,7 +931,7 @@ class RetainedPolicyChildContracts(unittest.TestCase):
         model.owner._test_state='exited' if reason=='controller-exited' else 'live'
         raw=self.request_bytes(model.owner,reason)
         model.peer._pumps.stdout.extend(policy.context.frame(json.loads(raw),policy.MAX_POLICY)+tail)
-        model.child.returncode=code
+        model.child.observed_code=code
         return raw
 
     def test_launch_is_consumed_before_fixed_command_and_input(self):
@@ -1024,9 +1033,29 @@ class RetainedPolicyChildContracts(unittest.TestCase):
         self.assertEqual(model.owner._generated_calls,[])
 
     def test_complete_output_is_drained_after_observed_exit(self):
-        model=self.start();raw=self.request_bytes(model.owner,'controller-exited');model.child.returncode=0
+        model=self.start();raw=self.request_bytes(model.owner,'controller-exited');model.child.observed_code=0
         model.peer._pumps.finish_action=lambda:model.peer._pumps.stdout.extend(policy.context.frame(json.loads(raw),policy.MAX_POLICY))
         self.assertEqual(model.peer.request(),raw)
+
+    def test_exit_status_does_not_reap_linux_leader_before_group_closure(self):
+        model=self.start();raw=self.complete(model);self.assertEqual(model.peer.request(),raw)
+        if os.name=='posix':self.assertFalse(model.child.reaped);self.assertIsNone(model.child.returncode)
+        self.assertEqual(model.ended,[])
+        model.peer.close();self.assertTrue(model.child.reaped);self.assertEqual(model.peer.report()['exitCode'],0)
+
+    def test_linux_exit_observation_keeps_wnowait_and_requires_owned_pid(self):
+        import audit_process_posix as linux
+        fence=object.__new__(linux.GroupFence);fence.process=SimpleNamespace(pid=12345)
+        calls=[];result=[None]
+        def waitid(*args):calls.append(args);return result[0]
+        fake=SimpleNamespace(waitid=waitid,P_PID=1,WEXITED=2,WNOHANG=4,WNOWAIT=8,CLD_EXITED=10,CLD_KILLED=11,CLD_DUMPED=12)
+        with patch.object(linux,'os',fake):
+            for code,status,expected in ((10,0,0),(10,7,7),(11,9,-9),(12,6,-6)):
+                result[0]=SimpleNamespace(si_pid=12345,si_code=code,si_status=status)
+                self.assertEqual(fence.exit_code(),expected);self.assertEqual(calls[-1],(1,12345,14))
+            for value in (None,SimpleNamespace(si_pid=54321,si_code=10,si_status=0),SimpleNamespace(si_pid=12345,si_code=99,si_status=0)):
+                result[0]=value
+                with self.assertRaises(OSError):fence.exit_code()
 
     def test_eof_partial_extra_stderr_and_nonzero_exit_refuse(self):
         for fault in ('eof','partial','extra','stderr','exit'):
@@ -1079,7 +1108,7 @@ class RetainedPolicyChildContracts(unittest.TestCase):
         self.assertEqual(model.owner._generated_calls,[])
 
     def test_creator_failure_path_uses_owned_absence_not_a_wire_exit(self):
-        model=self.start();model.child.returncode=1;model.peer.close(failed=True)
+        model=self.start();model.child.observed_code=1;model.peer.close(failed=True)
         self.assertEqual(model.owner._policy_binding.creator_fallback(model.peer),('policy-peer-failed','live'))
         self.assertFalse(model.owner._policy_binding._accepted);self.assertIsNone(model.owner._policy_binding._request_pin)
         with self.assertRaises(REFUSED):model.owner._policy_binding.creator_fallback(model.peer)
@@ -1176,7 +1205,7 @@ class RetainedPolicyChildContracts(unittest.TestCase):
             raw=json.loads(self.complete(model));raw['contextSha256']='f'*64
             del model.peer._pumps.stdout[model.peer._total:]
             model.peer._pumps.stdout.extend(policy.context.frame(raw,policy.MAX_POLICY))
-        else:model.child.returncode=1
+        else:model.child.observed_code=1
         result=owner.cleanup()
         self.assertEqual(result['reason'],'policy-peer-failed');self.assertFalse(result['policyRequestValidated'])
         self.assertTrue(result['policyPeerFailedObserved']);self.assertTrue(result['policyProcessSeparated'])
