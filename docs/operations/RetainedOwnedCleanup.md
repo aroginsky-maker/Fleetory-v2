@@ -138,10 +138,52 @@ request result separately from these generated models.
 Mutation counterexamples establish a valid expiry or exit first, so an unrelated
 early-lease refusal cannot hide a missing live-object or clock check.
 
-This is the clock/custody protocol prerequisite for a fixed policy child. Policy
-execution still shares the creator process (`policyProcessSeparated=false`). No
-OS policy-child death or transport-loss case is proved by this step. Introducing
-that independently fenced child and validating its failure after its own gates
-remain next; surviving-creator/daemon/host loss and full original recovery stay
-open. The original 58 publication descriptors, source inventories and source,
-lease, cleanup and worker durations remain unchanged.
+The fixed policy now runs in a separate Python child, started only after the
+creator retains its complete runtime reply and typed ready record. The existing
+entry script accepts the sole fixed `--cleanup-policy` mode. The creator flushes
+a consumed launch record before starting that child, holds its own OS process
+fence and verifies its birth identity and pinned executable before releasing any
+input. The header contains only both process identities, source/executable pins
+and the public clock context. No resource object, resource ID, Docker argument,
+credential or configurable command/path crosses this interface. The child checks
+the same 81 pinned source files and its read-only creator/self process handles,
+then emits a ready acknowledgement and at most one bounded cleanup request.
+Its inherited environment uses the fixed host allowlist, without Docker-specific
+runtime additions or credential variables. No Docker executable pin or action
+endpoint is supplied. This is a fixed trusted-code interface; it is not
+an OS sandbox against arbitrary code running as the same user.
+
+The child uses the original wall and monotonic cleanup origins. Starting it does
+not restart the 5-second lease or 75-second cleanup bound. A controller-exit event
+on its one bounded input frame is only a policy hint: the creator independently
+rechecks its held controller fence before admitting the resulting request. The
+child cannot assert its own death over this protocol. Normal cancellation closes
+only the separately owned process/fence; its absence is recorded before the
+creator's cleanup dispatch. The result distinguishes creator, controller and
+policy identities. The legacy `guardian` identity in the native case envelope
+denotes the creator; `policyProcess` identifies the actual new child. The result
+reports `creatorAliveDuringCleanup=true` and `guardianAliveDuringCleanup=false`
+because the policy child has already exited before deletion.
+
+EOF, nonzero exit, partial/trailing output, stderr and invalid requests do not
+become positive policy admissions. After closing and checking the exact owned
+peer fence, the live creator may use its separate `policy-peer-failed` path for
+already-known own resources. That path requires the original live client,
+reply/resource/record/context objects, an unexpired original cleanup clock and
+no unknown create outcome. It is consumed independently of peer admission, never
+retries a consumed Docker removal and records no validated request digest. It
+cannot be constructed from a serialized report or a caller-selected process.
+
+All 90 accepted contract methods/assertions remain included. Another 34 generated
+contracts check fixed launch/input, identity and ready binding, bounded frames,
+original clocks, normal closure and creator-only dispatch after modeled peer
+failure. These models perform no OS fault injection or Docker operations. Native
+normal lifecycle cases require a distinct policy birth identity, ready record,
+successful own-fence closure and validated request. They are separate evidence
+from these generated models. Actual policy-child death/transport-loss injections
+remain next, after this implementation's preparatory tests and CI/Sonar gates.
+`guardianDeathCleanupVerified` remains false. Surviving-creator/daemon/host loss
+and full original recovery stay open. The original 58 publication descriptors,
+81/63 source inventories and source, lease, cleanup and worker durations remain
+unchanged. Three existing source files change and remain explicitly pinned;
+no new source inventory entry is adopted.

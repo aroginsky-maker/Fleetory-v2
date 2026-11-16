@@ -1,6 +1,7 @@
 """Generated handoff/own-receipt/consumption contracts; no actual compiler or Docker proof."""
 from contextlib import ExitStack
 import copy
+import io
 import json
 import os
 from pathlib import Path
@@ -272,6 +273,12 @@ class RetainedCleanupContracts(unittest.TestCase):
         owner._record('bound',dict(schema='generated-ready-test',nonce=owner._nonce,runtimeReceiptSha256=H(resource._snapshot),
             leaseOpenedNs=owner._wall,cleanupMonotonicOriginNs=owner._mono,leaseExpiresNs=owner._expiry))
         owner._policy_binding=None;policy._CleanupRequestBinding(owner)
+        peer=object.__new__(policy._PolicyProcess);owner._policy_process=peer
+        peer._owner=owner;peer._closed=False;peer._identity=dict(pid=owner._caller+100000)
+        peer.request=lambda:policy.policy_request(owner._policy_binding.context_bytes(),owner._state(),owner._elapsed())
+        def close(failed=False):peer._closed=True
+        peer.close=close
+        peer.report=lambda:dict(policy=peer._identity,creator=owner._transport._parent,policyReadyVerified=True,ownedPolicyMembersAbsent=True,peerFailedObserved=False,exitCode=0)
         return owner
 
     def test_cleanup_lease_and_intent_are_bound_to_persisted_creator_record(self):
@@ -833,8 +840,353 @@ class RetainedPolicyRequestContracts(unittest.TestCase):
         self.assertEqual(owner._generated_calls,[])
 
 
+class RetainedPolicyChildContracts(unittest.TestCase):
+    """Generated lifecycle models; actual native peers are checked separately."""
+    setUpClass=classmethod(RetainedRemovalContracts.setUpClass.__func__)
+    setUp=RetainedRemovalContracts.setUp
+    ready_owner=RetainedCleanupContracts.ready_owner
+    owner_resource=RetainedPolicyRequestContracts.owner_resource
+    owner=RetainedPolicyRequestContracts.owner
+    request_bytes=RetainedPolicyRequestContracts.request
+
+    def peer_fixture(self,ready_change=None,identity_change=None,spawn_error=None):
+        previous=getattr(self,'_last_model',None)
+        if previous is not None and hasattr(previous,'peer'):previous.peer.close()
+        owner=self.owner();owner._policy_process=None;owner._waiting=policy.threading.Event();owner._unknown=False
+        owner._transport._repo=ROOT
+        python=SimpleNamespace(path=Path(sys.executable),digest=json.loads(self.header)['runtimes']['python'])
+        owner._transport._runtimes={'python':python};owner._transport._header=self.header
+        child=SimpleNamespace(returncode=None,stdout=object(),stderr=object(),pid=owner._caller+200000)
+        def wait(timeout):
+            self.assertIsNotNone(child.returncode)
+            return child.returncode
+        child.wait=wait;child.poll=lambda:child.returncode
+        stdin=SimpleNamespace(closed=False)
+        stdin.close=lambda:setattr(stdin,'closed',True)
+        child.stdin=stdin
+        identity=dict(owner._transport._parent,pid=child.pid)
+        if identity_change:identity_change(identity)
+        fence=SimpleNamespace()
+        # Platform fences return imageSha256; the trusted adapter forms the protocol identity.
+        fence.identity=lambda *_:{('imageSha256' if k=='executableSha256' else k):v for k,v in identity.items()}
+        fence.exited=lambda:child.returncode is not None
+        events=[];commands=[];ended=[]
+        class Pumps:
+            def __init__(p,process,data):
+                self.assertIs(process,child);self.assertEqual(data,b'')
+                p.stdout=bytearray();p.stderr=bytearray();p.errors=[];p.threads=[];p.finish_action=None
+            def _read(p,*_):pass
+            def _send(p,raw):
+                events.append(raw)
+                if raw.endswith(b'\n'):
+                    self.assertIn('policy-start',owner._records)
+                    header,context_raw=policy.policy_child_header(raw[:-1])
+                    ready=dict(schema=policy.POLICY_READY,contextSha256=H(context_raw),parent=header['parent'],policy=header['policy'],
+                        sourcePinsSha256=H(C(header['sourcePins'])),noDockerInterface=True,clocksReset=False)
+                    if ready_change:ready_change(ready)
+                    p.stdout.extend(policy.context.frame(ready,policy.MAX_POLICY))
+                else:
+                    event=policy.admit_policy_event(raw[4:],H(owner._policy_binding.context_bytes()))
+                    if event=='cancel':child.returncode=0
+                    else:
+                        p.stdout.extend(policy.context.frame(json.loads(self.request_bytes(owner,'controller-exited')),policy.MAX_POLICY));child.returncode=0
+            def finish(p):
+                if p.finish_action:
+                    action,p.finish_action=p.finish_action,None;action()
+        def spawn(command):
+            self.assertIn('policy-start',owner._records);self.assertEqual(events,[])
+            commands.append(command)
+            if spawn_error:raise spawn_error
+            return child
+        def finish(process,owned,pumps):
+            if process is None:return None,None
+            self.assertIs(process,child);self.assertIs(owned,fence)
+            if child.returncode is None:child.returncode=0
+            if pumps:pumps.finish()
+            ended.append(process)
+            return dict(noRunningMembersVerified=True),None
+        for name,value in (('_spawn',spawn),('_create_fence',lambda actual:fence),('_Pumps',Pumps),('_finish_owned',finish)):
+            self.held.enter_context(patch.object(policy.context.process,name,value))
+        model=SimpleNamespace(owner=owner,child=child,fence=fence,identity=identity,events=events,commands=commands,ended=ended)
+        self._last_model=model
+        return model
+
+    def start(self,**changes):
+        model=self.peer_fixture(**changes);model.peer=policy._PolicyProcess(model.owner)
+        self.addCleanup(model.peer.close)
+        return model
+
+    def complete(self,model,reason='lease-expired',code=0,tail=b''):
+        model.owner._test_elapsed=model.owner._expiry-model.owner._wall if reason=='lease-expired' else 0
+        model.owner._test_state='exited' if reason=='controller-exited' else 'live'
+        raw=self.request_bytes(model.owner,reason)
+        model.peer._pumps.stdout.extend(policy.context.frame(json.loads(raw),policy.MAX_POLICY)+tail)
+        model.child.returncode=code
+        return raw
+
+    def test_launch_is_consumed_before_fixed_command_and_input(self):
+        model=self.start();command=model.commands[0]
+        self.assertEqual(command.arguments,('-I','-B',str(ROOT/'eng/pilot/RetainedContextController.py'),'--cleanup-policy'))
+        self.assertEqual(command.directory,ROOT);self.assertNotIn('docker',command.env)
+        self.assertFalse(set(command.env)&{'DOCKER_HOST','DOCKER_CONFIG','BAO_TOKEN','VAULT_TOKEN','PGPASSWORD'})
+        header,_=policy.policy_child_header(model.events[0][:-1])
+        self.assertEqual(set(header),{'schema','parent','policy','pythonSha256','sourcePins','contextBase64'})
+        self.assertEqual(model.owner._generated_calls,[])
+
+    def test_ready_binds_actual_distinct_peer_and_original_context(self):
+        model=self.start();record=model.owner._records['policy-ready'].report()
+        self.assertEqual(record['policy'],model.identity)
+        self.assertNotIn(record['policy']['pid'],(model.owner._caller,model.owner._transport._controller['pid']))
+        self.assertTrue(record['actualOwnedFenceHeld']);self.assertTrue(record['noDockerInterface']);self.assertFalse(record['clocksReset'])
+
+    def test_policy_start_cannot_be_replayed_or_built_from_wire(self):
+        model=self.start()
+        for owner in (model.owner,json.loads(model.peer._context),SimpleNamespace()):
+            with self.subTest(owner=type(owner).__name__),self.assertRaises(REFUSED):policy._PolicyProcess(owner)
+        self.assertEqual(len(model.commands),1)
+
+    def test_each_ready_fact_must_match_and_failure_disposes_only_owned_peer(self):
+        for key in ('schema','contextSha256','parent','policy','sourcePinsSha256','noDockerInterface','clocksReset'):
+            with self.subTest(key=key):
+                model=self.peer_fixture(ready_change=lambda v:v.update({key:'foreign'}))
+                with self.assertRaises(REFUSED):policy._PolicyProcess(model.owner)
+                self.assertEqual(model.ended,[model.child]);self.assertTrue(model.owner._policy_process._closed)
+                self.assertEqual(model.owner._generated_calls,[])
+
+    def test_extra_ready_authority_is_refused(self):
+        model=self.peer_fixture(ready_change=lambda v:v.update(containerId='f'*64))
+        with self.assertRaises(REFUSED):policy._PolicyProcess(model.owner)
+        self.assertEqual(model.ended,[model.child])
+
+    def test_spawn_failure_is_consumed_without_releasing_input(self):
+        model=self.peer_fixture(spawn_error=OSError('Generated launch refusal'))
+        with self.assertRaises(OSError):policy._PolicyProcess(model.owner)
+        self.assertIn('policy-start',model.owner._records);self.assertEqual(model.events,[])
+        with self.assertRaises(REFUSED):policy._PolicyProcess(model.owner)
+
+    def test_policy_identity_cannot_equal_creator_or_controller(self):
+        for role in ('creator','controller'):
+            model=self.peer_fixture()
+            model.identity['pid']=model.owner._caller if role=='creator' else model.owner._transport._controller['pid']
+            with self.subTest(role=role),self.assertRaises(REFUSED):policy._PolicyProcess(model.owner)
+            self.assertEqual(model.events,[]);self.assertEqual(model.ended,[model.child])
+
+    def test_policy_image_mismatch_refuses_before_input(self):
+        model=self.peer_fixture(identity_change=lambda v:v.update(executableSha256='f'*64))
+        with self.assertRaises(REFUSED):policy._PolicyProcess(model.owner)
+        self.assertEqual(model.events,[]);self.assertEqual(model.ended,[model.child])
+
+    def test_header_extra_fields_changed_pins_and_invalid_context_are_refused(self):
+        model=self.start();header=json.loads(model.events[0][:-1])
+        values=[dict(header,command='docker'),dict(header,pythonSha256='f'*64),dict(header,contextBase64=policy.context.encode(b'{}')),
+            dict(header,sourcePins={}),dict(header,parent=header['policy'])]
+        for value in values:
+            with self.subTest(keys=list(value)),self.assertRaises(REFUSED):policy.policy_child_header(C(value))
+
+    def test_header_requires_bounded_canonical_unique_json(self):
+        model=self.start();raw=model.events[0][:-1]
+        for value in (raw+b' ',raw[:-1]+b',"schema":"duplicate"}',b' '*policy.MAX_POLICY_HEADER,raw.decode()):
+            with self.subTest(kind=type(value).__name__),self.assertRaises(REFUSED):policy.policy_child_header(value)
+
+    def test_event_has_only_fixed_context_digest_and_one_action(self):
+        digest='a'*64
+        for event in ('controller-exited','cancel'):
+            raw=C(policy.policy_event(digest,event));self.assertEqual(policy.admit_policy_event(raw,digest),event)
+        for value in (dict(policy.policy_event(digest,'cancel'),command='foreign'),policy.policy_event('b'*64,'cancel'),
+                dict(policy.policy_event(digest,'cancel'),event='guardian-exited')):
+            with self.subTest(value=value),self.assertRaises(REFUSED):policy.admit_policy_event(C(value),digest)
+
+    def test_clean_expiry_frame_is_checked_before_creator_admission(self):
+        model=self.start();raw=self.complete(model)
+        self.assertEqual(model.peer.request(),raw);self.assertFalse(model.owner._policy_binding._attempted)
+        self.assertEqual(model.owner._policy_binding.admit(raw),('lease-expired','live'))
+        model.peer.close();report=model.peer.report()
+        self.assertTrue(report['ownedPolicyMembersAbsent']);self.assertFalse(report['peerFailedObserved']);self.assertEqual(report['exitCode'],0)
+
+    def test_controller_exit_event_does_not_authorize_a_forged_exit(self):
+        model=self.start();model.owner._test_state='exited'
+        raw=model.peer.request();self.assertTrue(model.child.stdin.closed)
+        self.assertEqual(policy.admit_policy_event(model.events[-1][4:],H(model.peer._context)),'controller-exited')
+        model.owner._test_state='live'
+        with self.assertRaises(REFUSED):model.owner._policy_binding.admit(raw)
+        self.assertEqual(model.owner._generated_calls,[])
+
+    def test_complete_output_is_drained_after_observed_exit(self):
+        model=self.start();raw=self.request_bytes(model.owner,'controller-exited');model.child.returncode=0
+        model.peer._pumps.finish_action=lambda:model.peer._pumps.stdout.extend(policy.context.frame(json.loads(raw),policy.MAX_POLICY))
+        self.assertEqual(model.peer.request(),raw)
+
+    def test_eof_partial_extra_stderr_and_nonzero_exit_refuse(self):
+        for fault in ('eof','partial','extra','stderr','exit'):
+            with self.subTest(fault=fault):
+                model=self.start();self.complete(model,code=1 if fault=='exit' else 0,tail=b'extra' if fault=='extra' else b'')
+                if fault=='eof':del model.peer._pumps.stdout[model.peer._total:]
+                if fault=='partial':del model.peer._pumps.stdout[-1:]
+                if fault=='stderr':model.peer._pumps.stderr.extend(b'generated diagnostic')
+                with self.assertRaises(REFUSED):model.peer.request()
+                self.assertFalse(model.owner._policy_binding._accepted);self.assertEqual(model.owner._generated_calls,[])
+
+    def test_original_cleanup_deadline_is_not_restarted_for_policy(self):
+        model=self.start();self.complete(model)
+        model.owner._elapsed=lambda:policy.packet.require(False)
+        with self.assertRaises(REFUSED):model.peer.request()
+        self.assertEqual(model.owner._generated_calls,[])
+
+    def test_blocked_input_still_checks_original_creator_deadline(self):
+        model=self.start();started=policy.threading.Event();release=policy.threading.Event()
+        def blocked(_):started.set();release.wait(3)
+        check=model.peer._check;send=model.peer._pumps._send
+        def expired():
+            self.assertTrue(started.wait(1));raise ValueError('Generated original deadline refusal')
+        model.peer._check=expired;model.peer._pumps._send=blocked
+        try:
+            with self.assertRaisesRegex(ValueError,'original deadline'):model.peer._send(b'fixed generated input')
+        finally:
+            release.set()
+            for writer in model.peer._pumps.threads:writer.join(1)
+            model.peer._check=check;model.peer._pumps._send=send
+        self.assertFalse(any(writer.is_alive() for writer in model.peer._pumps.threads))
+        self.assertEqual(model.owner._generated_calls,[])
+
+    def test_substituted_transport_child_fence_and_policy_context_refuse(self):
+        for attribute,value in (('_transport',object()),('_source_pin','f'*64),('_child',object()),('_fence',object()),('_context',b'{}')):
+            with self.subTest(attribute=attribute):
+                model=self.start();original=getattr(model.peer,attribute);setattr(model.peer,attribute,value)
+                with self.assertRaises(REFUSED):model.peer._check()
+                setattr(model.peer,attribute,original)
+
+    def test_changed_creator_pid_refuses_policy_use(self):
+        model=self.start()
+        with patch.object(policy.os,'getpid',return_value=model.peer._caller+1),self.assertRaises(REFUSED):model.peer._check()
+
+    def test_close_cancels_only_own_peer_and_is_idempotent(self):
+        model=self.start();model.peer.close();model.peer.close()
+        self.assertEqual(len(model.ended),1);self.assertEqual(len(model.events),2)
+        self.assertEqual(policy.admit_policy_event(model.events[-1][4:],H(model.peer._context)),'cancel')
+        self.assertTrue(model.owner._records['policy-closed'].report()['ownedPolicyMembersAbsent'])
+        self.assertEqual(model.owner._generated_calls,[])
+
+    def test_creator_failure_path_uses_owned_absence_not_a_wire_exit(self):
+        model=self.start();model.child.returncode=1;model.peer.close(failed=True)
+        self.assertEqual(model.owner._policy_binding.creator_fallback(model.peer),('policy-peer-failed','live'))
+        self.assertFalse(model.owner._policy_binding._accepted);self.assertIsNone(model.owner._policy_binding._request_pin)
+        with self.assertRaises(REFUSED):model.owner._policy_binding.creator_fallback(model.peer)
+
+    def test_fallback_refuses_live_peer_and_unknown_create_outcome(self):
+        for fault in ('live','unknown'):
+            model=self.start()
+            if fault=='unknown':model.peer.close(failed=True);model.owner._unknown=True
+            with self.subTest(fault=fault),self.assertRaises(REFUSED):model.owner._policy_binding.creator_fallback(model.peer)
+            self.assertEqual(model.owner._generated_calls,[])
+
+    def test_fallback_refuses_copied_or_foreign_peer(self):
+        model=self.start();model.peer.close(failed=True)
+        for peer in (json.loads(C(model.peer.report())),object.__new__(policy._PolicyProcess),SimpleNamespace()):
+            model.owner._policy_binding._fallback_attempted=False
+            with self.subTest(kind=type(peer).__name__),self.assertRaises(REFUSED):model.owner._policy_binding.creator_fallback(peer)
+
+    def test_refused_frame_consumes_admission_without_fabricating_acceptance(self):
+        model=self.start();raw=self.complete(model);value=json.loads(raw);value['contextSha256']='f'*64
+        with self.assertRaises(REFUSED):model.owner._policy_binding.admit(C(value))
+        model.peer.close(failed=True)
+        self.assertEqual(model.owner._policy_binding.creator_fallback(model.peer)[0],'policy-peer-failed')
+        self.assertTrue(model.owner._policy_binding._attempted);self.assertFalse(model.owner._policy_binding._accepted)
+        self.assertEqual(model.owner._generated_calls,[])
+
+    def test_accepted_request_cannot_be_reclassified_as_failure_cleanup(self):
+        model=self.start();model.owner._policy_binding.admit(self.complete(model));model.peer.close(failed=True)
+        with self.assertRaises(REFUSED):model.owner._policy_binding.creator_fallback(model.peer)
+
+    def test_existing_delete_record_cannot_be_retried_via_peer_failure(self):
+        model=self.start();model.peer.close(failed=True);model.owner._record('delete',dict(schema='generated-consumed'))
+        with self.assertRaises(REFUSED):model.owner._policy_binding.creator_fallback(model.peer)
+        self.assertEqual(model.owner._generated_calls,[])
+
+    def service(self,elapsed,event=None,parent_live=True):
+        model=self.start();header=model.peer._header;value,raw=policy.policy_child_header(header);lease=policy.policy_context(raw)
+        output=[];checks=[];clock=[elapsed]
+        class Held:
+            def __enter__(h):return h
+            def __exit__(h,*_):pass
+            def check(h):checks.append('source')
+            def snapshot(h):return dict(state='live' if parent_live else 'exited')
+        def receive(box):
+            if event is None:return
+            box['done']=True
+            if event=='eof':box['error']=True
+            else:box['raw']=C(policy.policy_event(H(raw),event))
+        def thread(target,args,daemon):return SimpleNamespace(start=lambda:target(*args))
+        with ExitStack() as held:
+            for target,attribute,replacement in ((policy.sys,'stdin',SimpleNamespace(buffer=io.BytesIO(header+b'\n'))),
+                    (policy.context.process.control,'DirectoryLease',lambda *_:Held()),
+                    (policy.context.publication.prep,'_RootInputPin',lambda *_:Held()),
+                    (policy.context.process,'PinnedFile',lambda *_:Held()),(policy.guard.identity,'HeldLocalPeer',lambda *_:Held()),
+                    (policy,'_policy_event_input',receive),(policy.threading,'Thread',thread),
+                    (policy.time,'time_ns',lambda:lease['leaseOpenedNs']+clock[0]),
+                    (policy.time,'monotonic_ns',lambda:lease['cleanupMonotonicOriginNs']+clock[0]),
+                    (policy.time,'sleep',lambda _:clock.__setitem__(0,policy.LEASE_NS))):
+                held.enter_context(patch.object(target,attribute,replacement))
+            policy.serve_policy(output.append)
+        return model,output,checks
+
+    def test_service_waits_for_original_lease_without_docker_or_clock_reset(self):
+        model,output,checks=self.service(0)
+        self.assertEqual(len(output),2);self.assertEqual(len(checks),len(policy.context.SOURCES))
+        request=json.loads(output[1][4:]);self.assertEqual(request['reason'],'lease-expired')
+        self.assertEqual(request['contextSha256'],H(model.peer._context));self.assertEqual(model.owner._generated_calls,[])
+
+    def test_service_can_request_after_source_admission_without_extending_cleanup(self):
+        _,output,_=self.service(policy.CLEANUP_NS-1)
+        self.assertEqual(json.loads(output[1][4:])['reason'],'lease-expired')
+
+    def test_service_controller_exit_is_only_a_request(self):
+        model,output,_=self.service(0,'controller-exited')
+        with self.assertRaises(REFUSED):model.owner._policy_binding.admit(bytes(output[1][4:]))
+        self.assertEqual(model.owner._generated_calls,[])
+
+    def test_service_cancel_closes_without_cleanup_request(self):
+        _,output,checks=self.service(0,'cancel')
+        self.assertEqual(len(output),1);self.assertEqual(checks,[])
+
+    def test_service_eof_or_lost_parent_does_not_forge_ready_cleanup(self):
+        for event,parent_live in (('eof',True),(None,False)):
+            with self.subTest(event=event),self.assertRaises(REFUSED):self.service(0,event,parent_live)
+
+    def test_service_original_cleanup_clock_expiry_and_rollback_refuse(self):
+        for elapsed in (-1,policy.CLEANUP_NS):
+            with self.subTest(elapsed=elapsed),self.assertRaises(REFUSED):self.service(elapsed)
+
+    def creator_cleanup(self,invalid_request):
+        model=self.start();owner=model.owner;owner._cleanup_started=False;owner._failed=False;owner._result=None
+        owner._bases=copy.deepcopy(images.BASE_VALUES)
+        owner._docker.base=lambda reference:next(v for v in owner._bases if v['reference']==reference)
+        if invalid_request:
+            raw=json.loads(self.complete(model));raw['contextSha256']='f'*64
+            del model.peer._pumps.stdout[model.peer._total:]
+            model.peer._pumps.stdout.extend(policy.context.frame(raw,policy.MAX_POLICY))
+        else:model.child.returncode=1
+        result=owner.cleanup()
+        self.assertEqual(result['reason'],'policy-peer-failed');self.assertFalse(result['policyRequestValidated'])
+        self.assertTrue(result['policyPeerFailedObserved']);self.assertTrue(result['policyProcessSeparated'])
+        self.assertTrue(result['creatorAliveDuringCleanup']);self.assertFalse(result['guardianDeathCleanupVerified'])
+        self.assertIsNone(owner._records['delete'].report()['policyRequestSha256'])
+        calls=list(owner._generated_calls)
+        self.assertEqual(sum(c[:2]==['container','rm'] for c in calls),1)
+        with self.assertRaises(REFUSED):owner.cleanup()
+        self.assertEqual(owner._generated_calls,calls)
+        return owner
+
+    def test_modeled_peer_exit_keeps_one_creator_dispatch_without_wire_admission(self):
+        owner=self.creator_cleanup(False)
+        self.assertFalse(owner._policy_binding._attempted);self.assertTrue(owner._policy_binding._fallback_attempted)
+
+    def test_modeled_bad_request_consumes_admission_but_known_resources_are_not_orphaned(self):
+        owner=self.creator_cleanup(True)
+        self.assertTrue(owner._policy_binding._attempted);self.assertTrue(owner._resources['runtime']._closed)
+
+
 if __name__=='__main__':
-    result=unittest.TextTestRunner().run(unittest.TestSuite(unittest.defaultTestLoader.loadTestsFromTestCase(case) for case in (RetainedCleanupContracts,RetainedRemovalContracts,RetainedCleanupLifecycleContracts,RetainedPolicyRequestContracts)))
+    result=unittest.TextTestRunner().run(unittest.TestSuite(unittest.defaultTestLoader.loadTestsFromTestCase(case) for case in (RetainedCleanupContracts,RetainedRemovalContracts,RetainedCleanupLifecycleContracts,RetainedPolicyRequestContracts,RetainedPolicyChildContracts)))
     if not result.wasSuccessful() or result.skipped:raise SystemExit(1)
     print('RETAINED OWNED CLEANUP CONTRACT PASS: '+json.dumps(dict(tests=result.testsRun,skipped=0,generatedOnly=True,
         actualDockerOperationsPerformed=0,actualNativePublicationUsed=False,sourceFiles=len(policy.context.SOURCES),

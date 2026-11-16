@@ -336,7 +336,10 @@ def _positive(owner,case):
     packet.require(result['reason']==expected and result['actualCleanupExecuted'] and result['ownCreatedResourcesAbsent'] and
         result['typedRetainedHandoffVerified'] and result['cleanupIndependentOfLiveChildCapability'])
     packet.require(result['sourceAdmissionExpiredBeforeCleanup'] is (case=='source-admission-expired'))
-    packet.require(result['policyRequestValidated'] is True and result['policyProcessSeparated'] is False)
+    packet.require(result['policyRequestValidated'] is True and result['policyProcessSeparated'] is True and result['policyPeerFailedObserved'] is False)
+    peer=result['policyProcess']
+    packet.require(peer['policyReadyVerified'] and peer['ownedPolicyMembersAbsent'] and peer['exitCode']==0 and not peer['peerFailedObserved'])
+    packet.require(peer['policy']['pid'] not in (owner._caller,owner._transport._controller['pid']))
     packet.hex_value(owner._records['delete'].report()['policyRequestSha256'])
     if timer is not None:packet.require(killed.is_set() and not errors and not timer.is_alive())
     return dict(guardianCleanupAccepted=True,result=result,actualControllerKilledWhileGuardianWaiting=case=='controller-exited',
@@ -400,6 +403,9 @@ def exercise(prepared,cases=CASES):
                     else:_fixture_dispose(owner,captured)
                     if result is not None and not result['guardianCleanupAccepted']:_replay(owner,prepared,raw,reference,paths,pins,sources)
                 finally:
+                    peer=getattr(owner,'_policy_process',None)
+                    if peer is not None:peer.close()
+                    policy_report=peer.report() if peer is not None else None
                     records=_records(owner) if closed_capture is None else closed_capture['records']
                     expired_before_close=hasattr(owner,'_intent') and time.time_ns()>=owner._intent['expiresNs']
                     transport=owner._transport;owner.close()
@@ -407,6 +413,7 @@ def exercise(prepared,cases=CASES):
             packet.require(descriptors=={n:p.fd for n,p in reference.pins.items()});reference.check()
             outcomes.append(dict(case=case,**result,ready=ready,records=records,controllerClosure=closed,
                 guardian=closed['parent'],controller=closed['controller'],allFixtureOwnedResourcesDisposed=True,
+                creator=closed['parent'],policyProcess=policy_report,legacyGuardianFieldIsCreator=True,
                 sourceAdmissionExpiredBeforeControllerClose=bool(expired_before_close),
                 original58ParentReferenceDescriptorsUnchanged=True,startAndCleanupReplayRefused=True,
                 fixtureDisposalDoesNotAuthorizeGuardReplay=True,originalInputsRead=False,originalPrivatePkiUsed=False,

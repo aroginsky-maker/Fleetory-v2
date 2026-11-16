@@ -1,4 +1,4 @@
-"""Fixed retained public-source child. Binary context output and close only; no Docker."""
+"""Fixed retained source controller or policy-only peer; no Docker action interface."""
 from contextlib import ExitStack
 import os
 from pathlib import Path
@@ -90,6 +90,10 @@ def run():
 
 
 if __name__=='__main__':
-    try:run()
+    try:
+        if sys.argv[1:]==['--cleanup-policy']:
+            import audit_retained_cleanup_guard as policy
+            policy.serve_policy(_write)
+        else:run()
     except Exception:
         print('Owned retained context controller refused; no paths, values or credentials logged.',file=sys.stderr);raise SystemExit(1)

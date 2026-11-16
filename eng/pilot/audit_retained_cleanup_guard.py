@@ -8,6 +8,7 @@ import re
 import sys
 import threading
 import time
+from types import SimpleNamespace
 
 import audit_retained_guard_protocol as protocol
 
@@ -19,8 +20,13 @@ LEASE_NS,CLEANUP_NS=5_000_000_000,75_000_000_000
 POLICY_CONTEXT='fleetory.retained-cleanup-policy-context.v1'
 POLICY_REQUEST='fleetory.retained-cleanup-policy-request.v1'
 MAX_POLICY=2048
+POLICY_HEADER='fleetory.retained-policy-child-header.v1'
+POLICY_READY='fleetory.retained-policy-child-ready.v1'
+POLICY_EVENT='fleetory.retained-policy-child-event.v1'
+MAX_POLICY_HEADER=32768
+_POLICY_TOKEN=object()
 _TOKEN=object()
-KINDS=('start','admission','build','image','copy','copy-delete','copy-closed','runtime','runtime-closed','bound','delete','image-closed','result')
+KINDS=('start','admission','build','image','copy','copy-delete','copy-closed','runtime','runtime-closed','bound','policy-start','policy-ready','policy-closed','delete','image-closed','result')
 BASE_FORMAT='{"id":{{json .Id}},"layers":{{json .RootFS.Layers}},"labels":{{if .Config.Labels}}{{json .Config.Labels}}{{else}}{}{{end}}}'
 IMAGE_FORMAT=('{"schema":"fleetory.audit-probe-image-observation.v1","id":{{json .Id}},'
     '"tags":{{if .RepoTags}}{{json .RepoTags}}{{else}}[]{{end}},"digests":{{if .RepoDigests}}{{json .RepoDigests}}{{else}}[]{{end}},'
@@ -270,13 +276,80 @@ def policy_context(raw):
 
 
 def policy_request(raw,state,elapsed):
-    """A future policy peer can request cleanup; these bytes never authorize Docker."""
+    """The fixed policy peer can request cleanup; these bytes never authorize Docker."""
     value=policy_context(raw)
     packet.require(type(state) is str and state in ('live','exited') and type(elapsed) is int and 0<=elapsed<CLEANUP_NS)
     expired=value['leaseOpenedNs']+elapsed>=value['leaseExpiresNs']
     if not expired and state=='live':return None
     reason='lease-expired' if expired else 'controller-exited'
     return C(dict(schema=POLICY_REQUEST,contextSha256=H(raw),reason=reason))
+
+
+def policy_child_header(raw):
+    packet.require(type(raw) is bytes and 0<len(raw)<=MAX_POLICY_HEADER)
+    value=packet.strict_json(raw,MAX_POLICY_HEADER)
+    packet.keys(value,'schema parent policy pythonSha256 sourcePins contextBase64')
+    packet.require(value['schema']==POLICY_HEADER and C(value)==raw and type(value['sourcePins']) is dict and set(value['sourcePins'])==set(context.SOURCES))
+    packet.hex_value(value['pythonSha256'])
+    for digest in value['sourcePins'].values():packet.hex_value(digest)
+    for key in ('parent','policy'):
+        guard.identity.protocol._identity(value[key]);packet.require(value[key]['executableSha256']==value['pythonSha256'])
+    packet.require(value['parent']['pid']!=value['policy']['pid'])
+    data=packet.decode(value['contextBase64'],MAX_POLICY);policy_context(data)
+    return value,data
+
+
+def policy_event(context_pin,event):
+    packet.hex_value(context_pin);packet.require(event in ('controller-exited','cancel'))
+    return dict(schema=POLICY_EVENT,contextSha256=context_pin,event=event)
+
+
+def admit_policy_event(raw,context_pin):
+    value=packet.strict_json(raw,MAX_POLICY);packet.keys(value,'schema contextSha256 event')
+    packet.require(C(value)==raw and value==policy_event(context_pin,value['event']))
+    return value['event']
+
+
+def _policy_event_input(box):
+    try:
+        size=context.frame_size(protocol._read_exact(4),MAX_POLICY)
+        box['raw']=protocol._read_exact(size);packet.require(os.read(sys.stdin.fileno(),1)==b'')
+    except Exception:box['error']=True
+    finally:box['done']=True
+
+
+def serve_policy(write):
+    """Fixed policy-only OS entry: pinned public code, read-only peers, bounded pipe data."""
+    header=sys.stdin.buffer.readline(MAX_POLICY_HEADER+1)
+    packet.require(header.endswith(b'\n') and len(header)<=MAX_POLICY_HEADER)
+    value,raw=policy_child_header(header[:-1]);lease=policy_context(raw);repository=Path(__file__).resolve().parents[2]
+    with ExitStack() as held:
+        held.enter_context(context.process.control.DirectoryLease(repository))
+        sources=[held.enter_context(context.publication.prep._RootInputPin(repository/n,value['sourcePins'][n])) for n in context.SOURCES]
+        python=held.enter_context(context.process.PinnedFile(Path(sys.executable),value['pythonSha256'],True))
+        parent=held.enter_context(guard.identity.HeldLocalPeer('parent',python,value['parent']))
+        own=held.enter_context(guard.identity.HeldLocalPeer('self',python,value['policy']))
+        packet.require(parent.snapshot()['state']==own.snapshot()['state']=='live')
+        ready=dict(schema=POLICY_READY,contextSha256=H(raw),parent=value['parent'],policy=value['policy'],
+            sourcePinsSha256=H(C(value['sourcePins'])),noDockerInterface=True,clocksReset=False)
+        write(context.frame(ready,MAX_POLICY))
+        box={'done':False};threading.Thread(target=_policy_event_input,args=(box,),daemon=True).start()
+        state='live'
+        while True:
+            packet.require(parent.snapshot()['state']=='live')
+            mono,wall=time.monotonic_ns()-lease['cleanupMonotonicOriginNs'],time.time_ns()-lease['leaseOpenedNs']
+            packet.require(0<=mono<CLEANUP_NS and 0<=wall<CLEANUP_NS)
+            if box['done']:
+                packet.require(not box.get('error'))
+                event=admit_policy_event(box['raw'],H(raw))
+                if event=='cancel':break
+                state='exited'
+            request=policy_request(raw,state,max(mono,wall))
+            if request is not None:
+                for source in sources:source.check()
+                packet.require(parent.snapshot()['state']=='live')
+                write(context.frame(packet.strict_json(request,MAX_POLICY),MAX_POLICY));break
+            time.sleep(0.05)
 
 
 class _CleanupRequestBinding:
@@ -299,6 +372,7 @@ class _CleanupRequestBinding:
             runtimeExpiresNs=owner._intent['expiresNs']))
         policy_context(self._context)
         self._attempted,self._accepted,self._request_pin=False,False,None
+        self._fallback_attempted=False
         owner._policy_binding=self
 
     def check(self):
@@ -342,13 +416,148 @@ class _CleanupRequestBinding:
         self.check();self._accepted=True;self._request_pin=H(raw)
         return reason,state
 
+    def creator_fallback(self,peer):
+        self.check();owner=self._owner
+        packet.require(owner._cleanup_started is True and not self._accepted and not self._fallback_attempted and 'delete' not in owner._records)
+        self._fallback_attempted=True
+        packet.require(type(peer) is _PolicyProcess and peer is owner._policy_process and peer._owner is owner and
+            peer._token is _POLICY_TOKEN and peer._context==self._context and owner._unknown is False)
+        peer.failure_check();owner._elapsed();state=owner._state();self.check()
+        return 'policy-peer-failed',state
+
+
+class _PolicyProcess:
+    """A separately owned fixed peer; it never receives resource objects, IDs or Docker arguments."""
+    def __init__(self,owner):
+        packet.require(type(owner) is RetainedCleanupGuard and owner._prepared is True and owner._policy_process is None)
+        self._owner,self._caller,self._token=owner,os.getpid(),_POLICY_TOKEN
+        self._child=self._fence=self._pumps=None;self._launch_child=self._launch_fence=None
+        self._closed,self._ready,self._failed,self._notified=False,False,False,False
+        self._end,self._identity,self._exit_code=None,None,None
+        self._context=owner._policy_binding.context_bytes();self._python=owner._transport._runtimes['python']
+        self._transport=owner._transport;self._source_pin=owner._source_pin
+        owner._policy_process=self
+        try:
+            owner._check_owned()
+            self._start=owner._record('policy-start',dict(schema='fleetory.retained-policy-start.v1',nonce=owner._nonce,
+                status='POLICY_LAUNCH_CONSUMED',contextSha256=H(self._context),sourcePinsSha256=self._source_pin,pythonSha256=self._python.digest))
+            command=SimpleNamespace(executable=self._python,arguments=('-I','-B',str(self._transport._repo/'eng/pilot/RetainedContextController.py'),'--cleanup-policy'),
+                directory=self._transport._repo,env=context.process.environment(self._python))
+            self._child=context.process._spawn(command);self._fence=context.process._create_fence(self._child)
+            self._launch_child,self._launch_fence=self._child,self._fence
+            self._identity=guard._process_identity(self._fence.identity(self._child,self._python))
+            packet.require(self._identity['pid'] not in (owner._caller,self._transport._controller['pid']))
+            pins=context._header(self._transport._header)[0]['sourcePins']
+            self._header=C(dict(schema=POLICY_HEADER,parent=self._transport._parent,policy=self._identity,
+                pythonSha256=self._python.digest,sourcePins=pins,contextBase64=context.encode(self._context)))
+            policy_child_header(self._header);owner._check_owned()
+            self._pumps=context.process._Pumps(self._child,b'')
+            for stream,target,bound in ((self._child.stdout,self._pumps.stdout,2*MAX_POLICY+8),(self._child.stderr,self._pumps.stderr,512)):
+                t=threading.Thread(target=self._pumps._read,args=(stream,target,bound,'policy-output-bound'),daemon=True)
+                self._pumps.threads.append(t);t.start()
+            self._send(self._header+b'\n')
+            self._total,self._ready_raw=self._frame(0)
+            value=packet.strict_json(self._ready_raw,MAX_POLICY)
+            packet.require(C(value)==self._ready_raw and value==dict(schema=POLICY_READY,contextSha256=H(self._context),
+                parent=self._transport._parent,policy=self._identity,sourcePinsSha256=self._source_pin,noDockerInterface=True,clocksReset=False))
+            if self._exited():
+                self._child.wait(timeout=3);self._pumps.finish()
+                packet.require(self._child.returncode==0 and len(self._pumps.stdout)>self._total)
+            else:packet.require(guard._process_identity(self._fence.identity(self._child,self._python))==self._identity)
+            self._ready=True;owner._check_owned()
+            owner._record('policy-ready',dict(schema='fleetory.retained-policy-ready.v1',nonce=owner._nonce,contextSha256=H(self._context),
+                creator=self._transport._parent,policy=self._identity,controller=self._transport._controller,sourcePinsSha256=self._source_pin,
+                actualOwnedFenceHeld=True,noDockerInterface=True,clocksReset=False))
+        except BaseException:self._failed=True;self.close();raise
+
+    def _check(self):
+        owner=self._owner
+        packet.require(self._token is _POLICY_TOKEN and self._caller==os.getpid() and owner._policy_process is self and
+            owner._transport is self._transport and owner._source_pin==self._source_pin and self._child is self._launch_child and self._fence is self._launch_fence)
+        packet.require(owner._policy_binding.context_bytes()==self._context)
+        owner._elapsed()
+
+    def _exited(self):return self._child.poll() is not None if os.name=='nt' else self._fence.exited()
+
+    def _frame(self,start):
+        self._wait_bytes(start+4)
+        size=context.frame_size(bytes(self._pumps.stdout[start:start+4]),MAX_POLICY);end=start+4+size
+        self._wait_bytes(end)
+        return end,bytes(self._pumps.stdout[start+4:end])
+
+    def _wait_bytes(self,count):
+        while len(self._pumps.stdout)<count:
+            self._check();packet.require(not self._pumps.errors and not self._pumps.stderr)
+            if self._exited():
+                self._child.wait(timeout=3);self._pumps.finish();packet.require(len(self._pumps.stdout)>=count)
+                break
+            time.sleep(0.01)
+        self._check();packet.require(not self._pumps.errors and not self._pumps.stderr)
+
+    def _event(self,event):
+        self._send(context.frame(policy_event(H(self._context),event),MAX_POLICY))
+        self._child.stdin.close()
+
+    def _send(self,data):
+        def write():
+            try:self._pumps._send(data)
+            except (OSError,ValueError):self._pumps.errors.append('policy-input-io')
+        writer=threading.Thread(target=write,daemon=True);self._pumps.threads.append(writer);writer.start()
+        while writer.is_alive():
+            self._check();packet.require(not self._pumps.errors);time.sleep(0.01)
+        self._check();packet.require(not self._pumps.errors)
+
+    def request(self):
+        self._check();packet.require(self._ready and not self._closed and not self._failed)
+        while len(self._pumps.stdout)<self._total+4:
+            self._check();packet.require(not self._pumps.errors and not self._pumps.stderr)
+            if self._exited():
+                self._wait_bytes(self._total+4);break
+            if not self._notified and self._owner._state()=='exited':
+                self._notified=True
+                try:self._event('controller-exited')
+                except (OSError,ValueError):packet.require(self._exited())
+            self._owner._waiting.set();time.sleep(0.01)
+        end,raw=self._frame(self._total)
+        while not self._exited():
+            self._check();packet.require(not self._pumps.errors and not self._pumps.stderr);time.sleep(0.01)
+        self._child.wait(timeout=3);self._pumps.finish();self._check()
+        packet.require(self._child.returncode==0 and not self._pumps.errors and not self._pumps.stderr and len(self._pumps.stdout)==end)
+        return raw
+
+    def close(self,failed=False):
+        if failed:self._failed=True
+        if self._closed:return
+        packet.require(os.getpid()==self._caller)
+        if self._child is not None and self._ready and not self._exited():
+            try:self._event('cancel')
+            except (OSError,ValueError):pass
+            end=time.monotonic_ns()+1_000_000_000
+            while not self._exited() and time.monotonic_ns()<end:time.sleep(0.01)
+        ended,failure=context.process._finish_owned(self._child,self._fence,self._pumps)
+        self._closed=True;self._end=ended;self._exit_code=None if self._child is None else self._child.returncode
+        packet.require(failure is None and (self._child is None or ended is not None and ended['noRunningMembersVerified'] is True))
+        if self._identity is not None:
+            self._owner._record('policy-closed',dict(schema='fleetory.retained-policy-closed.v1',nonce=self._owner._nonce,
+                contextSha256=H(self._context),creator=self._transport._parent,policy=self._identity,ownedPolicyMembersAbsent=True,
+                peerFailedObserved=self._failed,exitCode=self._exit_code,processSignalFromWire=False))
+
+    def failure_check(self):
+        self._check()
+        packet.require(self._failed and self._closed and self._ready and self._end is not None and self._end['noRunningMembersVerified'] is True)
+
+    def report(self):
+        packet.require(self._closed and self._identity is not None and self._end is not None and self._end['noRunningMembersVerified'] is True)
+        return dict(policy=dict(self._identity),creator=dict(self._transport._parent),policyReadyVerified=self._ready,
+            ownedPolicyMembersAbsent=True,peerFailedObserved=self._failed,exitCode=self._exit_code,contextSha256=H(self._context))
+
 
 class RetainedCleanupGuard:
     """Independent parent executor for one fixed public probe; serialized receipts are metadata only."""
     def __init__(self,repository,operator_root,native_plan,reference,*,runtime_paths,runtime_pins,source_pins):
         self._held=ExitStack();self._transport=None;self._closed=False;self._resources={};self._records={}
         self._failed,self._unknown,self._prepared,self._cleanup_started=False,False,False,False
-        self._result=None;self._caller=os.getpid();self._root=Path(operator_root);self._waiting=threading.Event();self._policy_binding=None
+        self._result=None;self._caller=os.getpid();self._root=Path(operator_root);self._waiting=threading.Event();self._policy_binding=None;self._policy_process=None
         self._plan=context.restore.plan(bytes(native_plan),H(bytes(native_plan)));self._nonce=self._plan['nonce']
         try:
             self._record('start',dict(schema='fleetory.retained-own-guard-start.v1',nonce=self._nonce,status='START_CONSUMED',
@@ -432,6 +641,7 @@ class RetainedCleanupGuard:
                 controller=transport._controller,supervisor=transport._parent,typedHandoffVerified=True))
             _CleanupRequestBinding(self)
             self._prepared=True
+            _PolicyProcess(self)
             return self.receipt()
         except BaseException:self._failed=True;raise
 
@@ -461,15 +671,19 @@ class RetainedCleanupGuard:
 
     def _cleanup_reason(self):
         if self._failed:
+            peer=getattr(self,'_policy_process',None)
+            if peer is not None:peer.close(failed=True)
             state=self._state()
             reason='controller-exited-before-handoff' if state=='exited' and 'runtime' in self._resources else 'preparation-failed'
             return reason,state
-        packet.require(type(getattr(self,'_policy_binding',None)) is _CleanupRequestBinding)
-        while True:
-            elapsed=self._elapsed();state=self._state()
-            request=policy_request(self._policy_binding.context_bytes(),state,elapsed)
-            if request is not None:return self._policy_binding.admit(request)
-            self._waiting.set();time.sleep(0.01)
+        packet.require(type(getattr(self,'_policy_binding',None)) is _CleanupRequestBinding and type(getattr(self,'_policy_process',None)) is _PolicyProcess)
+        peer=self._policy_process
+        try:
+            request=peer.request();decision=self._policy_binding.admit(request);peer.close()
+            return decision
+        except (OSError,ValueError,context.process.LaunchError):
+            peer.close(failed=True)
+            return self._policy_binding.creator_fallback(peer)
 
     def _dispose_known(self):
         deleted=0
@@ -490,15 +704,18 @@ class RetainedCleanupGuard:
         deleted=self._dispose_known()
         packet.require([self._docker.base(n) for n in context.probe.BASES]==self._bases)
         packet.require(not self._unknown)
+        peer=getattr(self,'_policy_process',None)
+        policy_report=peer.report() if peer is not None and peer._closed and peer._identity is not None else None
         value=dict(schema='fleetory.retained-independent-cleanup.v1',nonce=self._nonce,reason=reason,ownCreatedResourcesAbsent=True,
             actualCleanupExecuted=deleted>0,ownSuccessfulCreateReplyHeld='runtime' in self._resources,typedRetainedHandoffVerified=self._prepared,
             typedImageReadbackPreparationVerified=hasattr(self,'_intent'),
-            actualControllerIdentityVerified=True,controllerExitedBeforeCleanup=state=='exited',guardianAliveDuringCleanup=True,
+            actualControllerIdentityVerified=True,controllerExitedBeforeCleanup=state=='exited',guardianAliveDuringCleanup=False,creatorAliveDuringCleanup=True,
             independentExpiryEnforcementVerified=reason=='lease-expired',controllerDeathCleanupVerified=reason in ('controller-exited','controller-exited-before-handoff'),
             sourceAdmissionExpiredBeforeCleanup=bool(expired),cleanupIndependentOfLiveChildCapability=True,
             publicationDescriptorsHeld=58,sourceFilesPinned=len(context.SOURCES),sourcePinsSha256=self._source_pin,
             cachedBasesPreserved=True,cleanupAttemptConsumed=True,unknownCreateOutcome=False,retainedCommandLifetimeSeconds=660,
-            policyRequestValidated=self._prepared and self._policy_binding._accepted,policyProcessSeparated=False,
+            policyRequestValidated=self._prepared and self._policy_binding._accepted,policyProcessSeparated=policy_report is not None and policy_report['policyReadyVerified'],
+            policyProcess=policy_report,policyPeerFailedObserved=policy_report is not None and policy_report['peerFailedObserved'],
             controller=self._transport._controller,supervisor=self._transport._parent,
             guardianDeathCleanupVerified=False,daemonFailureCleanupVerified=False,preReceiptCrashCleanupVerified=False,
             externalRollbackResistanceVerified=False,nativePublisherOriginIndependentlyAuthenticated=False,
@@ -516,7 +733,10 @@ class RetainedCleanupGuard:
         if self._closed:return
         packet.require(os.getpid()==self._caller)
         try:
-            if self._transport is not None:self._transport.close()
+            try:
+                if getattr(self,'_policy_process',None) is not None:self._policy_process.close()
+            finally:
+                if self._transport is not None:self._transport.close()
         finally:self._closed=True;self._held.close()
 
     def run(self):
