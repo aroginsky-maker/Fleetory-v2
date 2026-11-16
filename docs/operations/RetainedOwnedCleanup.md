@@ -121,3 +121,25 @@ independent people, post-restore human login, physical Agent and revocation.
 The Windows CI job has a 20-minute overall limit after two runs exhausted 15 minutes. This runner limit covers the full validation workload; every test and the aggregate gate remain mandatory. Source admission remains 60 seconds, the ready cleanup lease 5 seconds, cleanup 75 seconds and the retained worker 660 seconds. Linux now has a 35-minute overall limit after CI373 exhausted 30 minutes during Sonar finalization, after all .NET tests passed and before analysis submission. The workflow contract refuses a silent return to 30 minutes or extension to 60. Provider/data job bounds remain unchanged.
 
 The disposable pilot provisioning regression rejects PostgreSQL's socket-only temporary initialization server. A bounded fixture-only initialization gate keeps that listener available while the shared readiness function must refuse it; the gate is then released and final TCP readiness is required before provisioning. SQL diagnostics and generated passwords remain suppressed, and the fixture removes only its own container and volumes. This does not change original database restore or role/login evidence.
+
+The next guardian split first establishes a policy-request boundary inside the
+existing live creator. A public context contains only the original lease clocks,
+nonce and source/receipt/ready-record digests. A request carries its context digest
+and one fixed reason; IDs, commands, paths and replacement clocks are refused.
+The creator retains its actual client, runtime reply/resource and ready-record
+handle. It checks those same live objects and independently observes its held
+controller fence and original cleanup clock before accepting a request. A refused
+or accepted admission consumes the request attempt; public context bytes cannot
+construct a new creator binding or authorize Docker. Cleanup success records the
+validated request digest, while an interrupted pre-handoff rollback has no policy
+request. The existing 62 contract methods and assertions remain; 28 generated
+contracts exercise this new boundary. Native controller tests check the actual
+request result separately from these generated models.
+
+This is the clock/custody protocol prerequisite for a fixed policy child. Policy
+execution still shares the creator process (`policyProcessSeparated=false`). No
+OS policy-child death or transport-loss case is proved by this step. Introducing
+that independently fenced child and validating its failure after its own gates
+remain next; surviving-creator/daemon/host loss and full original recovery stay
+open. The original 58 publication descriptors, source inventories and source,
+lease, cleanup and worker durations remain unchanged.

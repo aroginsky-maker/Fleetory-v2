@@ -307,6 +307,7 @@ def _handoff_death(owner):
     packet.require(result['reason']=='controller-exited-before-handoff' and result['controllerDeathCleanupVerified'] and
         result['ownSuccessfulCreateReplyHeld'] and result['typedImageReadbackPreparationVerified'] and
         not result['typedRetainedHandoffVerified'] and result['ownCreatedResourcesAbsent'])
+    packet.require(result['policyRequestValidated'] is False and result['policyProcessSeparated'] is False)
     return dict(guardianCleanupAccepted=True,result=result,actualControllerKilledAfterOwnReplyBeforeBinding=True,
         failedHandoffNotAdmitted=True,automaticOwnRollbackBeforeContextClosureVerified=True),captured
 
@@ -335,6 +336,8 @@ def _positive(owner,case):
     packet.require(result['reason']==expected and result['actualCleanupExecuted'] and result['ownCreatedResourcesAbsent'] and
         result['typedRetainedHandoffVerified'] and result['cleanupIndependentOfLiveChildCapability'])
     packet.require(result['sourceAdmissionExpiredBeforeCleanup'] is (case=='source-admission-expired'))
+    packet.require(result['policyRequestValidated'] is True and result['policyProcessSeparated'] is False)
+    packet.hex_value(owner._records['delete'].report()['policyRequestSha256'])
     if timer is not None:packet.require(killed.is_set() and not errors and not timer.is_alive())
     return dict(guardianCleanupAccepted=True,result=result,actualControllerKilledWhileGuardianWaiting=case=='controller-exited',
         actualOriginalAdmissionExpiredBeforeCleanup=case=='source-admission-expired')

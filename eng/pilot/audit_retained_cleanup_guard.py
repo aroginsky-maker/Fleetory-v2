@@ -16,6 +16,9 @@ guard,packet,C,H=context.guard,context.packet,context.C,context.H
 runtime,container=retained.runtime,retained.container
 PURPOSE='retained-publication-independent-cleanup.v1'
 LEASE_NS,CLEANUP_NS=5_000_000_000,75_000_000_000
+POLICY_CONTEXT='fleetory.retained-cleanup-policy-context.v1'
+POLICY_REQUEST='fleetory.retained-cleanup-policy-request.v1'
+MAX_POLICY=2048
 _TOKEN=object()
 KINDS=('start','admission','build','image','copy','copy-delete','copy-closed','runtime','runtime-closed','bound','delete','image-closed','result')
 BASE_FORMAT='{"id":{{json .Id}},"layers":{{json .RootFS.Layers}},"labels":{{if .Config.Labels}}{{json .Config.Labels}}{{else}}{}{{end}}}'
@@ -250,12 +253,102 @@ class _Resource:
         self._closed=True
 
 
+def policy_context(raw):
+    """Public decision inputs only: no creator object, resource ID, path or command."""
+    packet.require(type(raw) is bytes and 0<len(raw)<=MAX_POLICY)
+    value=packet.strict_json(raw,MAX_POLICY)
+    packet.keys(value,'schema nonce sourcePinsSha256 runtimeReceiptSha256 readyRecordSha256 leaseOpenedNs '
+        'cleanupMonotonicOriginNs leaseExpiresNs runtimeExpiresNs')
+    packet.require(value['schema']==POLICY_CONTEXT and C(value)==raw)
+    packet.identity(value['nonce'])
+    for key in ('sourcePinsSha256','runtimeReceiptSha256','readyRecordSha256'):packet.hex_value(value[key])
+    for key in ('leaseOpenedNs','cleanupMonotonicOriginNs','leaseExpiresNs','runtimeExpiresNs'):
+        packet.require(type(value[key]) is int and value[key]>0)
+    opened,expiry,end=(value[k] for k in ('leaseOpenedNs','leaseExpiresNs','runtimeExpiresNs'))
+    packet.require(opened<expiry==min(opened+LEASE_NS,end) and 0<end-opened<=context.publication.WINDOW_NS)
+    return value
+
+
+def policy_request(raw,state,elapsed):
+    """A future policy peer can request cleanup; these bytes never authorize Docker."""
+    value=policy_context(raw)
+    packet.require(type(state) is str and state in ('live','exited') and type(elapsed) is int and 0<=elapsed<CLEANUP_NS)
+    expired=value['leaseOpenedNs']+elapsed>=value['leaseExpiresNs']
+    if not expired and state=='live':return None
+    reason='lease-expired' if expired else 'controller-exited'
+    return C(dict(schema=POLICY_REQUEST,contextSha256=H(raw),reason=reason))
+
+
+class _CleanupRequestBinding:
+    """Live creator custody; serializing public policy context cannot recreate it."""
+    def __init__(self,owner):
+        packet.require(type(owner) is RetainedCleanupGuard and owner._policy_binding is None and type(owner._prepared) is bool and
+            owner._closed is False and owner._caller==os.getpid())
+        packet.require('runtime' in owner._resources and 'bound' in owner._records)
+        resource=owner._resources['runtime']
+        packet.require(type(resource) is _Resource and resource.owner is owner and resource._closed is False and
+            resource.reply.kind=='runtime' and resource.reply.client is owner._docker)
+        resource.check()
+        self._owner,self._resource,self._reply=owner,resource,resource.reply
+        self._client,self._transport,self._records=owner._docker,owner._transport,owner._records
+        self._bound=owner._records['bound'];self._bound.check();self._bound_bytes=bytes(self._bound._bytes)
+        self._intent=bytes(resource.intent);self._clock=(owner._mono,owner._wall,owner._expiry)
+        self._context=C(dict(schema=POLICY_CONTEXT,nonce=owner._nonce,sourcePinsSha256=owner._source_pin,
+            runtimeReceiptSha256=H(resource._snapshot),readyRecordSha256=H(self._bound_bytes),
+            leaseOpenedNs=owner._wall,cleanupMonotonicOriginNs=owner._mono,leaseExpiresNs=owner._expiry,
+            runtimeExpiresNs=owner._intent['expiresNs']))
+        policy_context(self._context)
+        self._attempted,self._accepted,self._request_pin=False,False,None
+        owner._policy_binding=self
+
+    def check(self):
+        owner,resource=self._owner,self._resource
+        packet.require(type(owner) is RetainedCleanupGuard and owner._policy_binding is self and owner._prepared is True and
+            owner._closed is False and owner._caller==os.getpid() and owner._docker is self._client and
+            owner._transport is self._transport and owner._records is self._records and
+            owner._resources.get('runtime') is resource and resource.owner is owner and resource.reply is self._reply and
+            self._reply.client is self._client and resource.intent==self._intent==C(owner._intent) and
+            self._clock==(owner._mono,owner._wall,owner._expiry) and owner._records.get('bound') is self._bound and
+            type(resource._closed) is bool)
+        self._bound.check();packet.require(self._bound._bytes==self._bound_bytes)
+        value=policy_context(self._context)
+        packet.require(value['nonce']==owner._nonce and value['sourcePinsSha256']==owner._source_pin and
+            value['runtimeReceiptSha256']==H(resource._snapshot) and value['readyRecordSha256']==H(self._bound_bytes) and
+            (value['cleanupMonotonicOriginNs'],value['leaseOpenedNs'],value['leaseExpiresNs'])==self._clock and
+            value['runtimeExpiresNs']==owner._intent['expiresNs'])
+        if not resource._closed:resource.check()
+        else:
+            packet.require(owner._cleanup_started is True)
+            closed=owner._records['runtime-closed'];packet.require(type(closed) is type(self._bound))
+            closed.check();saved=closed.report();saved.pop('localConsumedRecordFlushed')
+            packet.require(saved==dict(schema='fleetory.retained-own-resource-closed.v1',nonce=owner._nonce,
+                id=self._reply.identifier,receiptSha256=H(resource._snapshot),absenceVerified=True))
+
+    def context_bytes(self):
+        self.check()
+        return bytes(self._context)
+
+    def admit(self,raw):
+        self.check();owner=self._owner
+        packet.require(owner._cleanup_started is True and not self._attempted)
+        self._attempted=True
+        packet.require(type(raw) is bytes and 0<len(raw)<=MAX_POLICY)
+        value=packet.strict_json(raw,MAX_POLICY);packet.keys(value,'schema contextSha256 reason')
+        packet.require(C(value)==raw and value['schema']==POLICY_REQUEST and value['contextSha256']==H(self._context))
+        elapsed,state=owner._elapsed(),owner._state()
+        reason=value['reason']
+        packet.require(type(elapsed) is int and 0<=elapsed<CLEANUP_NS and type(state) is str and state in ('live','exited') and
+            (reason=='lease-expired' and owner._wall+elapsed>=owner._expiry or reason=='controller-exited' and state=='exited'))
+        self.check();self._accepted=True;self._request_pin=H(raw)
+        return reason,state
+
+
 class RetainedCleanupGuard:
     """Independent parent executor for one fixed public probe; serialized receipts are metadata only."""
     def __init__(self,repository,operator_root,native_plan,reference,*,runtime_paths,runtime_pins,source_pins):
         self._held=ExitStack();self._transport=None;self._closed=False;self._resources={};self._records={}
         self._failed,self._unknown,self._prepared,self._cleanup_started=False,False,False,False
-        self._result=None;self._caller=os.getpid();self._root=Path(operator_root);self._waiting=threading.Event()
+        self._result=None;self._caller=os.getpid();self._root=Path(operator_root);self._waiting=threading.Event();self._policy_binding=None
         self._plan=context.restore.plan(bytes(native_plan),H(bytes(native_plan)));self._nonce=self._plan['nonce']
         try:
             self._record('start',dict(schema='fleetory.retained-own-guard-start.v1',nonce=self._nonce,status='START_CONSUMED',
@@ -296,6 +389,8 @@ class RetainedCleanupGuard:
             saved['runtimeReceiptSha256']==H(resource._snapshot) and saved['leaseOpenedNs']==self._wall and
             saved['cleanupMonotonicOriginNs']==self._mono and saved['leaseExpiresNs']==self._expiry and
             self._expiry==min(self._wall+LEASE_NS,self._intent['expiresNs']))
+        packet.require(type(getattr(self,'_policy_binding',None)) is _CleanupRequestBinding)
+        self._policy_binding.check()
 
     def _create(self,kind,intent,callback):
         try:
@@ -335,6 +430,7 @@ class RetainedCleanupGuard:
                 runtimeReceiptSha256=H(worker._snapshot),backendBindingSha256=bound,leaseOpenedNs=self._wall,
                 cleanupMonotonicOriginNs=self._mono,leaseExpiresNs=self._expiry,
                 controller=transport._controller,supervisor=transport._parent,typedHandoffVerified=True))
+            _CleanupRequestBinding(self)
             self._prepared=True
             return self.receipt()
         except BaseException:self._failed=True;raise
@@ -368,11 +464,12 @@ class RetainedCleanupGuard:
             state=self._state()
             reason='controller-exited-before-handoff' if state=='exited' and 'runtime' in self._resources else 'preparation-failed'
             return reason,state
+        packet.require(type(getattr(self,'_policy_binding',None)) is _CleanupRequestBinding)
         while True:
             elapsed=self._elapsed();state=self._state()
-            if self._wall+elapsed>=self._expiry or state=='exited':break
+            request=policy_request(self._policy_binding.context_bytes(),state,elapsed)
+            if request is not None:return self._policy_binding.admit(request)
             self._waiting.set();time.sleep(0.01)
-        return ('lease-expired' if self._wall+elapsed>=self._expiry else 'controller-exited'),state
 
     def _dispose_known(self):
         deleted=0
@@ -387,7 +484,8 @@ class RetainedCleanupGuard:
         self._check_owned();packet.require(not self._cleanup_started and (self._prepared or self._failed))
         self._cleanup_started=True
         reason,state=self._cleanup_reason()
-        self._record('delete',dict(schema='fleetory.retained-own-cleanup-attempt.v1',nonce=self._nonce,status='ATTEMPT_CONSUMED',reason=reason))
+        self._record('delete',dict(schema='fleetory.retained-own-cleanup-attempt.v1',nonce=self._nonce,status='ATTEMPT_CONSUMED',reason=reason,
+            policyRequestSha256=self._policy_binding._request_pin if self._prepared else None))
         expired=hasattr(self,'_intent') and time.time_ns()>=self._intent['expiresNs']
         deleted=self._dispose_known()
         packet.require([self._docker.base(n) for n in context.probe.BASES]==self._bases)
@@ -400,6 +498,7 @@ class RetainedCleanupGuard:
             sourceAdmissionExpiredBeforeCleanup=bool(expired),cleanupIndependentOfLiveChildCapability=True,
             publicationDescriptorsHeld=58,sourceFilesPinned=len(context.SOURCES),sourcePinsSha256=self._source_pin,
             cachedBasesPreserved=True,cleanupAttemptConsumed=True,unknownCreateOutcome=False,retainedCommandLifetimeSeconds=660,
+            policyRequestValidated=self._prepared and self._policy_binding._accepted,policyProcessSeparated=False,
             controller=self._transport._controller,supervisor=self._transport._parent,
             guardianDeathCleanupVerified=False,daemonFailureCleanupVerified=False,preReceiptCrashCleanupVerified=False,
             externalRollbackResistanceVerified=False,nativePublisherOriginIndependentlyAuthenticated=False,

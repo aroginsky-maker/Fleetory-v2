@@ -271,6 +271,7 @@ class RetainedCleanupContracts(unittest.TestCase):
         owner._expiry=min(owner._wall+policy.LEASE_NS,owner._intent['expiresNs'])
         owner._record('bound',dict(schema='generated-ready-test',nonce=owner._nonce,runtimeReceiptSha256=H(resource._snapshot),
             leaseOpenedNs=owner._wall,cleanupMonotonicOriginNs=owner._mono,leaseExpiresNs=owner._expiry))
+        owner._policy_binding=None;policy._CleanupRequestBinding(owner)
         return owner
 
     def test_cleanup_lease_and_intent_are_bound_to_persisted_creator_record(self):
@@ -637,8 +638,198 @@ class RetainedCleanupLifecycleContracts(unittest.TestCase):
             with self.subTest(identifier=identifier),self.assertRaises(REFUSED):fixture_removal_reply(identifier.encode()+b'\n',identifier)
 
 
+class RetainedPolicyRequestContracts(unittest.TestCase):
+    """Wire policy requests cannot replace the live creator's replies, clocks or records."""
+    setUpClass=classmethod(RetainedRemovalContracts.setUpClass.__func__)
+    setUp=RetainedRemovalContracts.setUp
+    ready_owner=RetainedCleanupContracts.ready_owner
+
+    def owner_resource(self):
+        result=RetainedCleanupContracts.owner_resource(self)
+        result[0]._generated_calls=result[3]
+        return result
+
+    def owner(self):
+        root=self.root;number=getattr(self,'_owner_number',0)+1;self._owner_number=number
+        self.root=root/str(number);self.root.mkdir(mode=0o700)
+        try:owner=self.ready_owner()
+        finally:self.root=root
+        owner._cleanup_started=True;owner._test_elapsed=0;owner._test_state='live'
+        owner._elapsed=lambda:owner._test_elapsed;owner._state=lambda:owner._test_state
+        return owner
+
+    def request(self,owner,reason='lease-expired'):
+        return C(dict(schema=policy.POLICY_REQUEST,contextSha256=H(owner._policy_binding.context_bytes()),reason=reason))
+
+    def expired(self,owner):owner._test_elapsed=owner._expiry-owner._wall
+
+    def test_public_context_contains_only_fixed_inputs_and_digests(self):
+        owner=self.owner();raw=owner._policy_binding.context_bytes();value=policy.policy_context(raw)
+        self.assertEqual(value['leaseOpenedNs'],owner._wall)
+        self.assertEqual(value['readyRecordSha256'],H(owner._records['bound']._bytes))
+        self.assertFalse(set(value)&{'containerId','command','path','endpoint','cleanupAuthorized','owner'})
+        value['leaseOpenedNs']=0
+        self.assertNotEqual(C(value),owner._policy_binding.context_bytes())
+
+    def test_live_controller_before_original_expiry_has_no_request(self):
+        owner=self.owner();raw=owner._policy_binding.context_bytes()
+        for elapsed in (0,owner._expiry-owner._wall-1):self.assertIsNone(policy.policy_request(raw,'live',elapsed))
+
+    def test_exact_original_lease_boundary_requests_cleanup(self):
+        owner=self.owner();self.expired(owner)
+        request=policy.policy_request(owner._policy_binding.context_bytes(),'live',owner._test_elapsed)
+        self.assertEqual(owner._policy_binding.admit(request),('lease-expired','live'))
+        self.assertEqual(owner._policy_binding._request_pin,H(request))
+
+    def test_fenced_controller_exit_can_precede_lease_expiry(self):
+        owner=self.owner();owner._test_state='exited'
+        request=policy.policy_request(owner._policy_binding.context_bytes(),'exited',0)
+        self.assertEqual(owner._policy_binding.admit(request),('controller-exited','exited'))
+
+    def test_expiry_has_priority_when_both_conditions_hold(self):
+        owner=self.owner();self.expired(owner)
+        request=policy.policy_request(owner._policy_binding.context_bytes(),'exited',owner._test_elapsed)
+        self.assertEqual(json.loads(request)['reason'],'lease-expired')
+
+    def test_early_lease_request_is_independently_refused_by_creator(self):
+        owner=self.owner()
+        with self.assertRaises(REFUSED):owner._policy_binding.admit(self.request(owner))
+        self.assertFalse(owner._policy_binding._accepted);self.assertEqual(owner._generated_calls,[])
+
+    def test_claimed_controller_exit_cannot_replace_creator_observation(self):
+        owner=self.owner()
+        with self.assertRaises(REFUSED):owner._policy_binding.admit(self.request(owner,'controller-exited'))
+        self.assertEqual(owner._generated_calls,[])
+
+    def test_new_fence_observation_is_used_after_request_generation(self):
+        owner=self.owner();request=policy.policy_request(owner._policy_binding.context_bytes(),'exited',0)
+        with self.assertRaises(REFUSED):owner._policy_binding.admit(request)
+
+    def test_controller_exit_request_remains_valid_if_lease_expires_in_transit(self):
+        owner=self.owner();request=policy.policy_request(owner._policy_binding.context_bytes(),'exited',0)
+        self.expired(owner);owner._test_state='exited'
+        self.assertEqual(owner._policy_binding.admit(request),('controller-exited','exited'))
+
+    def test_request_from_different_public_context_is_refused(self):
+        owner=self.owner();self.expired(owner);value=json.loads(owner._policy_binding.context_bytes())
+        value['sourcePinsSha256']='f'*64
+        foreign=policy.policy_request(C(value),'live',owner._test_elapsed)
+        with self.assertRaises(REFUSED):owner._policy_binding.admit(foreign)
+        self.assertEqual(owner._generated_calls,[])
+
+    def test_authority_paths_ids_and_extended_deadlines_are_not_request_fields(self):
+        for key in ('containerId','command','operatorRoot','expiresNs','elapsedNs','cleanupAuthorized'):
+            owner=self.owner();self.expired(owner);request=json.loads(self.request(owner));request[key]='foreign'
+            with self.subTest(key=key),self.assertRaises(REFUSED):owner._policy_binding.admit(C(request))
+            self.assertEqual(owner._generated_calls,[])
+
+    def test_noncanonical_duplicate_and_oversized_requests_are_refused(self):
+        for kind in ('space','duplicate','oversized','bytearray'):
+            owner=self.owner();self.expired(owner);raw=self.request(owner)
+            raw={'space':raw+b' ','duplicate':raw[:-1]+b',"reason":"lease-expired"}',
+                 'oversized':raw+b' '*policy.MAX_POLICY,'bytearray':bytearray(raw)}[kind]
+            with self.subTest(kind=kind),self.assertRaises(REFUSED):owner._policy_binding.admit(raw)
+            self.assertFalse(owner._policy_binding._accepted)
+
+    def test_refused_attempt_cannot_be_replaced_with_valid_request(self):
+        owner=self.owner();self.expired(owner);binding=owner._policy_binding
+        with self.assertRaises(REFUSED):binding.admit(b'{}')
+        with self.assertRaises(REFUSED):binding.admit(self.request(owner))
+        self.assertTrue(binding._attempted);self.assertFalse(binding._accepted);self.assertEqual(owner._generated_calls,[])
+
+    def test_accepted_request_cannot_be_replayed(self):
+        owner=self.owner();self.expired(owner);raw=self.request(owner);owner._policy_binding.admit(raw)
+        with self.assertRaises(REFUSED):owner._policy_binding.admit(raw)
+        self.assertEqual(owner._generated_calls,[])
+
+    def test_late_request_cannot_restart_original_cleanup_clock(self):
+        for elapsed in (-1,True,policy.CLEANUP_NS,policy.CLEANUP_NS+1):
+            owner=self.owner();owner._test_elapsed=elapsed
+            with self.subTest(elapsed=elapsed),self.assertRaises(REFUSED):owner._policy_binding.admit(self.request(owner))
+            self.assertEqual(owner._generated_calls,[])
+
+    def test_pid_change_cannot_transfer_live_binding(self):
+        owner=self.owner();raw=self.request(owner)
+        with patch.object(policy.os,'getpid',return_value=owner._caller+1),self.assertRaises(REFUSED):owner._policy_binding.admit(raw)
+
+    def test_original_clock_fields_cannot_be_rewritten(self):
+        for key in ('_mono','_wall','_expiry'):
+            owner=self.owner();raw=self.request(owner);setattr(owner,key,getattr(owner,key)+1)
+            with self.subTest(key=key),self.assertRaises(REFUSED):owner._policy_binding.admit(raw)
+
+    def test_live_client_and_transport_cannot_be_replaced_by_equivalent_metadata(self):
+        for key in ('_docker','_transport','_records'):
+            owner=self.owner();raw=self.request(owner)
+            setattr(owner,key,dict(owner._records) if key=='_records' else SimpleNamespace())
+            with self.subTest(key=key),self.assertRaises(REFUSED):owner._policy_binding.admit(raw)
+            self.assertEqual(owner._generated_calls,[])
+
+    def test_cloned_reply_cannot_replace_creator_retained_reply_object(self):
+        owner=self.owner();raw=self.request(owner);resource=owner._resources['runtime'];reply=resource.reply
+        resource.reply=policy._Reply(reply.token,reply.client,reply.kind,reply.raw,reply.identifier,reply.started,reply.finished,reply.input_pin)
+        with self.assertRaises(REFUSED):owner._policy_binding.admit(raw)
+
+    def test_foreign_resource_or_bound_handle_cannot_replace_original_live_objects(self):
+        for key in ('runtime','bound'):
+            owner=self.owner();raw=self.request(owner)
+            if key=='runtime':owner._resources['runtime']=object()
+            else:owner._records['bound']=SimpleNamespace(_bytes=owner._records['bound']._bytes)
+            with self.subTest(key=key),self.assertRaises(REFUSED):owner._policy_binding.admit(raw)
+
+    def test_serialized_policy_context_cannot_construct_creator_binding(self):
+        owner=self.owner();raw=owner._policy_binding.context_bytes()
+        for copied in (raw,json.loads(raw),dict(owner=owner._nonce),SimpleNamespace()):
+            with self.subTest(kind=type(copied).__name__),self.assertRaises(REFUSED):policy._CleanupRequestBinding(copied)
+        with self.assertRaises(REFUSED):policy._CleanupRequestBinding(owner)
+        other=self.owner();other._policy_binding=None;other._prepared=False;del other._records['bound']
+        with self.assertRaises(REFUSED):policy._CleanupRequestBinding(other)
+        self.assertEqual(other._generated_calls,[])
+
+    def test_replacing_binding_with_wire_context_is_not_admitted(self):
+        owner=self.owner();binding=owner._policy_binding;owner._policy_binding=json.loads(binding.context_bytes())
+        with self.assertRaises(REFUSED):binding.context_bytes()
+        with self.assertRaises(REFUSED):owner._check_ready()
+
+    def test_closed_creator_cannot_issue_or_admit_policy_requests(self):
+        owner=self.owner();raw=self.request(owner);owner._closed=True
+        with self.assertRaises(REFUSED):owner._policy_binding.context_bytes()
+        with self.assertRaises(REFUSED):owner._policy_binding.admit(raw)
+
+    def test_real_generated_owned_close_keeps_original_binding_checkable(self):
+        owner=self.owner();resource=owner._resources['runtime'];resource.dispose()
+        owner._policy_binding.check()
+        self.assertTrue(resource._closed);self.assertIn('runtime-closed',owner._records)
+
+    def test_forged_closed_resource_does_not_satisfy_live_binding(self):
+        owner=self.owner();resource=owner._resources['runtime'];resource._closed=True
+        with self.assertRaises((KeyError,*REFUSED)):owner._policy_binding.check()
+        owner._record('runtime-closed',dict(schema='fleetory.retained-own-resource-closed.v1',nonce=owner._nonce,
+            id='f'*64,receiptSha256=H(resource._snapshot),absenceVerified=True))
+        with self.assertRaises(REFUSED):owner._policy_binding.check()
+
+    def test_policy_inputs_reject_boolean_clocks_states_and_elapsed(self):
+        owner=self.owner();raw=owner._policy_binding.context_bytes();context=json.loads(raw)
+        for key in ('leaseOpenedNs','cleanupMonotonicOriginNs','leaseExpiresNs','runtimeExpiresNs'):
+            with self.subTest(key=key),self.assertRaises(REFUSED):policy.policy_context(C(dict(context,**{key:True})))
+        for state,elapsed in ((True,0),('foreign',0),('live',True),('live',-1),('live',policy.CLEANUP_NS)):
+            with self.subTest(state=state,elapsed=elapsed),self.assertRaises(REFUSED):policy.policy_request(raw,state,elapsed)
+
+    def test_coordinated_owner_and_policy_deadline_rewrite_cannot_replace_held_record(self):
+        owner=self.owner();raw=self.request(owner);owner._intent['expiresNs']+=1;owner._expiry+=1
+        value=json.loads(owner._policy_binding._context);value['runtimeExpiresNs']+=1;value['leaseExpiresNs']+=1
+        owner._policy_binding._context=C(value)
+        with self.assertRaises(REFUSED):owner._policy_binding.admit(raw)
+
+    def test_policy_functions_cannot_add_ids_or_dispatch_docker(self):
+        owner=self.owner();raw=owner._policy_binding.context_bytes();self.expired(owner)
+        for key in ('containerId','command','endpoint','owner'):
+            with self.subTest(key=key),self.assertRaises(REFUSED):policy.policy_context(C(dict(json.loads(raw),**{key:'foreign'})))
+        self.assertIsNotNone(policy.policy_request(raw,'live',owner._test_elapsed))
+        self.assertEqual(owner._generated_calls,[])
+
+
 if __name__=='__main__':
-    result=unittest.TextTestRunner().run(unittest.TestSuite(unittest.defaultTestLoader.loadTestsFromTestCase(case) for case in (RetainedCleanupContracts,RetainedRemovalContracts,RetainedCleanupLifecycleContracts)))
+    result=unittest.TextTestRunner().run(unittest.TestSuite(unittest.defaultTestLoader.loadTestsFromTestCase(case) for case in (RetainedCleanupContracts,RetainedRemovalContracts,RetainedCleanupLifecycleContracts,RetainedPolicyRequestContracts)))
     if not result.wasSuccessful() or result.skipped:raise SystemExit(1)
     print('RETAINED OWNED CLEANUP CONTRACT PASS: '+json.dumps(dict(tests=result.testsRun,skipped=0,generatedOnly=True,
         actualDockerOperationsPerformed=0,actualNativePublicationUsed=False,sourceFiles=len(policy.context.SOURCES),
