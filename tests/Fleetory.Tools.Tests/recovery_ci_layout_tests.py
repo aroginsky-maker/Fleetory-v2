@@ -191,7 +191,7 @@ def validate(text):
     assert block[start:end if end >= 0 else len(block)].strip() == fault_step.strip()
     for command in ('./eng/verify-quality.ps1', './eng/verify-sonar-issues.ps1', './eng/report-sonar-metrics.ps1'):
         assert text.count(command) == 1 and command in blocks['quality']
-    assert '    timeout-minutes: 30\n' in blocks['quality']
+    assert '    timeout-minutes: 35\n' in blocks['quality']
     assert '    timeout-minutes: 20\n' in blocks['windows-tls-chain']
     aggregate = blocks['quality-gate']
     assert '    name: Strict build, tests, coverage and Sonar\n' in aggregate
@@ -235,7 +235,9 @@ class RecoveryCiLayoutTests(unittest.TestCase):
             self.refused(self.text[:start] + self.text[start:].replace(old, 'removed', 1))
 
     def test_deadlines_or_sonar_ownership_cannot_change_silently(self):
-        self.refused(self.text.replace('timeout-minutes: 30', 'timeout-minutes: 60'))
+        for minutes in (30, 60):
+            self.refused(self.text.replace('runs-on: ubuntu-24.04\n    timeout-minutes: 35',
+                f'runs-on: ubuntu-24.04\n    timeout-minutes: {minutes}'))
         for minutes in (15, 60):
             self.refused(self.text.replace('runs-on: windows-latest\n    timeout-minutes: 20',
                 f'runs-on: windows-latest\n    timeout-minutes: {minutes}'))

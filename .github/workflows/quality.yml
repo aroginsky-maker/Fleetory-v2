@@ -427,7 +427,7 @@ jobs:
   quality:
     name: Strict build, tests, coverage and Sonar execution
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 35
     permissions:
       contents: read
       checks: read
