@@ -393,7 +393,7 @@ def _policy_fault(owner,case):
         owner._policy_binding._fallback_attempted and owner._records['delete'].report()['policyRequestSha256'] is None)
     report=result['policyProcess'];packet.require(report['policy']==identity and report['ownedPolicyMembersAbsent'] and
         report['peerFailedObserved'] and report['exitCode'] is not None and report['exitCode']!=0)
-    packet.require(deletions==[['container','rm','--force',reply.identifier],['image','rm',owner._resources['image'].reply.identifier]])
+    packet.require(deletions==[['container','rm','--force',reply.identifier],['image','rm','--no-prune',owner._resources['image'].reply.identifier]])
     packet.require(clock==(owner._mono,owner._wall,owner._expiry) and not result['guardianDeathCleanupVerified'])
     return dict(guardianCleanupAccepted=True,result=result,actualPolicyChildDeathInjected=case=='policy-child-exited',
         actualPolicyInputEofInjected=case=='policy-input-eof',faultInjectedBeforeOriginalLeaseExpiry=True,
