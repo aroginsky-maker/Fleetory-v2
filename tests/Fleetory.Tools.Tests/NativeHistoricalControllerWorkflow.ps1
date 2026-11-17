@@ -1,6 +1,71 @@
 #requires -Version 7.3
 # Generated source only; the actual owner receives frozen input through a private pipe.
 . (Join-Path $repo 'eng/pilot/HistoricalAuditControllerPolicy.ps1')
+function Invoke-NativeContainerReplyFault{
+    # A separate live fixture witness retains the real complete native reply;
+    # the tested owner sees only a prefix and may not recover ownership by name.
+    $liveClient=${function:Invoke-Docker}
+    $fault=@{Injected=$false;Calls=0;WitnessContext=$null;WitnessStore=$null;Closed=$false}
+    function Invoke-Docker([string[]]$Arguments,[byte[]]$InputBytes=$null,[int]$TimeoutSeconds=60,[switch]$AllowFailure){
+        $fault.Calls++
+        if($Arguments[0] -ceq 'run' -and -not $fault.Injected){
+            $fault.Injected=$true
+            $fault.WitnessStore=$context.Stores[-1].Clone()
+            $fault.WitnessContext=$context.Clone()
+            $fault.WitnessContext.Stores=[Collections.Generic.List[object]]::new()
+            $fault.WitnessContext.Stores.Add($fault.WitnessStore)
+            $native=@{Reply=$null}
+            $heldClient=$liveClient # GetNewClosure captures locals, not the enclosing function variables.
+            $operation=[Func[Tuple[int,byte[],byte[]]]]{
+                $native.Reply=& $heldClient $Arguments $InputBytes $TimeoutSeconds -AllowFailure
+                return [Tuple[int,byte[],byte[]]]::new($native.Reply.ExitCode,$native.Reply.StdoutBytes,$native.Reply.StderrBytes)
+            }.GetNewClosure()
+            $null=[Fleetory.Pilot.AuditContainerCustody]::Create($fault.WitnessContext,$fault.WitnessStore,$fault.Client,$operation)
+            Assert-ImmuData ($native.Reply.ExitCode -eq 0 -and $native.Reply.StdoutBytes.Length -ge 65) 'fault-witness-complete-native-reply'
+            return @{ExitCode=0;Stdout=$native.Reply.Stdout.Substring(0,12);Stderr='';
+                StdoutBytes=[byte[]]$native.Reply.StdoutBytes[0..11];StderrBytes=[byte[]]@()}
+        }
+        return & $liveClient $Arguments $InputBytes $TimeoutSeconds -AllowFailure:$AllowFailure
+    }
+    $fault.Client=${function:Invoke-Docker}
+    $outer=$null
+    try{
+        $refused=$false;try{$null=New-AuditDataStore $context 'corrupt'}catch{$refused=$true}
+        Assert-ImmuData ($refused -and $fault.Injected -and $null -ne $fault.WitnessStore) 'partial-native-create-refused'
+        $outer=$context.Stores[-1]
+        Assert-ImmuData (-not [object]::ReferenceEquals($outer,$fault.WitnessStore)) 'fault-witness-distinct-store'
+        Assert-ImmuData ($null -eq $outer.Id) 'partial-create-id-not-adopted'
+        $calls=$fault.Calls;$refused=$false
+        try{Remove-AuditDataStore $context $outer}catch{$refused=$true}
+        Assert-ImmuData ($refused -and $fault.Calls -eq $calls) 'partial-create-no-name-lookup'
+        $outer.Id=$fault.WitnessStore.Id;$refused=$false
+        try{Remove-AuditDataStore $context $outer}catch{$refused=$true}
+        Assert-ImmuData ($refused -and $fault.Calls -eq $calls) 'metadata-cannot-repair-unknown-create'
+        $outer.Id=$null
+        # The tested claim stays unknown. Only the witness's own complete reply
+        # and fresh generated profile authorize fixture disposal.
+        Read-AuditDataStore $fault.WitnessContext $fault.WitnessStore
+        Remove-AuditDataStore $fault.WitnessContext $fault.WitnessStore
+        $fault.Closed=$true;$calls=$fault.Calls;$refused=$false
+        try{Remove-AuditDataStore $fault.WitnessContext $fault.WitnessStore}catch{$refused=$true}
+        Assert-ImmuData ($refused -and $fault.Calls -eq $calls) 'native-witness-removal-no-replay'
+    }catch{
+        $failure=$_.Exception
+        while($null -ne $failure){
+            if($failure.Message -cmatch '^(Audit container live custody refused: [a-z-]+\.|Audit data fixture refused: [a-z0-9-]{1,64})$'){
+                [Console]::Error.WriteLine('Generated custody fault: '+$failure.Message)
+            }
+            $failure=$failure.InnerException
+        }
+        [Console]::Error.WriteLine('Generated custody fault line='+$_.InvocationInfo.ScriptLineNumber)
+        throw
+    }finally{
+        if($null -ne $fault.WitnessStore -and -not $fault.Closed){Remove-AuditDataStore $fault.WitnessContext $fault.WitnessStore;$fault.Closed=$true}
+        if($null -ne $outer -and $fault.Closed){$null=$context.Stores.Remove($outer)}
+    }
+    Assert-ImmuData $fault.Closed 'native-partial-reply-fixture-disposed'
+}
+
 function Assert-ControllerResourcesAbsent($Resources,[int]$Count){
     Assert-ImmuData (@($Resources.ids).Count -eq $Count -and $Resources.payloadAbsent -eq $true -and
         $Resources.payloadClaimed -is [bool] -and $Resources.payloadRemoved -eq $Resources.payloadClaimed) 'controller-resource-count'
@@ -35,6 +100,7 @@ function Invoke-GeneratedController($Plan,$Packet,[string]$ExpectedRefusal='',[i
 function Invoke-NativeHistoricalControllerWorkflow($Source,$Foreign){
     $script:controllerCaseNonces=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     $script:controllerSourceId=$Source.Id;$script:controllerForeignId=$Foreign.Id
+    $script:stage='controller-native-reply-fault';Invoke-NativeContainerReplyFault
     $script:stage='controller-source';$setup=Probe $Source 'observation-history-seed'
     $expected=New-HistoricalObservationExpectation $Source $setup
     $before=Read-HistoricalObservation $Source $expected
@@ -89,6 +155,15 @@ function Invoke-NativeHistoricalControllerWorkflow($Source,$Foreign){
     $script:stage='controller-foreign-lifetime'
     $wrongContext=$context.Clone();$wrongContext.LifetimeSeconds=660;$denied=$false
     try{Read-AuditDataStore $wrongContext $Foreign}catch{
+        if($_.Exception.GetBaseException().Message -cne 'Audit container live custody refused: object-identity.'){throw}
+        $denied=$true
+    }
+    Assert-ImmuData $denied 'controller-copied-context-refused'
+    # Preserve the independent runtime lifetime check after the earlier object-boundary refusal.
+    $actual=@((Invoke-Docker @('inspect',$Foreign.Id)).Stdout|ConvertFrom-Json -AsHashtable -Depth 32)
+    Assert-ImmuData ($actual.Count -eq 1) 'controller-foreign-runtime-inspect'
+    $denied=$false
+    try{Assert-NativeStoreRuntime $actual[0] '3322:3322' 'audit' 660}catch{
         if($_.Exception.Message -cne 'Native signer fixture refused: audit-runtime'){throw}
         $denied=$true
     }
@@ -102,7 +177,7 @@ function Invoke-NativeHistoricalControllerWorkflow($Source,$Foreign){
         knownEvents=4;nullMembersPreserved=1;nativeTransactions=5;controllerCases=10;faultCleanupCases=2;typedRefusals=7;nativeArchiveCorruptionRefused=$true;
         distinctOperationNonces=10;operationNoncesDifferFromSource=$true;sourceIdentityPreserved=$true;parentInputsUnchanged=$true;
         codeInventoryV2Matched=$true;publishedProbeBundleMatched=$true;containerProbeBundleMatched=$true;revisionMismatchRefused=$true;probeBundleMismatchRefused=$true;
-        foreignLifetimeRefused=$true;sourceUnchanged=$true;nativeOwnerCleanupVerified=$true;targetLifetimeSeconds=660;nativeDeadlineSeconds=600;
+        foreignLifetimeRefused=$true;copiedContextRefusedBeforeLookup=$true;sourceUnchanged=$true;nativeOwnerCleanupVerified=$true;partialNativeCreateReplyRefused=$true;unknownCreateNameAdoptionRefused=$true;liveCompleteReplyWitnessDisposed=$true;containerRemovalReplayRefused=$true;targetLifetimeSeconds=660;nativeDeadlineSeconds=600;
         originalInputsRead=$false;originalPrivatePkiUsed=$false;sourceVpsAccessed=$false;externalGatesAuthenticated=$false;exclusiveUseLedgerVerified=$false;
         historicalComparisonOnly=$true;writerAdmissionVerified=$false;executionAuthorized=$false;fullSystemRecoveryVerified=$false;phase7Complete=$false}
 }

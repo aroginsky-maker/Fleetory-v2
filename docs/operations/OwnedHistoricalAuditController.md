@@ -79,11 +79,11 @@ Each of those ten invocations now receives a distinct canonical operation
 nonce. The case builder copies the plan and packet, consumes that child nonce
 in a bounded, ordinal in-memory set before serialization, replaces only the
 plan nonce and repins the encoded plan. It rejects the parent/source nonce,
-noncanonical or zero identities, duplicate/changed-plan reuse, a ninth case
+noncanonical or zero identities, duplicate/changed-plan reuse, an eleventh case
 and oversized output. Failed preparation stays consumed in that set. Caller
 plans, packets, source expectation nonce and known event bytes are preserved.
 The observation fingerprint stays tied to the same data while the expectation
-hash changes with the operation. Portable tests and all eight native cases
+hash changes with the operation. Portable tests and all ten native cases
 check this separation. This fixture set is neither a durable purpose ledger
 nor authority to retry an original operation. The owner's payload/image names
 remain internally random; held control/resource binding is still open.
@@ -127,3 +127,38 @@ bounded private pipes. Process lifetime evidence is separate from native
 payload/resource identity. The existing native payload is still internally
 random; no positive restore or forced-owner-death backend cleanup is authorized
 or certified by the new refusal probe.
+
+
+Container ownership now also requires a live, process-local claim made while the
+fixed creator invokes its actual Docker client. The claim privately retains the
+complete native exit code and raw stdout/stderr, binds the same context, store,
+client and store-list objects, original start time, session, role, image and
+configured lifetime, and accepts exactly one full lowercase container ID plus a
+line ending. Inspection replies are retained before parsing. JSON ledgers,
+copied objects, labels, a later name lookup and an externally supplied ID cannot
+reconstruct the claim. Metadata changes are refused before a Docker lookup.
+
+A create attempt is consumed before execution. Missing, partial, malformed or
+failed replies leave an unknown outcome; cleanup must report that refusal.
+Removal is likewise consumed before the native call and requires the complete
+matching ID reply. Lost removal replies never authorize retry. Already absent
+containers require the actual held inspect failure naming the exact claimed ID;
+this closes the live claim without claiming a successful removal. This is a
+trusted in-process code boundary, not protection against arbitrary code running
+as that user, authentication of Docker, or authority that survives owner death.
+
+Generated tests cover copied metadata, replaced clients/lists, mutated identity
+and clocks, full/partial replies, transport failures and consumed attempts. The
+native historical workflow additionally truncates a real create reply before
+the tested owner receives it. That owner refuses lookup and removal even if an
+ID is later supplied. A separate live fixture witness holds the original full
+reply and checks the fresh runtime profile before disposing only that fixture;
+its cleanup cannot be replayed. Existing normal four-event/five-transaction
+observation, exact historical null preservation and refusal cases still run.
+
+This closes only the container reply-custody prerequisite. The current image
+builder still uses a tag/readback path and needs its own complete build-reply
+custody review. A surviving outside owner, abrupt creator/daemon/host failure,
+original input execution and full recovery remain open. No original bytes,
+private PKI, provider, issuer or VPS access is introduced by these tests. The
+accepted public probe profile and its inventories and durations are unchanged.

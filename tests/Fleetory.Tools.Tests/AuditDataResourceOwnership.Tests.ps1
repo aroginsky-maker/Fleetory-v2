@@ -157,6 +157,95 @@ try{
     Refused {Write-AuditDataLedger $linkedLedger} 'directory-destination'
     Check ((Get-Item -LiteralPath $destination).PSIsContainer) 'foreign-destination-preserved'
     Remove-AuditDataPublicPayload $directory $ledger;Remove-AuditDataPublicPayload $directory $linkedLedger
+
+    # Same-process raw reply custody. These generated CLI models do not prove Docker origin.
+    . (Join-Path $PSScriptRoot 'NativeAuditDataFixture.ps1')
+    $script:custodyModel=$null
+    function Invoke-Docker([string[]]$Arguments,[switch]$AllowFailure){
+        $m=$script:custodyModel;$m.Calls.Add(($Arguments -join '|'))
+        if($m.Throw){throw 'Injected native transport loss.'}
+        if($Arguments[0] -ceq 'inspect'){
+            if($m.Absent){$exitCode=1;$out='';$err='No such object: '+$Arguments[1]+"`n"}
+            else{
+                $exitCode=0;$err='';$s=$m.Store;$c=$m.Context
+                $out=@(@{Id=$s.Id;Name=('/'+$s.Name);Created=$s.Started.ToString('O');Image=$c.ImageId;
+                    Config=@{Image=$c.ImageName;Labels=@{'fleetory.immu-data.session'=$s.Session}}})|ConvertTo-Json -Depth 5 -Compress -AsArray
+                if($m.BadProfile){$out=$out.Replace('/'+$s.Name,'/foreign')}
+            }
+        }else{$exitCode=$m.Exit;$out=$m.Output;$err='';if($Arguments[0] -ceq 'rm' -and $exitCode -eq 0){$m.Absent=$true}}
+        return @{ExitCode=$exitCode;Stdout=$out;Stderr=$err;StdoutBytes=[Text.Encoding]::UTF8.GetBytes($out);StderrBytes=[Text.Encoding]::UTF8.GetBytes($err)}
+    }
+    function New-CustodyModel{
+        $c=Context $directory;$c.ImageId='sha256:'+('d'*64);$c.LifetimeSeconds=660
+        $session=[Guid]::NewGuid().ToString('D')
+        $s=@{Id=$null;Session=$session;Name=('fleetory-immu-store-'+$session.Replace('-',''));Started=[DateTimeOffset]::UtcNow;Role='target'}
+        $c.Stores.Add($s)
+        $script:custodyModel=@{Context=$c;Store=$s;Calls=[Collections.Generic.List[string]]::new();Output=(('a'*64)+"`n");Exit=0;Throw=$false;Absent=$false;BadProfile=$false}
+        return $script:custodyModel
+    }
+    function Claim-CustodyModel($Model){$null=Invoke-AuditDataContainerOperation $Model.Context $Model.Store 'Create' @('run','fixed-model')}
+    foreach($bad in @('',('a'*12),('a'*64),(' '+('a'*64)+"`n"),(('a'*64)+"`n"+('b'*64)+"`n"),(('A'*64)+"`n"))){
+        $m=New-CustodyModel;$m.Output=$bad
+        Refused {Claim-CustodyModel $m} 'create-raw-boundary'
+        $calls=$m.Calls.Count;$m.Store.Id='a'*64
+        Refused {Remove-AuditDataStore $m.Context $m.Store} 'unknown-create-no-name-adoption'
+        Refused {Claim-CustodyModel $m} 'unknown-create-consumed'
+        Check ($m.Calls.Count -eq $calls) 'unknown-create-no-docker'
+    }
+    foreach($kind in @('exit','throw')){
+        $m=New-CustodyModel
+        if($kind -ceq 'exit'){$m.Exit=1}else{$m.Throw=$true}
+        Refused {Claim-CustodyModel $m} 'create-failed-unknown'
+        $calls=$m.Calls.Count;$m.Exit=0;$m.Throw=$false
+        Refused {Claim-CustodyModel $m} 'failed-create-never-retried'
+        Refused {Remove-AuditDataStore $m.Context $m.Store} 'failed-create-never-adopted'
+        Check ($m.Calls.Count -eq $calls) 'failed-create-no-docker'
+    }
+    foreach($newline in @("`n","`r`n")){
+        $m=New-CustodyModel;$m.Output=('a'*64)+$newline;Claim-CustodyModel $m
+        Check ($m.Store.Id -ceq ('a'*64)) 'full-id-not-trimmed-or-shortened'
+        $c=$m.Context;$s=$m.Store;$client=${function:Invoke-Docker};$calls=$m.Calls.Count
+        foreach($pair in @(@('Session',[Guid]::NewGuid().ToString('D')),@('Name','foreign'),@('Role','source'),@('Started',$s.Started.AddTicks(1)),@('Id',('b'*64)))){
+            $old=$s[$pair[0]];$s[$pair[0]]=$pair[1]
+            Refused {Remove-AuditDataStore $c $s} 'changed-store-refused-before-lookup';$s[$pair[0]]=$old
+        }
+        foreach($pair in @(@('Fixture',[Guid]::NewGuid().ToString('D')),@('ImageName','foreign:fixture'),@('ImageId',('sha256:'+('b'*64))),@('LifetimeSeconds',3300))){
+            $old=$c[$pair[0]];$c[$pair[0]]=$pair[1]
+            Refused {Remove-AuditDataStore $c $s} 'changed-context-refused-before-lookup';$c[$pair[0]]=$old
+        }
+        Refused {Remove-AuditDataStore $c ($s.Clone())} 'copied-store-has-no-claim'
+        Refused {Remove-AuditDataStore ($c.Clone()) $s} 'copied-context-has-no-claim'
+        $copy=($s|ConvertTo-Json -Compress)|ConvertFrom-Json -AsHashtable
+        Refused {Remove-AuditDataStore $c $copy} 'serialized-ledger-has-no-claim'
+        $list=$c.Stores;$c.Stores=[Collections.Generic.List[object]]::new();$c.Stores.Add($s)
+        Refused {Remove-AuditDataStore $c $s} 'replaced-store-list';$c.Stores=$list
+        $c.Stores.Clear();Refused {Remove-AuditDataStore $c $s} 'removed-store-refused';$c.Stores.Add($s)
+        try{
+            function Invoke-Docker{throw 'Changed live client must not run.'}
+            Refused {Remove-AuditDataStore $c $s} 'changed-live-client'
+        }finally{Set-Item -Path Function:Invoke-Docker -Value $client}
+        Check ($m.Calls.Count -eq $calls) 'mutations-never-looked-up'
+        $m.BadProfile=$true
+        Refused {Remove-AuditDataStore $c $s} 'fresh-inspection-foreign-refused'
+        Check (@($m.Calls|Where-Object {$_ -like 'rm|*'}).Count -eq 0) 'foreign-profile-never-removed'
+        $m.BadProfile=$false;$m.Output=('a'*64)+$newline;$m.Absent=$false
+        Remove-AuditDataStore $c $s
+        $calls=$m.Calls.Count;Refused {Remove-AuditDataStore $c $s} 'complete-removal-consumed'
+        Check ($m.Calls.Count -eq $calls) 'complete-removal-no-replay'
+    }
+    foreach($kind in @('partial','wrong-id','exit','throw')){
+        $m=New-CustodyModel;Claim-CustodyModel $m
+        switch($kind){'partial'{$m.Output='a'*12};'wrong-id'{$m.Output=('b'*64)+"`n"};'exit'{$m.Exit=1};'throw'{$m.Throw=$true}}
+        Refused {Invoke-AuditDataContainerOperation $m.Context $m.Store 'Remove' @('rm','-f','-v',$m.Store.Id)} 'removal-outcome-unknown'
+        $calls=$m.Calls.Count;$m.Throw=$false;$m.Exit=0;$m.Output=('a'*64)+"`n"
+        Refused {Remove-AuditDataStore $m.Context $m.Store} 'unknown-removal-consumed'
+        Check ($m.Calls.Count -eq $calls) 'unknown-removal-no-retry'
+    }
+    $m=New-CustodyModel;Claim-CustodyModel $m;$m.Absent=$true
+    Remove-AuditDataStore $m.Context $m.Store;$calls=$m.Calls.Count
+    Refused {Remove-AuditDataStore $m.Context $m.Store} 'observed-absence-consumed'
+    Check ($m.Calls.Count -eq $calls -and @($m.Calls|Where-Object {$_ -like 'rm|*'}).Count -eq 0) 'already-absent-never-removed'
+    $script:custodyModel=$null
 }finally{
     foreach($child in $children){
         if(-not $child.Process.HasExited){$child.Process.Kill($true);$null=$child.Process.WaitForExit(3000)}
@@ -168,5 +257,5 @@ try{
         Remove-Item -LiteralPath $owned.FullName -Recurse -Force
     }
 }
-Write-Output ('AUDIT RESOURCE OWNERSHIP PASS:'+ $count +' assertions;exclusive claim,foreign preservation,atomic publication,100 concurrent replacements.')
+Write-Output ('AUDIT RESOURCE OWNERSHIP PASS:'+ $count +' assertions;exclusive claim,foreign preservation,atomic publication,100 concurrent replacements,live raw container replies and consumed attempts.')
 $global:LASTEXITCODE=0

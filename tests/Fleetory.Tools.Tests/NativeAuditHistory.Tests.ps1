@@ -138,6 +138,7 @@ try{
 }catch{
     if($_.Exception.Message -cmatch '^Audit data fixture refused: ([a-z0-9-]{1,64})\z'){[Console]::Error.WriteLine('Audit history refusal category='+$Matches[1])}
     [Console]::Error.WriteLine('Native audit history failed at '+$stage+'; type='+$_.Exception.GetType().Name+'; line='+$_.InvocationInfo.ScriptLineNumber+'. No packet, value or credential logged.')
+    [Console]::Error.WriteLine($_.ScriptStackTrace)
     throw 'Native audit history fixture failed.'
 }finally{
     $cleaning=$true;$failures=@()

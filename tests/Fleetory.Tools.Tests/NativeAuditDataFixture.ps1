@@ -6,8 +6,27 @@ function Get-AuditDataLifetime($Context){
     Assert-ImmuData ($value -is [int] -and $value -cin @(3300,660)) 'store-lifetime'
     return $value
 }
+function Invoke-AuditDataContainerOperation($Context,$Store,[ValidateSet('Create','Inspect','Remove')][string]$Mode,[string[]]$Arguments){
+    # Capture the actual live client and raw native reply; no caller-supplied result/import API.
+    $client=${function:Invoke-Docker}
+    $operation=[Func[Tuple[int,byte[],byte[]]]]{
+        $reply=& $client $Arguments -AllowFailure
+        return [Tuple[int,byte[],byte[]]]::new($reply.ExitCode,$reply.StdoutBytes,$reply.StderrBytes)
+    }.GetNewClosure()
+    switch -CaseSensitive ($Mode){
+        'Create' {return [Fleetory.Pilot.AuditContainerCustody]::Create($Context,$Store,$client,$operation)}
+        'Inspect' {
+            $reply=[Fleetory.Pilot.AuditContainerCustody]::Inspect($Context,$Store,$client,$operation)
+            return @{ExitCode=$reply.Item1;Stdout=[Text.Encoding]::UTF8.GetString($reply.Item2);Stderr=[Text.Encoding]::UTF8.GetString($reply.Item3)}
+        }
+        'Remove' {[Fleetory.Pilot.AuditContainerCustody]::Remove($Context,$Store,$client,$operation)}
+    }
+}
 function Read-AuditDataStore($Context,$Store,[switch]$Cleanup){
-    $items=@((Invoke-Docker @('inspect',$Store.Id)).Stdout|ConvertFrom-Json -AsHashtable -Depth 32)
+    $id=[Fleetory.Pilot.AuditContainerCustody]::Id($Context,$Store,${function:Invoke-Docker})
+    $reply=Invoke-AuditDataContainerOperation $Context $Store 'Inspect' @('inspect',$id)
+    Assert-ImmuData ($reply.ExitCode -eq 0) 'store-inspect-exit'
+    $items=@($reply.Stdout|ConvertFrom-Json -AsHashtable -Depth 32)
     Assert-ImmuData ($items.Count -eq 1) 'store-inspect';$i=$items[0];$created=ConvertTo-ProviderTimestamp $i.Created
     Assert-ImmuData ($Store.Id -cmatch '^[a-f0-9]{64}\z' -and $i.Id -ceq $Store.Id -and $i.Name -ceq ('/'+$Store.Name) -and
         $i.Config.Image -ceq $Context.ImageName -and $i.Image -ceq $Context.ImageId -and $i.Config.Labels['fleetory.immu-data.session'] -ceq $Store.Session -and
@@ -43,7 +62,8 @@ function New-AuditDataStore($Context,[string]$Role){
         '--cap-drop','ALL','--security-opt','no-new-privileges','--memory','384m','--cpus','1','--pids-limit','128','--ulimit','core=0',
         '--tmpfs',('/data:'+$script:nativeAuditTmpfs['/data']),'--tmpfs',('/tmp:'+$script:nativeAuditTmpfs['/tmp']),
         '--entrypoint','/bin/sh',$Context.ImageName,'-c',('exec /bin/sleep '+(Get-AuditDataLifetime $Context)))
-    $s.Id=(Invoke-Docker $arguments).Stdout.Trim();Write-AuditDataLedger $Context;Read-AuditDataStore $Context $s
+    $null=Invoke-AuditDataContainerOperation $Context $s 'Create' $arguments
+    Write-AuditDataLedger $Context;Read-AuditDataStore $Context $s
     Assert-ImmuData ((Invoke-Docker @('exec',$s.Id,'sha256sum','/tool/ServerBackendProbe.dll')).Stdout.Split(' ')[0] -ceq $Context.ProbeHash) 'probe-code-identity'
     if($Context.ContainsKey('ProbeBundle')){Assert-HistoricalProbeContainerBundle $Context $s}
     $null=Invoke-Docker @('exec',$s.Id,'/bin/mkdir','-m','700','/tmp/empty-ca-dir')
@@ -57,8 +77,16 @@ function New-AuditDataStore($Context,[string]$Role){
     return $s
 }
 function Remove-AuditDataStore($Context,$Store){
-    $lookup=if($Store.Id){$Store.Id}else{$Store.Name};$r=Invoke-Docker @('inspect',$lookup) -AllowFailure
-    if($r.ExitCode -eq 0){if(-not $Store.Id){$Store.Id=@($r.Stdout|ConvertFrom-Json -AsHashtable)[0].Id};Read-AuditDataStore $Context $Store -Cleanup;$null=Invoke-Docker @('rm','-f','-v',$Store.Id);$r=Invoke-Docker @('inspect',$Store.Id) -AllowFailure}
+    # An unknown create stays unknown. Never inspect by name or adopt an ID from metadata.
+    $id=[Fleetory.Pilot.AuditContainerCustody]::Id($Context,$Store,${function:Invoke-Docker})
+    $r=Invoke-AuditDataContainerOperation $Context $Store 'Inspect' @('inspect',$id)
+    if($r.ExitCode -ne 0){
+        [Fleetory.Pilot.AuditContainerCustody]::Absent($Context,$Store,${function:Invoke-Docker})
+        return
+    }
+    Read-AuditDataStore $Context $Store -Cleanup
+    Invoke-AuditDataContainerOperation $Context $Store 'Remove' @('rm','-f','-v',$id)
+    $r=Invoke-Docker @('inspect',$id) -AllowFailure
     Assert-ImmuData ($r.ExitCode -ne 0 -and ($r.Stderr+$r.Stdout) -match '(?i)no such (object|container)') 'cleanup-absence'
 }
 function Build-AuditDataImage($Context,[string]$CliImage){
