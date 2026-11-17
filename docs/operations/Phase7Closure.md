@@ -40,3 +40,20 @@ an operator alias nor the assistant can stand in for a missing independent actor
 If any control or its authority remains unverified, retain the exact open item
 and its next concrete action. Keep Phase 7 open and PR #2 draft/unmerged; do not
 fabricate approvals, production readiness or a completed full-system recovery.
+
+
+The required CI graph separates Windows process/publication tests from the
+independent Windows policy/evidence checks. The original Windows execution job
+keeps its 20-minute limit; a separate standard Windows job has a 10-minute
+limit and the same pinned SDK/build prerequisites. Signed artifact/journal,
+dependency/quality/readiness, expectation/Sonar CLI and Windows PowerShell 5.1
+checks retain their original commands and shells. No verification is omitted,
+softened or made conditional. Linux retains its 35-minute limit, and native
+data/provider jobs retain their existing limits and commands.
+
+The final aggregate requires all five execution jobs, including both Windows
+jobs. A missing, failed, cancelled, skipped or extra job result is rejected.
+Layout tests also reject removed/duplicated/softened moved checks, altered
+bootstrap and changed deadlines. The split addresses observed exhaustion of
+the former single Windows job's 20-minute budget; it does not relax a control,
+change the repository visibility or Actions budget, or accept any deployment.

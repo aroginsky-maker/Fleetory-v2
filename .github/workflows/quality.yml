@@ -50,30 +50,6 @@ jobs:
         shell: pwsh
         run: dotnet test tests/Fleetory.Server.Tests/Fleetory.Server.Tests.csproj -c Release --nologo --warnaserror
 
-      - name: Verify signed artifact anti-rollback on Windows
-        shell: pwsh
-        run: |
-          ./tests/Fleetory.Tools.Tests/SignedArtifactVerification.Tests.ps1
-          ./tests/Fleetory.Tools.Tests/SignedArtifactConcurrency.Tests.ps1
-
-      - name: Verify signer evidence snapshot on Windows
-        shell: pwsh
-        run: |
-          ./tests/Fleetory.Tools.Tests/SigningJournalSnapshot.Tests.ps1
-          ./tests/Fleetory.Tools.Tests/SigningJournalCheckpoint.Tests.ps1
-
-      - name: Verify dependency audit gate on Windows
-        shell: pwsh
-        run: ./tests/Fleetory.Tools.Tests/DependencyAudit.Tests.ps1
-
-      - name: Verify quality command orchestration
-        shell: pwsh
-        run: ./tests/Fleetory.Tools.Tests/QualityOrchestration.Tests.ps1
-
-      - name: Verify exact readiness response on Windows
-        shell: pwsh
-        run: ./tests/Fleetory.Tools.Tests/ReadinessResponse.Tests.ps1
-
       - name: Verify portable audit archive checkpoints on Windows
         shell: pwsh
         run: python ./tests/Fleetory.Tools.Tests/audit_archive_tests.py --portable
@@ -292,10 +268,6 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/audit_expectation_diagnostic_tests.py
 
-      - name: Verify independent production audit expectations on Windows
-        shell: pwsh
-        run: ./tests/Fleetory.Tools.Tests/AuditEventExpectations.Tests.ps1 -Python (Get-Command python).Source
-
       - name: Verify audit observation refusal policy on Windows
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/AuditObservationPolicy.Tests.ps1
@@ -356,10 +328,6 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/recovery_configuration_tests.py
 
-      - name: Verify Sonar issue gate on Windows
-        shell: pwsh
-        run: ./tests/Fleetory.Tools.Tests/SonarIssueGate.Tests.ps1
-
       - name: Verify provider target credential lease contract on Windows
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/OpenBaoTargetCredential.Tests.ps1
@@ -395,6 +363,61 @@ jobs:
       - name: Verify root-only Windows TLS chain
         shell: pwsh
         run: ./eng/verify-windows-tls-chain.ps1
+
+  windows-policy:
+    name: Windows policy and evidence
+    runs-on: windows-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6, Node.js 24
+
+      - name: Set up .NET 10
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6
+        with:
+          global-json-file: eng/global.ci.json
+
+      - name: Select the pinned CI SDK
+        shell: pwsh
+        run: Copy-Item -LiteralPath eng/global.ci.json -Destination global.json
+
+      - name: Build Server
+        shell: pwsh
+        run: dotnet build src/Fleetory.Server/Fleetory.Server.csproj -c Release
+
+      - name: Verify signed artifact anti-rollback on Windows
+        shell: pwsh
+        run: |
+          ./tests/Fleetory.Tools.Tests/SignedArtifactVerification.Tests.ps1
+          ./tests/Fleetory.Tools.Tests/SignedArtifactConcurrency.Tests.ps1
+
+      - name: Verify signer evidence snapshot on Windows
+        shell: pwsh
+        run: |
+          ./tests/Fleetory.Tools.Tests/SigningJournalSnapshot.Tests.ps1
+          ./tests/Fleetory.Tools.Tests/SigningJournalCheckpoint.Tests.ps1
+
+      - name: Verify dependency audit gate on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/DependencyAudit.Tests.ps1
+
+      - name: Verify quality command orchestration
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/QualityOrchestration.Tests.ps1
+
+      - name: Verify exact readiness response on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/ReadinessResponse.Tests.ps1
+
+      - name: Verify independent production audit expectations on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/AuditEventExpectations.Tests.ps1 -Python (Get-Command python).Source
+
+      - name: Verify Sonar issue gate on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/SonarIssueGate.Tests.ps1
 
       - name: Verify immudb TLS probe on Windows PowerShell 5.1
         shell: powershell
@@ -1025,7 +1048,7 @@ jobs:
     name: Strict build, tests, coverage and Sonar
     runs-on: ubuntu-24.04
     timeout-minutes: 2
-    needs: [quality, windows-tls-chain, native-data-recovery, native-provider-recovery]
+    needs: [quality, windows-tls-chain, windows-policy, native-data-recovery, native-provider-recovery]
     if: always()
     permissions:
       contents: read
@@ -1039,9 +1062,9 @@ jobs:
           Set-StrictMode -Version Latest
           if ([string]::IsNullOrWhiteSpace($env:FLEETORY_GATE_RESULTS) -or $env:FLEETORY_GATE_RESULTS.Length -gt 16384) { throw 'Missing or oversized job results.' }
           $results=$env:FLEETORY_GATE_RESULTS | ConvertFrom-Json -AsHashtable -Depth 4
-          $required=@('quality','windows-tls-chain','native-data-recovery','native-provider-recovery')
+          $required=@('quality','windows-tls-chain','windows-policy','native-data-recovery','native-provider-recovery')
           if ($results -isnot [hashtable] -or $results.Count -ne $required.Count) { throw 'Unexpected job result set.' }
           foreach ($name in $required) {
             if (-not $results.ContainsKey($name) -or $results[$name].result -cne 'success') { throw 'A required execution job did not succeed.' }
           }
-          Write-Output 'ALL JOBS GATE PASS:4/4 required execution jobs succeeded.'
+          Write-Output 'ALL JOBS GATE PASS:5/5 required execution jobs succeeded.'

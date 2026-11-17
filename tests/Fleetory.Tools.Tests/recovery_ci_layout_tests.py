@@ -20,6 +20,30 @@ PROVIDER = tuple((name, '') for name in ('PilotProvisioning.Tests.ps1', 'Identit
     'OpenBaoRaftRecovery.Tests.ps1', 'NativeSignerBackend.Tests.ps1', 'NativeJournalBackend.Tests.ps1'))
 
 
+WINDOWS_POLICY = (
+    ('Verify signed artifact anti-rollback on Windows', 'pwsh', ('./tests/Fleetory.Tools.Tests/SignedArtifactVerification.Tests.ps1', './tests/Fleetory.Tools.Tests/SignedArtifactConcurrency.Tests.ps1')),
+    ('Verify signer evidence snapshot on Windows', 'pwsh', ('./tests/Fleetory.Tools.Tests/SigningJournalSnapshot.Tests.ps1', './tests/Fleetory.Tools.Tests/SigningJournalCheckpoint.Tests.ps1')),
+    ('Verify dependency audit gate on Windows', 'pwsh', ('./tests/Fleetory.Tools.Tests/DependencyAudit.Tests.ps1',)),
+    ('Verify quality command orchestration', 'pwsh', ('./tests/Fleetory.Tools.Tests/QualityOrchestration.Tests.ps1',)),
+    ('Verify exact readiness response on Windows', 'pwsh', ('./tests/Fleetory.Tools.Tests/ReadinessResponse.Tests.ps1',)),
+    ('Verify independent production audit expectations on Windows', 'pwsh', ('./tests/Fleetory.Tools.Tests/AuditEventExpectations.Tests.ps1 -Python (Get-Command python).Source',)),
+    ('Verify Sonar issue gate on Windows', 'pwsh', ('./tests/Fleetory.Tools.Tests/SonarIssueGate.Tests.ps1',)),
+    ('Verify immudb TLS probe on Windows PowerShell 5.1', 'powershell', ('./tests/Fleetory.Tools.Tests/ImmudbTlsProbe.Tests.ps1',)),
+    ('Verify PHASE 7 readiness on Windows PowerShell 5.1', 'powershell', ('./tests/Fleetory.Tools.Tests/Phase7Readiness.Tests.ps1',)),
+    ('Verify immudb authenticated TLS transport on Windows PowerShell 5.1', 'powershell', ('./tests/Fleetory.Tools.Tests/ImmudbHttpTransport.Tests.ps1',)),
+    ('Verify receipt export and anchor binding on Windows PowerShell 5.1', 'powershell', ('./tests/Fleetory.Tools.Tests/ImmudbReceiptExport.Tests.ps1', './tests/Fleetory.Tools.Tests/ImmudbReceiptExportVerification.Tests.ps1')),
+    ('Verify receipt checkpoint rollback guard on Windows PowerShell 5.1', 'powershell', ('./tests/Fleetory.Tools.Tests/ImmudbReceiptCheckpoint.Tests.ps1',)),
+    ('Verify restore point and deferred anchor on Windows PowerShell 5.1', 'powershell', ('./tests/Fleetory.Tools.Tests/ImmudbStateVerification.Tests.ps1', './tests/Fleetory.Tools.Tests/ImmudbRestoreCheckpoint.Tests.ps1')),
+)
+
+
+def windows_step(item):
+    title, shell, commands = item
+    start = "      - name: " + title + "\n        shell: " + shell + "\n        run: "
+    return start + (commands[0] + "\n\n" if len(commands) == 1 else "|\n" + "".join("          " + c + "\n" for c in commands) + "\n")
+
+
+
 def jobs(text):
     text = text.split('jobs:\n', 1)[1]
     matches = list(re.finditer(r'^  ([a-z][a-z-]+):\s*$', text, re.MULTILINE))
@@ -28,7 +52,25 @@ def jobs(text):
 
 def validate(text):
     blocks = jobs(text)
-    assert set(blocks) == {'windows-tls-chain', 'quality', 'native-data-recovery', 'native-provider-recovery', 'quality-gate'}
+    assert set(blocks) == {'windows-tls-chain', 'windows-policy', 'quality', 'native-data-recovery', 'native-provider-recovery', 'quality-gate'}
+    policy = blocks['windows-policy']
+    assert '    runs-on: windows-latest\n' in policy and '    timeout-minutes: 10\n' in policy
+    assert '    permissions:\n      contents: read\n' in policy
+    assert not re.search(r'^\s*(if:|needs:|continue-on-error:|env:)', policy, re.MULTILINE)
+    for action in ('actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803', 'actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68'):
+        assert action in policy
+    assert 'Copy-Item -LiteralPath eng/global.ci.json -Destination global.json' in policy
+    assert '        run: dotnet build src/Fleetory.Server/Fleetory.Server.csproj -c Release\n' in policy
+    for item in WINDOWS_POLICY:
+        step = windows_step(item)
+        assert policy.count(step) == 1
+        start = policy.index(step)
+        end = policy.find('      - name:', start + len(step))
+        assert policy[start:end if end >= 0 else len(policy)].strip() == step.strip()
+        for command in item[2]:
+            assert command not in blocks['windows-tls-chain']
+    policy_commands = re.findall(r'^\s*(?:run: )?(\./tests/Fleetory.Tools.Tests/[^\n]+)', policy, re.MULTILINE)
+    assert Counter(policy_commands) == Counter(c for item in WINDOWS_POLICY for c in item[2])
     expected = Counter(name for name, _ in DATA + PROVIDER)
     found = Counter(re.findall(r'\./tests/Fleetory.Tools.Tests/([A-Za-z0-9]+\.Tests\.ps1)', text))
     assert all(found[name] == count for name, count in expected.items())
@@ -195,7 +237,7 @@ def validate(text):
     assert '    timeout-minutes: 20\n' in blocks['windows-tls-chain']
     aggregate = blocks['quality-gate']
     assert '    name: Strict build, tests, coverage and Sonar\n' in aggregate
-    assert '    needs: [quality, windows-tls-chain, native-data-recovery, native-provider-recovery]\n' in aggregate
+    assert '    needs: [quality, windows-tls-chain, windows-policy, native-data-recovery, native-provider-recovery]\n' in aggregate
     assert '    if: always()\n' in aggregate and 'continue-on-error:' not in aggregate
     assert '    name: Strict build, tests, coverage and Sonar execution\n' in blocks['quality']
     return True
@@ -215,6 +257,23 @@ class RecoveryCiLayoutTests(unittest.TestCase):
             '        run: python3 -B ./tests/Fleetory.Tools.Tests/native_public_cleanup_guard.py\n')
         self.refused(self.text.replace(step,''))
         self.refused(self.text.replace(step,step+'        continue-on-error: true\n'))
+
+    def test_windows_policy_job_cannot_be_missing_skipped_softened_or_delayed(self):
+        block = jobs(self.text)['windows-policy']
+        self.refused(self.text.replace(block, ''))
+        for option in ('    if: false\n', '    continue-on-error: true\n', '    needs: quality\n', '    env:\n      SONAR_TOKEN: copied\n'):
+            self.refused(self.text.replace('  windows-policy:\n', '  windows-policy:\n' + option))
+        for minutes in (5, 20, 60):
+            self.refused(self.text.replace('timeout-minutes: 10', 'timeout-minutes: ' + str(minutes), 1))
+
+    def test_every_partitioned_windows_command_remains_required_once(self):
+        block = jobs(self.text)['windows-policy']
+        for item in WINDOWS_POLICY:
+            step = windows_step(item)
+            for altered in (block.replace(step, ''), block.replace(step, step + step),
+                    block.replace(step, step.replace('        shell:', '        continue-on-error: true\n        shell:', 1))):
+                self.refused(self.text.replace(block, altered))
+        self.refused(self.text.replace('windows-tls-chain, windows-policy,', 'windows-tls-chain,', 1))
 
     def test_all_existing_gates_are_partitioned_with_strict_bootstrap(self):
         self.assertTrue(validate(self.text))
@@ -430,7 +489,7 @@ class RecoveryCiLayoutTests(unittest.TestCase):
         script = '\n'.join(line[10:] for line in block.split('        run: |\n', 1)[1].splitlines())
         executable = shutil.which('pwsh')
         self.assertIsNotNone(executable)
-        names = ('quality', 'windows-tls-chain', 'native-data-recovery', 'native-provider-recovery')
+        names = ('quality', 'windows-tls-chain', 'windows-policy', 'native-data-recovery', 'native-provider-recovery')
         success = {name: {'result': 'success', 'outputs': {}} for name in names}
         cases = [(success, True), ({}, False), ({**success, 'extra': {'result': 'success'}}, False)]
         for name in names:
