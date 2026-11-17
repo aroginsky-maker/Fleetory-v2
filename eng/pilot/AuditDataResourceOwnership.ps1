@@ -6,6 +6,104 @@ using System;
 using System.IO;
 using System.Runtime.InteropServices;
 namespace Fleetory.Pilot {
+    internal static class AuditNativeReply {
+        internal static object[] Values(System.Collections.IDictionary source, string[] keys) {
+            var values=new object[keys.Length];
+            for(int n=0;n<keys.Length;n++) values[n]=source[keys[n]];
+            return values;
+        }
+        internal static bool Same(object[] left, object[] right) {
+            for(int n=0;n<left.Length;n++) if(!Equals(left[n],right[n])) return false;
+            return true;
+        }
+        internal static Tuple<int,byte[],byte[]> Hold(Tuple<int,byte[],byte[]> reply) {
+            if(reply==null || reply.Item2==null || reply.Item3==null || reply.Item2.Length>67108864 || reply.Item3.Length>1048576) throw new InvalidOperationException("Audit native reply refused.");
+            return Tuple.Create(reply.Item1,(byte[])reply.Item2.Clone(),(byte[])reply.Item3.Clone());
+        }
+        internal static string Id(Tuple<int,byte[],byte[]> reply, string prefix) {
+            byte[] raw=reply.Item2;
+            int length=prefix.Length+64;
+            if(reply.Item1!=0 || (raw.Length!=length+1 && raw.Length!=length+2) || raw[raw.Length-1]!=10 ||
+                (raw.Length==length+2 && raw[length]!=13)) throw new InvalidOperationException("Audit native ID reply refused.");
+            for(int n=0;n<prefix.Length;n++) if(raw[n]!=prefix[n]) throw new InvalidOperationException("Audit native ID prefix refused.");
+            for(int n=prefix.Length;n<length;n++) if(!((raw[n]>=48 && raw[n]<=57)||(raw[n]>=97 && raw[n]<=102))) throw new InvalidOperationException("Audit native ID digits refused.");
+            return System.Text.Encoding.ASCII.GetString(raw,0,length);
+        }
+        internal static bool EmptyInspection(byte[] raw) {
+            string output=System.Text.Encoding.UTF8.GetString(raw);
+            return output=="" || output=="[]\n" || output=="[]\r\n";
+        }
+    }
+    // Fixed historical image creator only; no import or dead-owner recovery API.
+    public static class AuditImageCustody {
+        private sealed class Claim {
+            internal readonly System.Collections.IDictionary Context;
+            internal readonly object Client;
+            internal readonly object[] Values;
+            internal readonly byte[] Archive;
+            internal readonly int Process=Environment.ProcessId;
+            internal readonly DateTimeOffset Started=DateTimeOffset.UtcNow;
+            internal Tuple<int,byte[],byte[]> Creation, Inspection, Removal;
+            internal string Id;
+            internal int State;
+            internal Claim(System.Collections.IDictionary context, object client, byte[] archive) {
+                Context=context; Client=client; Values=AuditNativeReply.Values(context,Keys); Archive=(byte[])archive.Clone();
+            }
+        }
+        private static readonly string[] Keys={"Fixture","Root","ImageName","ProbeHash"};
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<object,Claim> Claims=new();
+        private static InvalidOperationException Refused() => new("Audit image live custody refused.");
+        private static Claim Get(System.Collections.IDictionary context, object client, bool live=true) {
+            if(!Claims.TryGetValue(context,out var claim) || !ReferenceEquals(context,claim.Context) || !ReferenceEquals(client,claim.Client) ||
+                claim.Process!=Environment.ProcessId || !AuditNativeReply.Same(AuditNativeReply.Values(context,Keys),claim.Values) ||
+                !Equals(context["ImageId"],claim.Id) || !Equals(context["ImageClaimed"],true) ||
+                (live && System.Threading.Volatile.Read(ref claim.State)!=1)) throw Refused();
+            return claim;
+        }
+        public static bool Attempted(System.Collections.IDictionary context) => Claims.TryGetValue(context,out _);
+        public static string Build(System.Collections.IDictionary context, object client, byte[] archive, Func<Tuple<int,byte[],byte[]>> operation) {
+            if(client==null || operation==null || archive==null || archive.Length==0 || archive.Length>16777216 ||
+                context["ImageId"]!=null || !Equals(context["ImageClaimed"],false)) throw Refused();
+            var claim=new Claim(context,client,archive);
+            Claims.Add(context,claim);
+            context["ImageClaimed"]=true; // Consumed before invoking the actual fixed native build.
+            claim.Creation=AuditNativeReply.Hold(operation());
+            if(!archive.AsSpan().SequenceEqual(claim.Archive)) throw Refused();
+            claim.Id=AuditNativeReply.Id(claim.Creation,"sha256:");
+            context["ImageId"]=claim.Id;claim.State=1;
+            return Get(context,client).Id;
+        }
+        public static string Id(System.Collections.IDictionary context, object client) => Get(context,client).Id;
+        public static DateTimeOffset Started(System.Collections.IDictionary context, object client) => Get(context,client).Started;
+        public static bool Closed(System.Collections.IDictionary context, object client) {
+            var claim=Get(context,client,false);return System.Threading.Volatile.Read(ref claim.State)==3;
+        }
+        public static Tuple<int,byte[],byte[]> Inspect(System.Collections.IDictionary context, object client, Func<Tuple<int,byte[],byte[]>> operation) {
+            var claim=Get(context,client);claim.Inspection=AuditNativeReply.Hold(operation());return AuditNativeReply.Hold(claim.Inspection);
+        }
+        private static void FullRemoval(Claim claim) {
+            string text=System.Text.Encoding.UTF8.GetString(claim.Removal.Item2);
+            if(claim.Removal.Item1!=0 || (text!="Deleted: "+claim.Id+"\n" && text!="Deleted: "+claim.Id+"\r\n")) throw Refused();
+        }
+        public static void Remove(System.Collections.IDictionary context, object client, Func<Tuple<int,byte[],byte[]>> operation) {
+            var claim=Get(context,client);
+            if(System.Threading.Interlocked.CompareExchange(ref claim.State,2,1)!=1) throw Refused();
+            claim.Removal=AuditNativeReply.Hold(operation());FullRemoval(claim);
+        }
+        private static void Absence(Claim claim,int expected) {
+            if(claim.Inspection==null || claim.Inspection.Item1!=1 || !AuditNativeReply.EmptyInspection(claim.Inspection.Item2)) throw Refused();
+            string text=System.Text.Encoding.UTF8.GetString(claim.Inspection.Item3);
+            if(!System.Text.RegularExpressions.Regex.IsMatch(text,@"\A(?:Error response from daemon: |Error: )?no such (object|image): "+claim.Id+@"\r?\n?\z",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase)) throw Refused();
+            if(System.Threading.Interlocked.CompareExchange(ref claim.State,3,expected)!=expected) throw Refused();
+        }
+        public static void Absent(System.Collections.IDictionary context, object client) => Absence(Get(context,client),1);
+        public static void ConfirmRemoval(System.Collections.IDictionary context, object client, Func<Tuple<int,byte[],byte[]>> operation) {
+            var claim=Get(context,client,false);
+            if(System.Threading.Volatile.Read(ref claim.State)!=2 || claim.Removal==null) throw Refused();
+            FullRemoval(claim);claim.Inspection=AuditNativeReply.Hold(operation());Absence(claim,2);
+        }
+    }
     // Live trusted caller only. No import, serialization or cross-process recovery API.
     public static class AuditContainerCustody {
         private sealed class Claim {
@@ -18,21 +116,12 @@ namespace Fleetory.Pilot {
             internal int State; // Unknown create, live, removal attempted, closed.
             internal Claim(System.Collections.IDictionary context, System.Collections.IDictionary store, object client) {
                 Context=context; Store=store; Client=client; Stores=context["Stores"];
-                ContextValues=Values(context, ContextKeys); StoreValues=Values(store, StoreKeys);
+                ContextValues=AuditNativeReply.Values(context, ContextKeys); StoreValues=AuditNativeReply.Values(store, StoreKeys);
             }
         }
         private static readonly string[] ContextKeys = {"Fixture", "ImageName", "ImageId", "LifetimeSeconds"};
         private static readonly string[] StoreKeys = {"Session", "Name", "Role", "Started"};
         private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<object, Claim> Claims = new();
-        private static object[] Values(System.Collections.IDictionary source, string[] keys) {
-            var values=new object[keys.Length];
-            for(int n=0;n<keys.Length;n++) values[n]=source[keys[n]];
-            return values;
-        }
-        private static bool Same(object[] left, object[] right) {
-            for(int n=0;n<left.Length;n++) if(!Equals(left[n],right[n])) return false;
-            return true;
-        }
         private static InvalidOperationException Refused(string reason="reply") => new("Audit container live custody refused: "+reason+".");
         private static Claim Get(System.Collections.IDictionary context, System.Collections.IDictionary store, object client, bool live=true) {
             if(!Claims.TryGetValue(store,out var claim)) throw Refused("unclaimed-store");
@@ -40,7 +129,7 @@ namespace Fleetory.Pilot {
             if(!ReferenceEquals(client,claim.Client)) throw Refused("client-identity");
             if(!ReferenceEquals(context["Stores"],claim.Stores)) throw Refused("store-list");
             if(claim.Process!=Environment.ProcessId) throw Refused("process");
-            if(!Same(Values(context,ContextKeys),claim.ContextValues) || !Same(Values(store,StoreKeys),claim.StoreValues)) throw Refused("metadata");
+            if(!AuditNativeReply.Same(AuditNativeReply.Values(context,ContextKeys),claim.ContextValues) || !AuditNativeReply.Same(AuditNativeReply.Values(store,StoreKeys),claim.StoreValues)) throw Refused("metadata");
             if(!Equals(store["Id"],claim.Id)) throw Refused("store-id");
             if(live && System.Threading.Volatile.Read(ref claim.State)!=1) throw Refused("outcome");
             bool present=false;
@@ -48,23 +137,13 @@ namespace Fleetory.Pilot {
             if(!present) throw Refused();
             return claim;
         }
-        private static Tuple<int,byte[],byte[]> Hold(Tuple<int,byte[],byte[]> reply) {
-            if(reply==null || reply.Item2==null || reply.Item3==null || reply.Item2.Length>67108864 || reply.Item3.Length>1048576) throw Refused();
-            return Tuple.Create(reply.Item1,(byte[])reply.Item2.Clone(),(byte[])reply.Item3.Clone());
-        }
-        private static string CompleteId(Tuple<int,byte[],byte[]> reply) {
-            byte[] raw=reply.Item2;
-            if(reply.Item1!=0 || (raw.Length!=65 && raw.Length!=66) || raw[raw.Length-1]!=10 ||
-                (raw.Length==66 && raw[64]!=13)) throw Refused();
-            for(int n=0;n<64;n++) if(!((raw[n]>=48 && raw[n]<=57)||(raw[n]>=97 && raw[n]<=102))) throw Refused();
-            return System.Text.Encoding.ASCII.GetString(raw,0,64);
-        }
+        private static string CompleteId(Tuple<int,byte[],byte[]> reply) => AuditNativeReply.Id(reply,"");
         public static string Create(System.Collections.IDictionary context, System.Collections.IDictionary store, object client,
             Func<Tuple<int,byte[],byte[]>> operation) {
             if(client==null || operation==null || store["Id"]!=null) throw Refused();
             var claim=new Claim(context,store,client);
             Claims.Add(store,claim); // Consumed before the native call, even on exception/unknown output.
-            claim.Creation=Hold(operation());
+            claim.Creation=AuditNativeReply.Hold(operation());
             claim.Id=CompleteId(claim.Creation);
             store["Id"]=claim.Id;
             claim.State=1;
@@ -78,14 +157,14 @@ namespace Fleetory.Pilot {
         public static Tuple<int,byte[],byte[]> Inspect(System.Collections.IDictionary context, System.Collections.IDictionary store, object client,
             Func<Tuple<int,byte[],byte[]>> operation) {
             var claim=Get(context,store,client);
-            claim.Inspection=Hold(operation());
-            return Hold(claim.Inspection);
+            claim.Inspection=AuditNativeReply.Hold(operation());
+            return AuditNativeReply.Hold(claim.Inspection);
         }
         public static void Remove(System.Collections.IDictionary context, System.Collections.IDictionary store, object client,
             Func<Tuple<int,byte[],byte[]>> operation) {
             var claim=Get(context,store,client);
             if(System.Threading.Interlocked.CompareExchange(ref claim.State,2,1)!=1) throw Refused("outcome"); // Consume before the call.
-            claim.Removal=Hold(operation());
+            claim.Removal=AuditNativeReply.Hold(operation());
             if(CompleteId(claim.Removal)!=claim.Id) throw Refused();
             // Stay consumed and unclosed until the subsequent native absence reply.
         }
@@ -93,7 +172,7 @@ namespace Fleetory.Pilot {
             Func<Tuple<int,byte[],byte[]>> operation) {
             var claim=Get(context,store,client,false);
             if(System.Threading.Volatile.Read(ref claim.State)!=2 || claim.Removal==null || CompleteId(claim.Removal)!=claim.Id) throw Refused("outcome");
-            claim.Inspection=Hold(operation());
+            claim.Inspection=AuditNativeReply.Hold(operation());
             ConfirmAbsence(claim,2);
         }
         public static void Absent(System.Collections.IDictionary context, System.Collections.IDictionary store, object client) {
@@ -101,8 +180,7 @@ namespace Fleetory.Pilot {
         }
         private static void ConfirmAbsence(Claim claim, int expectedState) {
             if(claim.Inspection==null || claim.Inspection.Item1!=1) throw Refused();
-            string output=System.Text.Encoding.UTF8.GetString(claim.Inspection.Item2);
-            if(output!="" && output!="[]\n" && output!="[]\r\n") throw Refused("absence-output");
+            if(!AuditNativeReply.EmptyInspection(claim.Inspection.Item2)) throw Refused("absence-output");
             string text=System.Text.Encoding.UTF8.GetString(claim.Inspection.Item3);
             if(!System.Text.RegularExpressions.Regex.IsMatch(text,@"\A(?:Error: )?no such (object|container): "+claim.Id+@"\r?\n?\z",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase)) throw Refused();

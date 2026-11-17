@@ -134,7 +134,7 @@ try{
     if(-not $failures.Count){try{Remove-NativePublicPayload $repo $root}catch{$failures+='payload'}}
     $env:DOCKER_BUILDKIT=$previousBuildKit;$auditContext.SigningPems.Clear();$auditContext.Tls=$null;$secrets.Clear();$canaries.Clear();$tls=$script:signingPem=$dump=$captured=$capture=$c=$null;$watch.Stop()
     if($failures.Count){throw 'Native audit owned cleanup unverified; identity ledger retained.'}
-    @{schema='fleetory.native-immu-cleanup.v1';fixture=$fixture;ids=@($stores|ForEach-Object {$_.Id});image=$imageName;cleanupVerified=$true;originalInputsRead=$false}|ConvertTo-Json -Compress
+    @{schema='fleetory.native-immu-cleanup.v1';fixture=$fixture;ids=@($stores|ForEach-Object {$_.Id});image=$imageName;imageId=$auditContext.ImageId;cleanupVerified=$true;originalInputsRead=$false}|ConvertTo-Json -Compress
 }
 if($FailurePoint -ceq 'none'){
     $fault=Invoke-NativeBytes ([Environment]::ProcessPath) @('-NoLogo','-NoProfile','-NonInteractive','-File',$PSCommandPath,'-Python',$Python,'-FailurePoint','after-stores') -TimeoutSeconds 120
@@ -144,7 +144,8 @@ if($FailurePoint -ceq 'none'){
     $null=Get-ImmuDataImageName $records[0].fixture
     Assert-ImmuData ($records[0].image -ceq (Get-ImmuDataImageName $records[0].fixture)) 'fault-image-name'
     foreach($id in $records[0].ids){Assert-ImmuData ($id -cmatch '^[a-f0-9]{64}\z') 'fault-id';$r=Invoke-Docker @('inspect',$id) -AllowFailure;Assert-ImmuData ($r.ExitCode -ne 0 -and ($r.Stderr+$r.Stdout) -match '(?i)no such (object|container)') 'fault-store-absence'}
-    $r=Invoke-Docker @('image','inspect',$records[0].image) -AllowFailure;Assert-ImmuData ($r.ExitCode -ne 0 -and ($r.Stderr+$r.Stdout) -match '(?i)no such (object|image)') 'fault-image-absence'
+    Assert-ImmuData ($records[0].imageId -cmatch '^sha256:[a-f0-9]{64}\z') 'fault-image-id'
+    $r=Invoke-Docker @('image','inspect',$records[0].imageId) -AllowFailure;Assert-ImmuData ($r.ExitCode -ne 0 -and ($r.Stderr+$r.Stdout) -match '(?i)no such (object|image)') 'fault-image-absence'
     Assert-ImmuData (-not (Test-Path -LiteralPath (Join-Path $repo ('artifacts/native-immu-data-'+$records[0].fixture)))) 'fault-payload-absence'
     $proof.faultCleanupVerified=$true;$proof.faultCleanupContainers=2
 }

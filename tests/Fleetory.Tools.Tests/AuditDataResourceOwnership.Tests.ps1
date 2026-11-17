@@ -161,7 +161,7 @@ try{
     # Same-process raw reply custody. These generated CLI models do not prove Docker origin.
     . (Join-Path $PSScriptRoot 'NativeAuditDataFixture.ps1')
     $script:custodyModel=$null
-    function Invoke-Docker([string[]]$Arguments,[switch]$AllowFailure){
+    function Invoke-Docker([string[]]$Arguments,[byte[]]$InputBytes=$null,[int]$TimeoutSeconds=60,[switch]$AllowFailure){
         $m=$script:custodyModel;$m.Calls.Add(($Arguments -join '|'))
         if($m.Throw){throw 'Injected native transport loss.'}
         if($Arguments[0] -ceq 'inspect'){
@@ -170,7 +170,7 @@ try{
             else{
                 $exitCode=0;$err='';$s=$m.Store;$c=$m.Context
                 $out=@(@{Id=$s.Id;Name=('/'+$s.Name);Created=$s.Started.ToString('O');Image=$c.ImageId;
-                    Config=@{Image=$c.ImageName;Labels=@{'fleetory.immu-data.session'=$s.Session}}})|ConvertTo-Json -Depth 5 -Compress -AsArray
+                    Config=@{Image=$c.ImageId;Labels=@{'fleetory.immu-data.session'=$s.Session}}})|ConvertTo-Json -Depth 5 -Compress -AsArray
                 if($m.BadProfile){$out=$out.Replace('/'+$s.Name,'/foreign')}
             }
         }else{$exitCode=$m.Exit;$out=$m.Output;$err='';if($Arguments[0] -ceq 'rm' -and $exitCode -eq 0){$m.Absent=$true}}
@@ -275,6 +275,114 @@ try{
         Refused {Remove-AuditDataStore $m.Context $m.Store} 'post-removal-loss-no-mutation-replay'
         Check ($m.Calls.Count -eq $calls -and @($m.Calls|Where-Object {$_ -like 'rm|*'}).Count -eq 1) 'post-removal-loss-only-one-rm'
     }
+    # Untagged historical image lifecycle. Models exercise replies, not Docker origin.
+    function Invoke-Docker([string[]]$Arguments,[byte[]]$InputBytes=$null,[int]$TimeoutSeconds=60,[switch]$AllowFailure){
+        $m=$script:imageModel;$m.Calls.Add(($Arguments -join '|'))
+        if($m.Throw){throw 'Injected image native loss.'}
+        $out='';$err='';$exitCode=$m.Exit
+        if($Arguments[0] -ceq 'build'){
+            Check ($TimeoutSeconds -eq 120 -and ($Arguments -join '|') -ceq 'build|--quiet|--network|none|--pull=false|-' -and $InputBytes.Length -gt 0) 'fixed-untagged-build-argv'
+            if($m.MutateArchive){$InputBytes[0]=$InputBytes[0] -bxor 1}
+            $out=$m.Output
+        }elseif($Arguments[1] -ceq 'inspect'){
+            if($m.Gone){
+                if($m.PostInspectThrow){throw 'Injected image post-removal read loss.'}
+                $exitCode=1;$out=$m.AbsentOutput
+                $missing=if($m.WrongAbsentId){'sha256:'+('f'*64)}else{$Arguments[2]}
+                $err='Error response from daemon: No such image: '+$missing+"`n"
+            }else{
+                $c=$m.Context;$exitCode=0
+                $out=@(@{Id=$c.ImageId;Created=([Fleetory.Pilot.AuditImageCustody]::Started($c,${function:Invoke-Docker})).ToString('O');
+                    Config=@{User='3322:3322';Labels=@{'fleetory.immu-data.build'=$c.Fixture}};RepoTags=$m.Tags;RepoDigests=$m.Digests;
+                    RootFS=@{Type='layers';Layers=@('sha256:'+('d'*64))}})|ConvertTo-Json -Depth 6 -Compress -AsArray
+            }
+        }else{
+            Check (($Arguments -join '|') -ceq ('image|rm|--no-prune|'+$m.Context.ImageId)) 'fixed-image-no-prune-no-force'
+            $out=$m.RemoveOutput
+            if($exitCode -eq 0){$m.Gone=$true}
+        }
+        return @{ExitCode=$exitCode;Stdout=$out;Stderr=$err;StdoutBytes=[Text.Encoding]::UTF8.GetBytes($out);StderrBytes=[Text.Encoding]::UTF8.GetBytes($err)}
+    }
+    function New-ImageModel{
+        $c=Context $directory;$c.ImageClaimed=$false;$c.ProbeHash='b'*64
+        $id='sha256:'+('a'*64)
+        $script:imageModel=@{Context=$c;Calls=[Collections.Generic.List[string]]::new();Exit=0;Throw=$false;MutateArchive=$false;
+            Output=($id+"`n");RemoveOutput=('Deleted: '+$id+"`n");Gone=$false;Tags=@();Digests=@();
+            AbsentOutput="[]`n";WrongAbsentId=$false;PostInspectThrow=$false}
+        return $script:imageModel
+    }
+    function Claim-ImageModel($Model){
+        $null=Invoke-AuditDataImageOperation $Model.Context 'Build' @('build','--quiet','--network','none','--pull=false','-') ([byte[]]@(1,2,3))
+    }
+    $m=New-ImageModel
+    Refused {Build-AuditDataImage $m.Context 'untrusted:latest'} 'caller-selected-cli-image-refused'
+    Check ($m.Calls.Count -eq 0 -and -not [Fleetory.Pilot.AuditImageCustody]::Attempted($m.Context)) 'untrusted-base-before-any-docker-or-claim'
+    foreach($size in @(0,16777217)){
+        $m=New-ImageModel;$bytes=[byte[]]::new($size)
+        Refused {Invoke-AuditDataImageOperation $m.Context 'Build' @('build','--quiet','--network','none','--pull=false','-') $bytes} 'image-archive-bound-before-native'
+        Check ($m.Calls.Count -eq 0 -and -not [Fleetory.Pilot.AuditImageCustody]::Attempted($m.Context)) 'image-invalid-archive-no-call-or-claim'
+    }
+    $m=New-ImageModel;Remove-AuditDataImage $m.Context;Check ($m.Calls.Count -eq 0) 'never-attempted-image-no-docker'
+    $m.Context.ImageClaimed=$true;$m.Context.ImageId='sha256:'+('a'*64)
+    Refused {Remove-AuditDataImage $m.Context} 'metadata-image-no-authority'
+    Check ($m.Calls.Count -eq 0) 'metadata-image-no-inspect'
+    foreach($kind in @('empty','short','no-newline','bare-id','extra-line','uppercase','exit','throw','mutated-archive')){
+        $m=New-ImageModel
+        switch($kind){
+            'empty'{$m.Output=''};'short'{$m.Output='sha256:'+('a'*12)};'no-newline'{$m.Output='sha256:'+('a'*64)}
+            'bare-id'{$m.Output=('a'*64)+"`n"};'extra-line'{$m.Output+="extra`n"};'uppercase'{$m.Output='sha256:'+('A'*64)+"`n"}
+            'exit'{$m.Exit=1};'throw'{$m.Throw=$true};'mutated-archive'{$m.MutateArchive=$true}
+        }
+        Refused {Claim-ImageModel $m} 'unknown-image-build-reply'
+        $calls=$m.Calls.Count;$m.Throw=$false;$m.Exit=0
+        Check (-not (Test-AuditDataImageClosed $m.Context)) 'unknown-image-build-never-closed'
+        $m.Context.ImageClaimed=$false
+        Refused {Remove-AuditDataImage $m.Context} 'cleared-flag-cannot-hide-image-attempt'
+        $m.Context.ImageClaimed=$true;$m.Context.ImageId='sha256:'+('a'*64)
+        Refused {Remove-AuditDataImage $m.Context} 'saved-image-id-cannot-repair-build'
+        Refused {Claim-ImageModel $m} 'unknown-image-build-no-replay'
+        Check ($m.Calls.Count -eq $calls) 'unknown-image-no-docker-after-reply-loss'
+    }
+    foreach($newline in @("`n","`r`n")){
+        $m=New-ImageModel;$m.Output='sha256:'+('a'*64)+$newline;$m.RemoveOutput='Deleted: sha256:'+('a'*64)+$newline
+        Claim-ImageModel $m;$c=$m.Context;$calls=$m.Calls.Count
+        Check ($c.ImageId -ceq ('sha256:'+('a'*64)) -and -not (Test-AuditDataImageClosed $c)) 'full-image-build-live'
+        Refused {Remove-AuditDataImage ($c.Clone())} 'copied-image-context'
+        foreach($pair in @(@('Fixture',[Guid]::NewGuid().ToString('D')),@('Root','foreign'),@('ImageName','foreign:tag'),@('ProbeHash',('c'*64)),@('ImageId',('sha256:'+('c'*64))),@('ImageClaimed',$false))){
+            $old=$c[$pair[0]];$c[$pair[0]]=$pair[1]
+            Refused {Remove-AuditDataImage $c} 'changed-image-metadata';$c[$pair[0]]=$old
+        }
+        $client=${function:Invoke-Docker}
+        try{function Invoke-Docker{throw 'Changed image client must never execute.'};Refused {Remove-AuditDataImage $c} 'changed-image-client'}
+        finally{Set-Item -Path Function:Invoke-Docker -Value $client}
+        Check ($m.Calls.Count -eq $calls) 'changed-image-descriptors-no-lookup'
+        $m.Tags=@('foreign:tag');Refused {Remove-AuditDataImage $c} 'image-foreign-tag-refused';$m.Tags=@()
+        $m.Digests=@('foreign@sha256:'+('e'*64));Refused {Remove-AuditDataImage $c} 'image-foreign-digest-refused';$m.Digests=@()
+        Check (@($m.Calls|Where-Object {$_ -like 'image|rm|*'}).Count -eq 0) 'foreign-image-reference-never-removed'
+        Remove-AuditDataImage $c;Check (Test-AuditDataImageClosed $c) 'image-rm-and-held-absence-closed'
+        $calls=$m.Calls.Count;Refused {Remove-AuditDataImage $c} 'image-removal-no-replay'
+        Check ($m.Calls.Count -eq $calls -and @($m.Calls|Where-Object {$_ -like 'image|rm|*'}).Count -eq 1) 'one-own-image-removal-only'
+    }
+    foreach($kind in @('partial','wrong-id','extra-line','exit','throw')){
+        $m=New-ImageModel;Claim-ImageModel $m
+        switch($kind){'partial'{$m.RemoveOutput='Deleted: sha256:aa'};'wrong-id'{$m.RemoveOutput='Deleted: sha256:'+('f'*64)+"`n"};'extra-line'{$m.RemoveOutput+="Deleted: parent`n"};'exit'{$m.Exit=1};'throw'{$m.Throw=$true}}
+        Refused {Invoke-AuditDataImageOperation $m.Context 'Remove' @('image','rm','--no-prune',$m.Context.ImageId)} 'unknown-image-remove-reply'
+        Check (-not (Test-AuditDataImageClosed $m.Context)) 'unknown-image-remove-not-closed'
+        $calls=$m.Calls.Count;Refused {Remove-AuditDataImage $m.Context} 'unknown-image-removal-no-retry'
+        Check ($m.Calls.Count -eq $calls) 'unknown-image-removal-no-lookup'
+    }
+    foreach($kind in @('transport','stdout','id')){
+        $m=New-ImageModel;Claim-ImageModel $m
+        if($kind -ceq 'transport'){$m.PostInspectThrow=$true}elseif($kind -ceq 'stdout'){$m.AbsentOutput='[{}]'}else{$m.WrongAbsentId=$true}
+        Refused {Remove-AuditDataImage $m.Context} 'image-post-rm-absence-failure'
+        Check (-not (Test-AuditDataImageClosed $m.Context)) 'image-ack-alone-never-closes'
+        $calls=$m.Calls.Count;Refused {Remove-AuditDataImage $m.Context} 'image-post-rm-no-second-mutation'
+        Check ($m.Calls.Count -eq $calls -and @($m.Calls|Where-Object {$_ -like 'image|rm|*'}).Count -eq 1) 'image-post-rm-only-one-removal'
+    }
+    $m=New-ImageModel;Claim-ImageModel $m;$m.Gone=$true
+    Remove-AuditDataImage $m.Context
+    Check ((Test-AuditDataImageClosed $m.Context) -and @($m.Calls|Where-Object {$_ -like 'image|rm|*'}).Count -eq 0) 'known-image-already-absent-no-rm'
+    $script:imageModel=$null
     $script:custodyModel=$null
 }finally{
     foreach($child in $children){
@@ -287,5 +395,5 @@ try{
         Remove-Item -LiteralPath $owned.FullName -Recurse -Force
     }
 }
-Write-Output ('AUDIT RESOURCE OWNERSHIP PASS:'+ $count +' assertions;exclusive claim,foreign preservation,atomic publication,100 concurrent replacements,live raw container replies and consumed attempts.')
+Write-Output ('AUDIT RESOURCE OWNERSHIP PASS:'+ $count +' assertions;exclusive claim,foreign preservation,atomic publication,100 concurrent replacements,live raw container/image replies,untagged build,no-prune and consumed attempts.')
 $global:LASTEXITCODE=0

@@ -1,17 +1,91 @@
 #requires -Version 7.3
 # Generated source only; the actual owner receives frozen input through a private pipe.
 . (Join-Path $repo 'eng/pilot/HistoricalAuditControllerPolicy.ps1')
+function New-NativeAuditCodeContext{
+    $nonce=[Guid]::NewGuid().ToString('D')
+    $imageContext=$context.Clone()
+    $imageContext.Fixture=$nonce;$imageContext.Root=Join-Path $repo ('artifacts/native-audit-controller-'+$nonce)
+    $imageContext.ImageName=Get-ImmuDataImageName $nonce;$imageContext.ImageId=$null;$imageContext.ImageClaimed=$false
+    $imageContext.PayloadClaimed=$false;$imageContext.PayloadRemoved=$false;$imageContext.Stores=[Collections.Generic.List[object]]::new()
+    New-AuditDataPublicPayload $repo $imageContext
+    $sourceBundle=Get-HistoricalProbeBundle $published
+    Copy-Item -LiteralPath $published -Destination (Join-Path $imageContext.Root 'publish') -Recurse
+    Assert-ImmuData ((Get-HistoricalProbeBundle (Join-Path $imageContext.Root 'publish')).sha256 -ceq $sourceBundle.sha256 -and
+        (Get-HistoricalProbeBundle $published).sha256 -ceq $sourceBundle.sha256) 'image-fault-public-copy-pin'
+    return $imageContext
+}
+function Invoke-NativeImageReplyFault{
+    $liveClient=${function:Invoke-Docker}
+    $imageContext=New-NativeAuditCodeContext
+    $fault=@{Injected=$false;Calls=[Collections.Generic.List[string]]::new();Witness=$null;Closed=$false;ForeignReadback=$false;Client=$null}
+    function Invoke-Docker([string[]]$Arguments,[byte[]]$InputBytes=$null,[int]$TimeoutSeconds=60,[switch]$AllowFailure){
+        $fault.Calls.Add(($Arguments -join '|'))
+        if($Arguments[0] -ceq 'build' -and -not $fault.Injected){
+            $fault.Injected=$true;$fault.Witness=$imageContext.Clone();$fault.Witness.ImageId=$null;$fault.Witness.ImageClaimed=$false
+            $heldClient=$liveClient;$native=@{Reply=$null}
+            $operation=[Func[Tuple[int,byte[],byte[]]]]{
+                $native.Reply=& $heldClient $Arguments $InputBytes $TimeoutSeconds -AllowFailure
+                return [Tuple[int,byte[],byte[]]]::new($native.Reply.ExitCode,$native.Reply.StdoutBytes,$native.Reply.StderrBytes)
+            }.GetNewClosure()
+            $null=[Fleetory.Pilot.AuditImageCustody]::Build($fault.Witness,$fault.Client,$InputBytes,$operation)
+            Assert-ImmuData ($native.Reply.ExitCode -eq 0 -and $native.Reply.StdoutBytes.Length -ge 72) 'image-witness-complete-build-reply'
+            return @{ExitCode=0;Stdout=$native.Reply.Stdout.Substring(0,19);Stderr='';
+                StdoutBytes=[byte[]]$native.Reply.StdoutBytes[0..18];StderrBytes=[byte[]]@()}
+        }
+        $r=& $liveClient $Arguments $InputBytes $TimeoutSeconds -AllowFailure:$AllowFailure
+        if($fault.ForeignReadback -and $Arguments[0] -ceq 'image' -and $Arguments[1] -ceq 'inspect' -and $Arguments[2] -ceq $fault.Witness.ImageId){
+            # A fault in the actual native readback, not an actual foreign tag claim.
+            $items=@($r.Stdout|ConvertFrom-Json -AsHashtable -Depth 32);$items[0].RepoTags=@('foreign-image-reference:fixture')
+            $out=ConvertTo-Json -InputObject $items -Depth 32 -Compress
+            return @{ExitCode=$r.ExitCode;Stdout=$out;Stderr=$r.Stderr;StdoutBytes=[Text.Encoding]::UTF8.GetBytes($out);StderrBytes=$r.StderrBytes}
+        }
+        return $r
+    }
+    $fault.Client=${function:Invoke-Docker}
+    try{
+        $refused=$false;try{Build-AuditDataImage $imageContext 'codenotary/immuadmin:1.11.2@sha256:fd52f498485dcaf792677bf7d4b5b12c3bc77af80ab0718981aea9fd085ee8bd'}catch{$refused=$true}
+        Assert-ImmuData ($refused -and $fault.Injected -and $null -ne $fault.Witness -and $null -eq $imageContext.ImageId) 'native-partial-image-build-refused'
+        $calls=$fault.Calls.Count;$refused=$false
+        try{Remove-AuditDataImage $imageContext}catch{$refused=$true}
+        Assert-ImmuData ($refused -and $fault.Calls.Count -eq $calls) 'native-unknown-image-no-alias-lookup'
+        $imageContext.ImageId=$fault.Witness.ImageId;$refused=$false
+        try{Remove-AuditDataImage $imageContext}catch{$refused=$true}
+        Assert-ImmuData ($refused -and $fault.Calls.Count -eq $calls) 'native-saved-image-id-no-authority'
+        $imageContext.ImageId=$null
+        Read-AuditDataImage $fault.Witness
+        $fault.ForeignReadback=$true;$refused=$false
+        try{Remove-AuditDataImage $fault.Witness}catch{$refused=$true}
+        Assert-ImmuData ($refused -and @($fault.Calls|Where-Object {$_ -like 'image|rm|*'}).Count -eq 0) 'native-foreign-image-readback-no-removal'
+        $fault.ForeignReadback=$false
+        Remove-AuditDataImage $fault.Witness
+        Assert-ImmuData ((Test-AuditDataImageClosed $fault.Witness) -and
+            @($fault.Calls|Where-Object {$_ -ceq ('image|rm|--no-prune|'+$fault.Witness.ImageId)}).Count -eq 1) 'native-image-witness-full-removal'
+        $fault.Closed=$true;$calls=$fault.Calls.Count;$refused=$false
+        try{Remove-AuditDataImage $fault.Witness}catch{$refused=$true}
+        Assert-ImmuData ($refused -and $fault.Calls.Count -eq $calls) 'native-image-removal-replay-refused'
+        foreach($base in @($script:nativeAuditSourceImage,$script:nativeSignerImage,'codenotary/immuadmin:1.11.2@sha256:fd52f498485dcaf792677bf7d4b5b12c3bc77af80ab0718981aea9fd085ee8bd')){
+            $r=Invoke-Docker @('image','inspect','--format','{{json .Id}}',$base)
+            Assert-ImmuData ($r.ExitCode -eq 0 -and ($r.Stdout|ConvertFrom-Json) -cmatch '^sha256:[a-f0-9]{64}\z') 'native-image-base-preserved'
+        }
+    }finally{
+        if($null -ne $fault.Witness -and -not $fault.Closed){Remove-AuditDataImage $fault.Witness;$fault.Closed=$true}
+        if($fault.Closed){Remove-AuditDataPublicPayload $repo $imageContext}
+    }
+    Assert-ImmuData ($fault.Closed -and $imageContext.PayloadRemoved -and -not (Test-Path -LiteralPath $imageContext.Root)) 'native-image-fault-all-owned-disposed'
+}
+
 function Invoke-NativeContainerReplyFault{
     # A separate live fixture witness retains the real complete native reply;
     # the tested owner sees only a prefix and may not recover ownership by name.
     $liveClient=${function:Invoke-Docker}
+    $containerContext=New-NativeAuditCodeContext
     $fault=@{Injected=$false;Calls=0;WitnessContext=$null;WitnessStore=$null;Closed=$false;StopAttempted=$false;StopComplete=$false}
     function Invoke-Docker([string[]]$Arguments,[byte[]]$InputBytes=$null,[int]$TimeoutSeconds=60,[switch]$AllowFailure){
         $fault.Calls++
         if($Arguments[0] -ceq 'run' -and -not $fault.Injected){
             $fault.Injected=$true
-            $fault.WitnessStore=$context.Stores[-1].Clone()
-            $fault.WitnessContext=$context.Clone()
+            $fault.WitnessStore=$containerContext.Stores[-1].Clone()
+            $fault.WitnessContext=$containerContext.Clone()
             $fault.WitnessContext.Stores=[Collections.Generic.List[object]]::new()
             $fault.WitnessContext.Stores.Add($fault.WitnessStore)
             $native=@{Reply=$null}
@@ -30,16 +104,17 @@ function Invoke-NativeContainerReplyFault{
     $fault.Client=${function:Invoke-Docker}
     $outer=$null
     try{
-        $refused=$false;try{$null=New-AuditDataStore $context 'corrupt'}catch{$refused=$true}
+        Build-AuditDataImage $containerContext 'codenotary/immuadmin:1.11.2@sha256:fd52f498485dcaf792677bf7d4b5b12c3bc77af80ab0718981aea9fd085ee8bd'
+        $refused=$false;try{$null=New-AuditDataStore $containerContext 'corrupt'}catch{$refused=$true}
         Assert-ImmuData ($refused -and $fault.Injected -and $null -ne $fault.WitnessStore) 'partial-native-create-refused'
-        $outer=$context.Stores[-1]
+        $outer=$containerContext.Stores[-1]
         Assert-ImmuData (-not [object]::ReferenceEquals($outer,$fault.WitnessStore)) 'fault-witness-distinct-store'
         Assert-ImmuData ($null -eq $outer.Id) 'partial-create-id-not-adopted'
         $calls=$fault.Calls;$refused=$false
-        try{Remove-AuditDataStore $context $outer}catch{$refused=$true}
+        try{Remove-AuditDataStore $containerContext $outer}catch{$refused=$true}
         Assert-ImmuData ($refused -and $fault.Calls -eq $calls) 'partial-create-no-name-lookup'
         $outer.Id=$fault.WitnessStore.Id;$refused=$false
-        try{Remove-AuditDataStore $context $outer}catch{$refused=$true}
+        try{Remove-AuditDataStore $containerContext $outer}catch{$refused=$true}
         Assert-ImmuData ($refused -and $fault.Calls -eq $calls) 'metadata-cannot-repair-unknown-create'
         $outer.Id=$null
         # The tested claim stays unknown. Only the witness's own complete reply
@@ -67,7 +142,12 @@ function Invoke-NativeContainerReplyFault{
     }finally{
         Assert-ImmuData (-not $fault.StopAttempted -or $fault.StopComplete) 'fault-unknown-stop-no-retry'
         if($null -ne $fault.WitnessStore -and -not $fault.Closed){Remove-AuditDataStore $fault.WitnessContext $fault.WitnessStore;$fault.Closed=$true}
-        if($null -ne $outer -and $fault.Closed){$null=$context.Stores.Remove($outer)}
+        if($null -ne $outer -and $fault.Closed){$null=$containerContext.Stores.Remove($outer)}
+        if($fault.Closed){
+            Remove-AuditDataImage $containerContext
+            Assert-ImmuData (Test-AuditDataImageClosed $containerContext) 'container-fault-own-image-closed'
+            Remove-AuditDataPublicPayload $repo $containerContext
+        }
     }
     Assert-ImmuData $fault.Closed 'native-partial-reply-fixture-disposed'
 }
@@ -106,6 +186,7 @@ function Invoke-GeneratedController($Plan,$Packet,[string]$ExpectedRefusal='',[i
 function Invoke-NativeHistoricalControllerWorkflow($Source,$Foreign){
     $script:controllerCaseNonces=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     $script:controllerSourceId=$Source.Id;$script:controllerForeignId=$Foreign.Id
+    $script:stage='controller-native-image-reply-fault';Invoke-NativeImageReplyFault
     $script:stage='controller-native-reply-fault';Invoke-NativeContainerReplyFault
     $script:stage='controller-source';$setup=Probe $Source 'observation-history-seed'
     $expected=New-HistoricalObservationExpectation $Source $setup
@@ -183,7 +264,7 @@ function Invoke-NativeHistoricalControllerWorkflow($Source,$Foreign){
         knownEvents=4;nullMembersPreserved=1;nativeTransactions=5;controllerCases=10;faultCleanupCases=2;typedRefusals=7;nativeArchiveCorruptionRefused=$true;
         distinctOperationNonces=10;operationNoncesDifferFromSource=$true;sourceIdentityPreserved=$true;parentInputsUnchanged=$true;
         codeInventoryV2Matched=$true;publishedProbeBundleMatched=$true;containerProbeBundleMatched=$true;revisionMismatchRefused=$true;probeBundleMismatchRefused=$true;
-        foreignLifetimeRefused=$true;copiedContextRefusedBeforeLookup=$true;sourceUnchanged=$true;nativeOwnerCleanupVerified=$true;partialNativeCreateReplyRefused=$true;unknownCreateNameAdoptionRefused=$true;liveCompleteReplyWitnessDisposed=$true;containerRemovalReplayRefused=$true;nativeAutoRemovedAbsenceVerified=$true;alreadyAbsentCleanupPerformedNoRm=$true;targetLifetimeSeconds=660;nativeDeadlineSeconds=600;
+        foreignLifetimeRefused=$true;copiedContextRefusedBeforeLookup=$true;sourceUnchanged=$true;nativeOwnerCleanupVerified=$true;nativePartialBuildReplyRefused=$true;nativeImageIdAdoptionRefused=$true;nativeForeignImageReadbackRefused=$true;nativeUntaggedImageWitnessDisposed=$true;nativeImageNoPruneVerified=$true;nativeImageRemovalReplayRefused=$true;partialNativeCreateReplyRefused=$true;unknownCreateNameAdoptionRefused=$true;liveCompleteReplyWitnessDisposed=$true;containerRemovalReplayRefused=$true;nativeAutoRemovedAbsenceVerified=$true;alreadyAbsentCleanupPerformedNoRm=$true;targetLifetimeSeconds=660;nativeDeadlineSeconds=600;
         originalInputsRead=$false;originalPrivatePkiUsed=$false;sourceVpsAccessed=$false;externalGatesAuthenticated=$false;exclusiveUseLedgerVerified=$false;
         historicalComparisonOnly=$true;writerAdmissionVerified=$false;executionAuthorized=$false;fullSystemRecoveryVerified=$false;phase7Complete=$false}
 }

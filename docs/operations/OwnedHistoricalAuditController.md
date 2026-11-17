@@ -156,12 +156,11 @@ reply and checks the fresh runtime profile before disposing only that fixture;
 its cleanup cannot be replayed. Existing normal four-event/five-transaction
 observation, exact historical null preservation and refusal cases still run.
 
-This closes only the container reply-custody prerequisite. The current image
-builder still uses a tag/readback path and needs its own complete build-reply
-custody review. A surviving outside owner, abrupt creator/daemon/host failure,
-original input execution and full recovery remain open. No original bytes,
-private PKI, provider, issuer or VPS access is introduced by these tests. The
-accepted public probe profile and its inventories and durations are unchanged.
+Container and image claims remain local to their live creator. A surviving
+outside owner, abrupt creator/daemon/host failure, original input execution and
+full recovery remain open. No original bytes, original private PKI, provider,
+issuer or VPS access is introduced by these tests. The accepted public probe
+profile and its inventories and durations are unchanged.
 
 
 The fixture's final sweep skips only a matching process-local claim whose
@@ -189,3 +188,48 @@ confirm exact-ID absence first. Transport loss, a nonempty array or an unrelated
 missing-ID message keeps it unclosed. The final sweep cannot turn that state
 into success or issue another removal. Separate refusal tests exercise all three
 post-removal inspection failures and verify exactly one removal call.
+
+
+The historical image build now uses the same fixed three pinned public base
+images, generated Dockerfile and bounded public-code tar, with `--quiet`,
+`--network none`, `--pull=false` and no tag. Its process-local claim retains the
+actual exit code and raw stdout/stderr, same client/context references, original
+start time and an immutable copy of the bounded build input. Only the complete
+`sha256:` image-ID reply can populate `ImageId`. Failed/partial replies or a
+changed input stay unknown and consumed. A tag, label, inspected ID, copied
+context, cleared boolean or JSON journal cannot repair them.
+
+Containers obtain their full image ID from that live image claim with the same
+client; both runtime image fields must match it. The legacy `image`/`ImageName`
+metadata is only an unused logical namespace hint. No alias is created. Checking
+that namespace name alone is not evidence that a physical image was deleted.
+The actual owner confirms absence using its privately held full image ID.
+
+Before deletion a fresh, retained native inspection requires the exact known
+ID, generated build label, original creation window, fixed image user and
+layered root filesystem. Any tag or digest reference refuses removal. The only
+mutation is nonforced `image rm --no-prune` with the full owned ID. Its complete
+`Deleted:` reply is required, followed by a separate retained exact-ID absence
+reply before closing the claim. An unknown removal, lost verification or
+unrelated missing-image message cannot close it or authorize another mutation.
+An already absent image still needs a known original build reply and its own
+native missing-image result. These rules do not authenticate Docker or protect
+against arbitrary code acting as that user.
+
+Additional generated models cover unknown build/removal replies, altered public
+input, descriptor/client copies, cleared flags, foreign references, no-prune,
+post-removal verification loss and replay. The native workflow truncates a real
+quiet build reply before the tested owner sees it. A separate live fixture
+witness executes that same actual build while retaining the full reply, then
+disposes its own untagged image by ID with no pruning and confirms absence.
+A modified actual inspection response containing a foreign tag is rejected
+before removal; this is a readback fault test, not a claim that a real foreign
+tag was created. The three pinned base images are checked after own deletion.
+The existing container-reply fault uses a separate fresh image built through
+its retained client, preserving the strict image-to-client binding.
+
+All of this concerns freshly generated historical fixtures. It is not evidence
+that an original deployed Server/signer/Keycloak image was reproduced, that a
+registry currently serves a recorded digest, or that original release/build
+inputs are authenticated. The outside owner, original recovery and independent
+production controls remain separate open requirements.

@@ -149,11 +149,11 @@ try{
             else{Remove-AuditDataStore $context $s}
         }catch{$failures+='store'}
     }
-    if(-not $failures.Count){try{Remove-AuditDataImage $context}catch{$failures+='image'}}
+    if(-not $failures.Count){try{Remove-AuditDataImage $context;if([Fleetory.Pilot.AuditImageCustody]::Attempted($context)){Assert-ImmuData (Test-AuditDataImageClosed $context) 'history-image-closed-after-absence'}}catch{$failures+='image'}}
     if(-not $failures.Count){try{Remove-NativePublicPayload $repo $root}catch{$failures+='payload'}}
     $env:DOCKER_BUILDKIT=$oldBuildKit;$context.Secrets.Clear();$context.SigningPems.Clear();$context.Tls=$null;$canaries.Clear();$captured=$dump=$body=$c=$null;$watch.Stop()
     if($failures.Count){throw 'Native audit history owned cleanup unverified; ledger retained.'}
-    @{schema='fleetory.native-audit-history-cleanup.v1';fixture=$fixture;ids=@($context.Stores|ForEach-Object {$_.Id});image=$context.ImageName;cleanupVerified=$true;originalInputsRead=$false}|ConvertTo-Json -Compress
+    @{schema='fleetory.native-audit-history-cleanup.v1';fixture=$fixture;ids=@($context.Stores|ForEach-Object {$_.Id});image=$context.ImageName;imageId=$context.ImageId;cleanupVerified=$true;originalInputsRead=$false}|ConvertTo-Json -Compress
 }
 if($FailurePoint -ceq 'none'){
     $fault=Invoke-NativeBytes ([Environment]::ProcessPath) @('-NoLogo','-NoProfile','-NonInteractive','-File',$PSCommandPath,'-Python',$Python,'-FailurePoint','after-stores','-Profile',$Profile) -TimeoutSeconds 120
@@ -161,9 +161,10 @@ if($FailurePoint -ceq 'none'){
     $records=@($fault.Stdout -split '\r?\n'|Where-Object {$_.StartsWith('{')}|ForEach-Object {$_|ConvertFrom-Json -AsHashtable}|Where-Object {$_.schema -ceq 'fleetory.native-audit-history-cleanup.v1'})
     Assert-ImmuData ($records.Count -eq 1 -and $records[0].cleanupVerified -eq $true -and $records[0].originalInputsRead -eq $false -and @($records[0].ids).Count -eq 2 -and $records[0].image -ceq (Get-ImmuDataImageName $records[0].fixture)) 'history-fault-record'
     foreach($id in $records[0].ids){Assert-ImmuData ($id -cmatch '^[a-f0-9]{64}\z') 'history-fault-id';$r=Invoke-Docker @('inspect',$id) -AllowFailure;Assert-ImmuData ($r.ExitCode -ne 0 -and ($r.Stderr+$r.Stdout) -match '(?i)no such (object|container)') 'history-fault-store-absence'}
-    $r=Invoke-Docker @('image','inspect',$records[0].image) -AllowFailure;Assert-ImmuData ($r.ExitCode -ne 0 -and ($r.Stderr+$r.Stdout) -match '(?i)no such (object|image)') 'history-fault-image-absence'
+    Assert-ImmuData ($records[0].imageId -cmatch '^sha256:[a-f0-9]{64}\z') 'history-fault-image-id'
+    $r=Invoke-Docker @('image','inspect',$records[0].imageId) -AllowFailure;Assert-ImmuData ($r.ExitCode -ne 0 -and ($r.Stderr+$r.Stdout) -match '(?i)no such (object|image)') 'history-fault-image-absence'
     Assert-ImmuData (-not (Test-Path -LiteralPath (Join-Path $repo ('artifacts/native-audit-history-'+$records[0].fixture)))) 'history-fault-payload-absence'
     $proof.faultCleanupVerified=$true;$proof.faultCleanupContainers=2
 }
-$proof.cleanupVerified=$true;$proof.alreadyClosedStoresNotRemovedAgain=$true;$proof.closedStoresSkipped=$closedStoresSkipped;$proof|ConvertTo-Json -Compress -Depth 8
+$proof.cleanupVerified=$true;$proof.untaggedImageCreatedFromCompleteReply=$true;$proof.imageRemovalAndHeldAbsenceVerified=$true;$proof.alreadyClosedStoresNotRemovedAgain=$true;$proof.closedStoresSkipped=$closedStoresSkipped;$proof|ConvertTo-Json -Compress -Depth 8
 $global:LASTEXITCODE=0
