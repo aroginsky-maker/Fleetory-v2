@@ -165,6 +165,7 @@ try{
         $m=$script:custodyModel;$m.Calls.Add(($Arguments -join '|'))
         if($m.Throw){throw 'Injected native transport loss.'}
         if($Arguments[0] -ceq 'inspect'){
+            if($m.Absent -and $m.PostInspectThrow){throw 'Injected post-removal read loss.'}
             if($m.Absent){$exitCode=1;$out=$m.AbsentOutput;$err='No such object: '+$Arguments[1]+"`n";if($m.WrongAbsentId){$err='No such object: '+('f'*64)+"`n"}}
             else{
                 $exitCode=0;$err='';$s=$m.Store;$c=$m.Context
@@ -180,7 +181,7 @@ try{
         $session=[Guid]::NewGuid().ToString('D')
         $s=@{Id=$null;Session=$session;Name=('fleetory-immu-store-'+$session.Replace('-',''));Started=[DateTimeOffset]::UtcNow;Role='target'}
         $c.Stores.Add($s)
-        $script:custodyModel=@{Context=$c;Store=$s;Calls=[Collections.Generic.List[string]]::new();Output=(('a'*64)+"`n");Exit=0;Throw=$false;Absent=$false;AbsentOutput="[]`n";WrongAbsentId=$false;BadProfile=$false}
+        $script:custodyModel=@{Context=$c;Store=$s;Calls=[Collections.Generic.List[string]]::new();Output=(('a'*64)+"`n");Exit=0;Throw=$false;Absent=$false;AbsentOutput="[]`n";WrongAbsentId=$false;PostInspectThrow=$false;BadProfile=$false}
         return $script:custodyModel
     }
     function Claim-CustodyModel($Model){$null=Invoke-AuditDataContainerOperation $Model.Context $Model.Store 'Create' @('run','fixed-model')}
@@ -263,6 +264,16 @@ try{
         Refused {Remove-AuditDataStore $m.Context $m.Store} 'ambiguous-absence-never-closes'
         Check (-not (Test-AuditDataStoreClosed $m.Context $m.Store)) 'invalid-absence-stays-live'
         Check (@($m.Calls|Where-Object {$_ -like 'rm|*'}).Count -eq 0) 'invalid-absence-never-removes'
+    }
+    foreach($kind in @('transport','stdout','id')){
+        $m=New-CustodyModel;Claim-CustodyModel $m
+        if($kind -ceq 'transport'){$m.PostInspectThrow=$true}
+        elseif($kind -ceq 'stdout'){$m.AbsentOutput='[{}]'}else{$m.WrongAbsentId=$true}
+        Refused {Remove-AuditDataStore $m.Context $m.Store} 'post-removal-absence-unverified'
+        Check (-not (Test-AuditDataStoreClosed $m.Context $m.Store)) 'rm-ack-not-closed-without-absence'
+        $calls=$m.Calls.Count
+        Refused {Remove-AuditDataStore $m.Context $m.Store} 'post-removal-loss-no-mutation-replay'
+        Check ($m.Calls.Count -eq $calls -and @($m.Calls|Where-Object {$_ -like 'rm|*'}).Count -eq 1) 'post-removal-loss-only-one-rm'
     }
     $script:custodyModel=$null
 }finally{

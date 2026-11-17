@@ -181,3 +181,11 @@ auto-remove container, verifies the full stop reply, then closes the live claim
 from the real absent inspect reply without issuing `rm`. An unknown stop reply
 does not authorize another mutation. This is scoped fixture fault injection,
 not evidence of creator, daemon or host-loss recovery.
+
+
+A complete removal acknowledgement consumes the mutation but does not yet close
+the claim. A separately invoked, privately retained native inspect reply must
+confirm exact-ID absence first. Transport loss, a nonempty array or an unrelated
+missing-ID message keeps it unclosed. The final sweep cannot turn that state
+into success or issue another removal. Separate refusal tests exercise all three
+post-removal inspection failures and verify exactly one removal call.

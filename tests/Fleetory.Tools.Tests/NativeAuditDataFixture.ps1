@@ -6,7 +6,7 @@ function Get-AuditDataLifetime($Context){
     Assert-ImmuData ($value -is [int] -and $value -cin @(3300,660)) 'store-lifetime'
     return $value
 }
-function Invoke-AuditDataContainerOperation($Context,$Store,[ValidateSet('Create','Inspect','Remove')][string]$Mode,[string[]]$Arguments){
+function Invoke-AuditDataContainerOperation($Context,$Store,[ValidateSet('Create','Inspect','Remove','ConfirmRemoval')][string]$Mode,[string[]]$Arguments){
     # Capture the actual live client and raw native reply; no caller-supplied result/import API.
     $client=${function:Invoke-Docker}
     $operation=[Func[Tuple[int,byte[],byte[]]]]{
@@ -20,6 +20,7 @@ function Invoke-AuditDataContainerOperation($Context,$Store,[ValidateSet('Create
             return @{ExitCode=$reply.Item1;Stdout=[Text.Encoding]::UTF8.GetString($reply.Item2);Stderr=[Text.Encoding]::UTF8.GetString($reply.Item3)}
         }
         'Remove' {[Fleetory.Pilot.AuditContainerCustody]::Remove($Context,$Store,$client,$operation)}
+        'ConfirmRemoval' {[Fleetory.Pilot.AuditContainerCustody]::ConfirmRemoval($Context,$Store,$client,$operation)}
     }
 }
 function Read-AuditDataStore($Context,$Store,[switch]$Cleanup){
@@ -90,8 +91,7 @@ function Remove-AuditDataStore($Context,$Store){
     }
     Read-AuditDataStore $Context $Store -Cleanup
     Invoke-AuditDataContainerOperation $Context $Store 'Remove' @('rm','-f','-v',$id)
-    $r=Invoke-Docker @('inspect',$id) -AllowFailure
-    Assert-ImmuData ($r.ExitCode -ne 0 -and ($r.Stderr+$r.Stdout) -match '(?i)no such (object|container)') 'cleanup-absence'
+    Invoke-AuditDataContainerOperation $Context $Store 'ConfirmRemoval' @('inspect',$id)
 }
 function Build-AuditDataImage($Context,[string]$CliImage){
     foreach($image in @($CliImage,$script:nativeAuditSourceImage,$script:nativeSignerImage)){

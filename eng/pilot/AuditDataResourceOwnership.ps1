@@ -87,17 +87,26 @@ namespace Fleetory.Pilot {
             if(System.Threading.Interlocked.CompareExchange(ref claim.State,2,1)!=1) throw Refused("outcome"); // Consume before the call.
             claim.Removal=Hold(operation());
             if(CompleteId(claim.Removal)!=claim.Id) throw Refused();
-            claim.State=3;
+            // Stay consumed and unclosed until the subsequent native absence reply.
+        }
+        public static void ConfirmRemoval(System.Collections.IDictionary context, System.Collections.IDictionary store, object client,
+            Func<Tuple<int,byte[],byte[]>> operation) {
+            var claim=Get(context,store,client,false);
+            if(System.Threading.Volatile.Read(ref claim.State)!=2 || claim.Removal==null || CompleteId(claim.Removal)!=claim.Id) throw Refused("outcome");
+            claim.Inspection=Hold(operation());
+            ConfirmAbsence(claim,2);
         }
         public static void Absent(System.Collections.IDictionary context, System.Collections.IDictionary store, object client) {
-            var claim=Get(context,store,client);
+            ConfirmAbsence(Get(context,store,client),1);
+        }
+        private static void ConfirmAbsence(Claim claim, int expectedState) {
             if(claim.Inspection==null || claim.Inspection.Item1!=1) throw Refused();
             string output=System.Text.Encoding.UTF8.GetString(claim.Inspection.Item2);
             if(output!="" && output!="[]\n" && output!="[]\r\n") throw Refused("absence-output");
             string text=System.Text.Encoding.UTF8.GetString(claim.Inspection.Item3);
             if(!System.Text.RegularExpressions.Regex.IsMatch(text,@"\A(?:Error: )?no such (object|container): "+claim.Id+@"\r?\n?\z",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase)) throw Refused();
-            if(System.Threading.Interlocked.CompareExchange(ref claim.State,3,1)!=1) throw Refused("outcome");
+            if(System.Threading.Interlocked.CompareExchange(ref claim.State,3,expectedState)!=expectedState) throw Refused("outcome");
         }
     }
     public static class ExclusiveAuditDirectory {
