@@ -197,6 +197,7 @@ try{
         if($kind -ceq 'exit'){$m.Exit=1}else{$m.Throw=$true}
         Refused {Claim-CustodyModel $m} 'create-failed-unknown'
         $calls=$m.Calls.Count;$m.Exit=0;$m.Throw=$false
+        Check (-not (Test-AuditDataStoreClosed $m.Context $m.Store)) 'failed-create-never-closed'
         Refused {Claim-CustodyModel $m} 'failed-create-never-retried'
         Refused {Remove-AuditDataStore $m.Context $m.Store} 'failed-create-never-adopted'
         Check ($m.Calls.Count -eq $calls) 'failed-create-no-docker'
@@ -204,6 +205,7 @@ try{
     foreach($newline in @("`n","`r`n")){
         $m=New-CustodyModel;$m.Output=('a'*64)+$newline;Claim-CustodyModel $m
         Check ($m.Store.Id -ceq ('a'*64)) 'full-id-not-trimmed-or-shortened'
+        Check (-not (Test-AuditDataStoreClosed $m.Context $m.Store)) 'created-store-still-live'
         $c=$m.Context;$s=$m.Store;$client=${function:Invoke-Docker};$calls=$m.Calls.Count
         foreach($pair in @(@('Session',[Guid]::NewGuid().ToString('D')),@('Name','foreign'),@('Role','source'),@('Started',$s.Started.AddTicks(1)),@('Id',('b'*64)))){
             $old=$s[$pair[0]];$s[$pair[0]]=$pair[1]
@@ -230,6 +232,8 @@ try{
         Check (@($m.Calls|Where-Object {$_ -like 'rm|*'}).Count -eq 0) 'foreign-profile-never-removed'
         $m.BadProfile=$false;$m.Output=('a'*64)+$newline;$m.Absent=$false
         Remove-AuditDataStore $c $s
+        Check (Test-AuditDataStoreClosed $c $s) 'complete-removal-known-closed'
+        Refused {Test-AuditDataStoreClosed ($c.Clone()) $s} 'closed-state-not-importable'
         $calls=$m.Calls.Count;Refused {Remove-AuditDataStore $c $s} 'complete-removal-consumed'
         Check ($m.Calls.Count -eq $calls) 'complete-removal-no-replay'
     }
@@ -238,11 +242,13 @@ try{
         switch($kind){'partial'{$m.Output='a'*12};'wrong-id'{$m.Output=('b'*64)+"`n"};'exit'{$m.Exit=1};'throw'{$m.Throw=$true}}
         Refused {Invoke-AuditDataContainerOperation $m.Context $m.Store 'Remove' @('rm','-f','-v',$m.Store.Id)} 'removal-outcome-unknown'
         $calls=$m.Calls.Count;$m.Throw=$false;$m.Exit=0;$m.Output=('a'*64)+"`n"
+        Check (-not (Test-AuditDataStoreClosed $m.Context $m.Store)) 'unknown-removal-not-closed'
         Refused {Remove-AuditDataStore $m.Context $m.Store} 'unknown-removal-consumed'
         Check ($m.Calls.Count -eq $calls) 'unknown-removal-no-retry'
     }
     $m=New-CustodyModel;Claim-CustodyModel $m;$m.Absent=$true
     Remove-AuditDataStore $m.Context $m.Store;$calls=$m.Calls.Count
+    Check (Test-AuditDataStoreClosed $m.Context $m.Store) 'observed-absence-known-closed'
     Refused {Remove-AuditDataStore $m.Context $m.Store} 'observed-absence-consumed'
     Check ($m.Calls.Count -eq $calls -and @($m.Calls|Where-Object {$_ -like 'rm|*'}).Count -eq 0) 'already-absent-never-removed'
     $script:custodyModel=$null

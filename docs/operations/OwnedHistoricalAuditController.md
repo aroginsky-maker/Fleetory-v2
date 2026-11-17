@@ -162,3 +162,12 @@ custody review. A surviving outside owner, abrupt creator/daemon/host failure,
 original input execution and full recovery remain open. No original bytes,
 private PKI, provider, issuer or VPS access is introduced by these tests. The
 accepted public probe profile and its inventories and durations are unchanged.
+
+
+The fixture's final sweep skips only a matching process-local claim whose
+complete removal or exact-ID absence was already confirmed. This read-only
+closed-state check performs no Docker operation and cannot import a copied
+context or journal. Unknown create/removal outcomes stay unclosed and fail the
+sweep; explicitly requesting removal again still fails before any lookup.
+Generated history deliberately removes four negative-test stores before the
+final sweep, so these completed claims must be distinguished from live ones.

@@ -34,7 +34,7 @@ namespace Fleetory.Pilot {
             return true;
         }
         private static InvalidOperationException Refused(string reason="reply") => new("Audit container live custody refused: "+reason+".");
-        private static Claim Get(System.Collections.IDictionary context, System.Collections.IDictionary store, object client) {
+        private static Claim Get(System.Collections.IDictionary context, System.Collections.IDictionary store, object client, bool live=true) {
             if(!Claims.TryGetValue(store,out var claim)) throw Refused("unclaimed-store");
             if(!ReferenceEquals(context,claim.Context) || !ReferenceEquals(store,claim.Store)) throw Refused("object-identity");
             if(!ReferenceEquals(client,claim.Client)) throw Refused("client-identity");
@@ -42,7 +42,7 @@ namespace Fleetory.Pilot {
             if(claim.Process!=Environment.ProcessId) throw Refused("process");
             if(!Same(Values(context,ContextKeys),claim.ContextValues) || !Same(Values(store,StoreKeys),claim.StoreValues)) throw Refused("metadata");
             if(!Equals(store["Id"],claim.Id)) throw Refused("store-id");
-            if(System.Threading.Volatile.Read(ref claim.State)!=1) throw Refused("outcome");
+            if(live && System.Threading.Volatile.Read(ref claim.State)!=1) throw Refused("outcome");
             bool present=false;
             foreach(var item in (System.Collections.IEnumerable)claim.Stores) if(ReferenceEquals(item,store)) present=true;
             if(!present) throw Refused();
@@ -71,6 +71,10 @@ namespace Fleetory.Pilot {
             return Get(context,store,client).Id;
         }
         public static string Id(System.Collections.IDictionary context, System.Collections.IDictionary store, object client) => Get(context,store,client).Id;
+        public static bool Closed(System.Collections.IDictionary context, System.Collections.IDictionary store, object client) {
+            var claim=Get(context,store,client,false);
+            return System.Threading.Volatile.Read(ref claim.State)==3;
+        }
         public static Tuple<int,byte[],byte[]> Inspect(System.Collections.IDictionary context, System.Collections.IDictionary store, object client,
             Func<Tuple<int,byte[],byte[]>> operation) {
             var claim=Get(context,store,client);

@@ -76,6 +76,10 @@ function New-AuditDataStore($Context,[string]$Role){
     Assert-ImmuData ($login.ExitCode -eq 0 -and $login.Stdout -match 'logged in') 'cli-login'
     return $s
 }
+function Test-AuditDataStoreClosed($Context,$Store){
+    # Read-only live state; an unknown result or imported record cannot become closed.
+    return [Fleetory.Pilot.AuditContainerCustody]::Closed($Context,$Store,${function:Invoke-Docker})
+}
 function Remove-AuditDataStore($Context,$Store){
     # An unknown create stays unknown. Never inspect by name or adopt an ID from metadata.
     $id=[Fleetory.Pilot.AuditContainerCustody]::Id($Context,$Store,${function:Invoke-Docker})

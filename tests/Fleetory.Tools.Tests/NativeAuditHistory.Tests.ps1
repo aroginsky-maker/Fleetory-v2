@@ -142,7 +142,13 @@ try{
     throw 'Native audit history fixture failed.'
 }finally{
     $cleaning=$true;$failures=@()
-    foreach($s in $context.Stores){try{Remove-AuditDataStore $context $s}catch{$failures+='store'}}
+    $closedStoresSkipped=0
+    foreach($s in $context.Stores){
+        try{
+            if(Test-AuditDataStoreClosed $context $s){$closedStoresSkipped++}
+            else{Remove-AuditDataStore $context $s}
+        }catch{$failures+='store'}
+    }
     if(-not $failures.Count){try{Remove-AuditDataImage $context}catch{$failures+='image'}}
     if(-not $failures.Count){try{Remove-NativePublicPayload $repo $root}catch{$failures+='payload'}}
     $env:DOCKER_BUILDKIT=$oldBuildKit;$context.Secrets.Clear();$context.SigningPems.Clear();$context.Tls=$null;$canaries.Clear();$captured=$dump=$body=$c=$null;$watch.Stop()
@@ -159,5 +165,5 @@ if($FailurePoint -ceq 'none'){
     Assert-ImmuData (-not (Test-Path -LiteralPath (Join-Path $repo ('artifacts/native-audit-history-'+$records[0].fixture)))) 'history-fault-payload-absence'
     $proof.faultCleanupVerified=$true;$proof.faultCleanupContainers=2
 }
-$proof.cleanupVerified=$true;$proof|ConvertTo-Json -Compress -Depth 8
+$proof.cleanupVerified=$true;$proof.alreadyClosedStoresNotRemovedAgain=$true;$proof.closedStoresSkipped=$closedStoresSkipped;$proof|ConvertTo-Json -Compress -Depth 8
 $global:LASTEXITCODE=0
