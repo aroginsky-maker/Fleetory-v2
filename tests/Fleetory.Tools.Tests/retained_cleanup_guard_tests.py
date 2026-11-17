@@ -1217,6 +1217,29 @@ class RetainedPolicyChildContracts(unittest.TestCase):
         self.assertEqual(owner._generated_calls,calls)
         return owner
 
+    def native_fault_refused(self,change,restore,case='policy-child-exited'):
+        from native_retained_cleanup_guard import _policy_fault
+        model=self.start();owner=model.owner
+        with patch.object(model.fence,'terminate',create=True) as signal,patch.object(model.child.stdin,'close') as close_input,patch.object(owner._docker,'_execute') as execute:
+            try:
+                change(model)
+                with self.assertRaises(REFUSED):_policy_fault(owner,case)
+                signal.assert_not_called();close_input.assert_not_called();execute.assert_not_called()
+            finally:restore(model)
+
+    def test_actual_fault_fixture_refuses_unknown_outcome_before_signaling(self):
+        self.native_fault_refused(lambda m:setattr(m.owner,'_unknown',True),lambda m:setattr(m.owner,'_unknown',False))
+
+    def test_actual_fault_fixture_rechecks_original_clock_before_signaling(self):
+        self.native_fault_refused(lambda m:setattr(m.owner,'_mono',m.owner._mono+1),lambda m:setattr(m.owner,'_mono',m.owner._mono-1))
+
+    def test_actual_fault_fixture_rechecks_held_birth_identity_before_signaling(self):
+        self.native_fault_refused(lambda m:m.peer._identity.update(pid=m.peer._identity['pid']+1),
+            lambda m:m.peer._identity.update(pid=m.peer._identity['pid']-1))
+
+    def test_actual_fault_fixture_refuses_other_case_without_signal_or_input(self):
+        self.native_fault_refused(lambda _:None,lambda _:None,case='controller-exited')
+
     def test_modeled_peer_exit_keeps_one_creator_dispatch_without_wire_admission(self):
         owner=self.creator_cleanup(False)
         self.assertFalse(owner._policy_binding._attempted);self.assertTrue(owner._policy_binding._fallback_attempted)

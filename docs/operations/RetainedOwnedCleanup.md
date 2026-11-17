@@ -192,3 +192,34 @@ no new source inventory entry is adopted. On Linux, exit status is observed with
 `WNOWAIT`: the owned leader remains unreaped and reserves its process group ID
 until the fence checks that whole group. Only the existing fenced close then
 reaps it. Windows continues to use its held job object and process handle.
+
+
+For current Phase 7 continuation, the user explicitly accepted local Sonar as
+the authoritative reference on 2026-11-17 while official upload is unavailable.
+All code/native CI checks and a current local analysis are still required.
+The official result remains recorded as failed/unavailable and its metrics are
+never replaced with local values. This decision does not renew any original
+secret, private-PKI, source-root recovery or external approval grant.
+
+Two public-only native cases now exercise the already separate policy process
+after complete creator-owned build/readback/runtime replies and typed ready.
+`policy-child-exited` terminates only that exact held owned fence;
+`policy-input-eof` closes its actual input pipe without a cancel/event frame.
+Both require a live controller and injection before the original five-second
+lease expires. Birth/image identity, original clocks and live creator objects
+are rechecked before injection. The creator observes nonzero peer exit and
+checks whole-fence absence before any removal; Linux retains the unreaped leader
+until that whole-group check. No resource ownership is imported from the report.
+
+The expected cleanup reason is `policy-peer-failed`. The creator-only failure
+dispatch is consumed without positive policy admission or a request digest.
+Only its retained runtime/image objects may be removed, once each, with fresh
+profile checks, full replies and absence. Replay remains refused. Existing
+58 descriptors, 81/63 inventories and 60/5/75/660-second bounds are unchanged.
+Four generated refusal contracts additionally reject unknown create outcomes,
+changed clocks, changed peer identities and unrelated fault selectors before
+any signal, input closure or Docker call. Native execution evidence is recorded
+separately by OS and commit. The scoped `policyChildDeathCleanupVerified` and
+`policyInputLossCleanupVerified` fields describe only those two successful native
+cases. General creator/daemon/host death and `guardianDeathCleanupVerified` remain
+open; no full original recovery or production readiness is implied.

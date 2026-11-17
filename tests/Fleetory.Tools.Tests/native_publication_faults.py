@@ -204,7 +204,7 @@ def run(*, continuation=False, with_image=False, with_cleanup=False):
         if with_cleanup:
             from native_retained_cleanup_guard import exercise as cleanup_exercise
             owned_cleanup=cleanup_exercise(prepared)
-            packet.require(owned_cleanup['verified'] and owned_cleanup['actualRetainedControllers']==11 and owned_cleanup['positiveGuardianCleanupCases']==4 and owned_cleanup['fullTypedHandoffCleanupCases']==3)
+            packet.require(owned_cleanup['verified'] and owned_cleanup['actualRetainedControllers']==13 and owned_cleanup['positiveGuardianCleanupCases']==6 and owned_cleanup['fullTypedHandoffCleanupCases']==5 and owned_cleanup['policyChildDeathCleanupVerified'] and owned_cleanup['policyInputLossCleanupVerified'])
         copied.check()
         tree=copied.tree_id;revision=copied.revision
     return dict(schema='fleetory.generated-native-publication-faults.v1',verified=True,cases=outcomes,continuationProof=continued,retainedContextTransport=transported,retainedOwnedCleanup=owned_cleanup,

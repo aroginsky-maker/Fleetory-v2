@@ -17,6 +17,8 @@ C,H,packet=policy.C,policy.H,policy.packet
 CASES=('lease-expired','controller-exited','source-admission-expired','controller-exited-before-handoff','foreign-observation',
     'lost-create-reply','partial-create-reply','cli-inspection-failure','own-runtime-paused',
     'remove-cli-fails-before-execution','remove-reply-lost-after-own-execution')
+POLICY_FAULT_CASES=('policy-child-exited','policy-input-eof')
+CASES+=POLICY_FAULT_CASES
 REFUSED=(OSError,ValueError,policy.context.process.LaunchError)
 
 
@@ -347,6 +349,59 @@ def _positive(owner,case):
 
 
 
+
+def _policy_fault(owner,case):
+    """Actual fixed owned peer fault; the surviving creator keeps all Docker authority."""
+    packet.require(case in POLICY_FAULT_CASES and type(owner) is policy.RetainedCleanupGuard and
+        owner._prepared and not owner._cleanup_started and not owner._unknown)
+    owner._check_owned();peer=owner._policy_process
+    packet.require(type(peer) is policy._PolicyProcess and peer._owner is owner and peer._ready and
+        not peer._closed and not peer._failed and not peer._exited())
+    packet.require(owner._state()=='live' and owner._wall+owner._elapsed()<owner._expiry)
+    identity=policy.guard._process_identity(peer._fence.identity(peer._child,peer._python))
+    packet.require(identity==peer._identity and identity['pid'] not in (owner._caller,owner._transport._controller['pid']))
+    resource=owner._resources['runtime'];resource.fresh()
+    client,reply,bound=owner._docker,resource.reply,owner._records['bound']
+    clock=(owner._mono,owner._wall,owner._expiry);context=owner._policy_binding.context_bytes()
+    packet.require(reply.client is client and owner._policy_binding._resource is resource and not owner._policy_binding._attempted)
+    packet.require(len(peer._pumps.stdout)==peer._total and not peer._pumps.stderr and not peer._pumps.errors)
+    injected=time.time_ns();packet.require(injected<owner._expiry)
+    if case=='policy-child-exited':
+        # Signal only the already held owned OS fence, retaining its unreaped Linux leader.
+        ended=peer._fence.terminate();packet.require(ended['noRunningMembersVerified'])
+    else:
+        # No cancel/event frame: the actual input pipe closes after the ready acknowledgement.
+        peer._child.stdin.close();packet.require(peer._child.stdin.closed and not peer._notified)
+    deadline=time.monotonic_ns()+3_000_000_000
+    while not peer._exited():
+        packet.require(time.monotonic_ns()<deadline);time.sleep(0.01)
+    packet.require(owner._state()=='live' and clock==(owner._mono,owner._wall,owner._expiry))
+    execute=client._execute;deletions=[]
+    def observed(args,data,seconds,limit):
+        if args[:2] in (['container','rm'],['image','rm']):
+            packet.require(peer._closed and peer._failed and peer._end['noRunningMembersVerified'] and
+                owner._docker is client and owner._resources['runtime'] is resource and resource.reply is reply and
+                owner._records['bound'] is bound and clock==(owner._mono,owner._wall,owner._expiry) and
+                owner._policy_binding.context_bytes()==context)
+            deletions.append(list(args))
+        return execute(args,data,seconds,limit)
+    with patch.object(client,'_execute',side_effect=observed):result=owner.cleanup()
+    packet.require(result['reason']=='policy-peer-failed' and result['actualCleanupExecuted'] and
+        result['ownCreatedResourcesAbsent'] and result['typedRetainedHandoffVerified'] and
+        result['policyProcessSeparated'] and result['policyPeerFailedObserved'] and not result['policyRequestValidated'])
+    packet.require(not owner._policy_binding._accepted and not owner._policy_binding._attempted and
+        owner._policy_binding._fallback_attempted and owner._records['delete'].report()['policyRequestSha256'] is None)
+    report=result['policyProcess'];packet.require(report['policy']==identity and report['ownedPolicyMembersAbsent'] and
+        report['peerFailedObserved'] and report['exitCode'] is not None and report['exitCode']!=0)
+    packet.require(deletions==[['container','rm','--force',reply.identifier],['image','rm',owner._resources['image'].reply.identifier]])
+    packet.require(clock==(owner._mono,owner._wall,owner._expiry) and not result['guardianDeathCleanupVerified'])
+    return dict(guardianCleanupAccepted=True,result=result,actualPolicyChildDeathInjected=case=='policy-child-exited',
+        actualPolicyInputEofInjected=case=='policy-input-eof',faultInjectedBeforeOriginalLeaseExpiry=True,
+        faultInjectedAtNs=injected,originalLeaseExpiresNs=clock[2],originalClockTuple=list(clock),
+        originalCreatorObjectsRetained=True,ownedPolicyAbsenceVerifiedBeforeDeletion=True,
+        creatorOnlyFailureDispatchConsumed=True,noPositivePolicyAdmission=True,ownRemovalCalls=deletions)
+
+
 def verify_closure(value,case,expired):
     packet.require(case in CASES and type(expired) is bool)
     packet.require(value['ownedControllerMembersAbsent'] and value['publicationDescriptorsHeld']==58)
@@ -389,7 +444,8 @@ def exercise(prepared,cases=CASES):
                     if case=='foreign-observation':result=_foreign(owner,captured)
                     elif case=='cli-inspection-failure':result=_cli_failure(owner)
                     elif case=='own-runtime-paused':result=_paused(owner,captured)
-                    elif case in CASES[-2:]:result=_removal_failure(owner,case,removals)
+                    elif case in ('remove-cli-fails-before-execution','remove-reply-lost-after-own-execution'):result=_removal_failure(owner,case,removals)
+                    elif case in POLICY_FAULT_CASES:result=_policy_fault(owner,case)
                     else:result=_positive(owner,case)
                 _replay(owner,prepared,raw,reference,paths,pins,sources,None if closed_capture is None else closed_capture['snapshot'])
             finally:
@@ -421,7 +477,9 @@ def exercise(prepared,cases=CASES):
             print('ACTUAL RETAINED OWNED CLEANUP CASE PASS: '+case,flush=True)
     return dict(schema='fleetory.actual-retained-owned-cleanup.v1',verified=True,sourceRevision=prepared.published['source']['revision'],
         sourcePins=sources,sourceFilesPinned=len(sources),cases=outcomes,actualRetainedControllers=len(cases),
-        positiveGuardianCleanupCases=sum(c in CASES[:4] for c in cases),fullTypedHandoffCleanupCases=sum(c in CASES[:3] for c in cases),allFixtureOwnedResourcesDisposed=True,
+        positiveGuardianCleanupCases=sum(c in CASES[:4]+POLICY_FAULT_CASES for c in cases),
+        fullTypedHandoffCleanupCases=sum(c in CASES[:3]+POLICY_FAULT_CASES for c in cases),allFixtureOwnedResourcesDisposed=True,
+        policyChildDeathCleanupVerified='policy-child-exited' in cases,policyInputLossCleanupVerified='policy-input-eof' in cases,
         same58ChildPublicationDescriptorsUsed=True,independent58ParentReferenceDescriptorsUnchanged=True,
         originalInputsRead=False,originalPrivatePkiUsed=False,sourceVpsAccessed=False,fullSystemRecoveryVerified=False,phase7Complete=False)
 
