@@ -171,3 +171,13 @@ context or journal. Unknown create/removal outcomes stay unclosed and fail the
 sweep; explicitly requesting removal again still fails before any lookup.
 Generated history deliberately removes four negative-test stores before the
 final sweep, so these completed claims must be distinguished from live ones.
+
+
+An exact-ID absence accepts only exit 1, an empty stdout or the CLI's canonical
+empty inspect array, and an exact missing-object message naming that ID in
+stderr. A nonempty array, unrelated ID or transport failure cannot close the
+claim. The generated native fault fixture stops only its known, freshly checked
+auto-remove container, verifies the full stop reply, then closes the live claim
+from the real absent inspect reply without issuing `rm`. An unknown stop reply
+does not authorize another mutation. This is scoped fixture fault injection,
+not evidence of creator, daemon or host-loss recovery.

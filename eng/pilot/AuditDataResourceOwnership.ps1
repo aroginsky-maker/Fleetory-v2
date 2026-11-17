@@ -92,7 +92,9 @@ namespace Fleetory.Pilot {
         public static void Absent(System.Collections.IDictionary context, System.Collections.IDictionary store, object client) {
             var claim=Get(context,store,client);
             if(claim.Inspection==null || claim.Inspection.Item1!=1) throw Refused();
-            string text=System.Text.Encoding.UTF8.GetString(claim.Inspection.Item2)+System.Text.Encoding.UTF8.GetString(claim.Inspection.Item3);
+            string output=System.Text.Encoding.UTF8.GetString(claim.Inspection.Item2);
+            if(output!="" && output!="[]\n" && output!="[]\r\n") throw Refused("absence-output");
+            string text=System.Text.Encoding.UTF8.GetString(claim.Inspection.Item3);
             if(!System.Text.RegularExpressions.Regex.IsMatch(text,@"\A(?:Error: )?no such (object|container): "+claim.Id+@"\r?\n?\z",
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase)) throw Refused();
             if(System.Threading.Interlocked.CompareExchange(ref claim.State,3,1)!=1) throw Refused("outcome");

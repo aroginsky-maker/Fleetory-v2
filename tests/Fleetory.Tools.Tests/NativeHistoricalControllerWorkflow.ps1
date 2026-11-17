@@ -5,7 +5,7 @@ function Invoke-NativeContainerReplyFault{
     # A separate live fixture witness retains the real complete native reply;
     # the tested owner sees only a prefix and may not recover ownership by name.
     $liveClient=${function:Invoke-Docker}
-    $fault=@{Injected=$false;Calls=0;WitnessContext=$null;WitnessStore=$null;Closed=$false}
+    $fault=@{Injected=$false;Calls=0;WitnessContext=$null;WitnessStore=$null;Closed=$false;StopAttempted=$false;StopComplete=$false}
     function Invoke-Docker([string[]]$Arguments,[byte[]]$InputBytes=$null,[int]$TimeoutSeconds=60,[switch]$AllowFailure){
         $fault.Calls++
         if($Arguments[0] -ceq 'run' -and -not $fault.Injected){
@@ -45,7 +45,12 @@ function Invoke-NativeContainerReplyFault{
         # The tested claim stays unknown. Only the witness's own complete reply
         # and fresh generated profile authorize fixture disposal.
         Read-AuditDataStore $fault.WitnessContext $fault.WitnessStore
+        $fault.StopAttempted=$true
+        $stopped=Invoke-Docker @('stop','--timeout','1',$fault.WitnessStore.Id)
+        Assert-ImmuData ($stopped.ExitCode -eq 0 -and $stopped.Stdout -cin @(($fault.WitnessStore.Id+"`n"),($fault.WitnessStore.Id+"`r`n"))) 'fault-owned-stop-complete-reply'
+        $fault.StopComplete=$true;$calls=$fault.Calls
         Remove-AuditDataStore $fault.WitnessContext $fault.WitnessStore
+        Assert-ImmuData ($fault.Calls -eq ($calls+1) -and (Test-AuditDataStoreClosed $fault.WitnessContext $fault.WitnessStore)) 'fault-native-empty-array-absence-no-rm'
         $fault.Closed=$true;$calls=$fault.Calls;$refused=$false
         try{Remove-AuditDataStore $fault.WitnessContext $fault.WitnessStore}catch{$refused=$true}
         Assert-ImmuData ($refused -and $fault.Calls -eq $calls) 'native-witness-removal-no-replay'
@@ -60,6 +65,7 @@ function Invoke-NativeContainerReplyFault{
         [Console]::Error.WriteLine('Generated custody fault line='+$_.InvocationInfo.ScriptLineNumber)
         throw
     }finally{
+        Assert-ImmuData (-not $fault.StopAttempted -or $fault.StopComplete) 'fault-unknown-stop-no-retry'
         if($null -ne $fault.WitnessStore -and -not $fault.Closed){Remove-AuditDataStore $fault.WitnessContext $fault.WitnessStore;$fault.Closed=$true}
         if($null -ne $outer -and $fault.Closed){$null=$context.Stores.Remove($outer)}
     }
@@ -177,7 +183,7 @@ function Invoke-NativeHistoricalControllerWorkflow($Source,$Foreign){
         knownEvents=4;nullMembersPreserved=1;nativeTransactions=5;controllerCases=10;faultCleanupCases=2;typedRefusals=7;nativeArchiveCorruptionRefused=$true;
         distinctOperationNonces=10;operationNoncesDifferFromSource=$true;sourceIdentityPreserved=$true;parentInputsUnchanged=$true;
         codeInventoryV2Matched=$true;publishedProbeBundleMatched=$true;containerProbeBundleMatched=$true;revisionMismatchRefused=$true;probeBundleMismatchRefused=$true;
-        foreignLifetimeRefused=$true;copiedContextRefusedBeforeLookup=$true;sourceUnchanged=$true;nativeOwnerCleanupVerified=$true;partialNativeCreateReplyRefused=$true;unknownCreateNameAdoptionRefused=$true;liveCompleteReplyWitnessDisposed=$true;containerRemovalReplayRefused=$true;targetLifetimeSeconds=660;nativeDeadlineSeconds=600;
+        foreignLifetimeRefused=$true;copiedContextRefusedBeforeLookup=$true;sourceUnchanged=$true;nativeOwnerCleanupVerified=$true;partialNativeCreateReplyRefused=$true;unknownCreateNameAdoptionRefused=$true;liveCompleteReplyWitnessDisposed=$true;containerRemovalReplayRefused=$true;nativeAutoRemovedAbsenceVerified=$true;alreadyAbsentCleanupPerformedNoRm=$true;targetLifetimeSeconds=660;nativeDeadlineSeconds=600;
         originalInputsRead=$false;originalPrivatePkiUsed=$false;sourceVpsAccessed=$false;externalGatesAuthenticated=$false;exclusiveUseLedgerVerified=$false;
         historicalComparisonOnly=$true;writerAdmissionVerified=$false;executionAuthorized=$false;fullSystemRecoveryVerified=$false;phase7Complete=$false}
 }

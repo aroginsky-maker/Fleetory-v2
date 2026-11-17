@@ -165,7 +165,7 @@ try{
         $m=$script:custodyModel;$m.Calls.Add(($Arguments -join '|'))
         if($m.Throw){throw 'Injected native transport loss.'}
         if($Arguments[0] -ceq 'inspect'){
-            if($m.Absent){$exitCode=1;$out='';$err='No such object: '+$Arguments[1]+"`n"}
+            if($m.Absent){$exitCode=1;$out=$m.AbsentOutput;$err='No such object: '+$Arguments[1]+"`n";if($m.WrongAbsentId){$err='No such object: '+('f'*64)+"`n"}}
             else{
                 $exitCode=0;$err='';$s=$m.Store;$c=$m.Context
                 $out=@(@{Id=$s.Id;Name=('/'+$s.Name);Created=$s.Started.ToString('O');Image=$c.ImageId;
@@ -180,7 +180,7 @@ try{
         $session=[Guid]::NewGuid().ToString('D')
         $s=@{Id=$null;Session=$session;Name=('fleetory-immu-store-'+$session.Replace('-',''));Started=[DateTimeOffset]::UtcNow;Role='target'}
         $c.Stores.Add($s)
-        $script:custodyModel=@{Context=$c;Store=$s;Calls=[Collections.Generic.List[string]]::new();Output=(('a'*64)+"`n");Exit=0;Throw=$false;Absent=$false;BadProfile=$false}
+        $script:custodyModel=@{Context=$c;Store=$s;Calls=[Collections.Generic.List[string]]::new();Output=(('a'*64)+"`n");Exit=0;Throw=$false;Absent=$false;AbsentOutput="[]`n";WrongAbsentId=$false;BadProfile=$false}
         return $script:custodyModel
     }
     function Claim-CustodyModel($Model){$null=Invoke-AuditDataContainerOperation $Model.Context $Model.Store 'Create' @('run','fixed-model')}
@@ -251,6 +251,19 @@ try{
     Check (Test-AuditDataStoreClosed $m.Context $m.Store) 'observed-absence-known-closed'
     Refused {Remove-AuditDataStore $m.Context $m.Store} 'observed-absence-consumed'
     Check ($m.Calls.Count -eq $calls -and @($m.Calls|Where-Object {$_ -like 'rm|*'}).Count -eq 0) 'already-absent-never-removed'
+    foreach($raw in @('',"[]`n","[]`r`n")){
+        $m=New-CustodyModel;Claim-CustodyModel $m;$m.Absent=$true;$m.AbsentOutput=$raw
+        Remove-AuditDataStore $m.Context $m.Store
+        Check (Test-AuditDataStoreClosed $m.Context $m.Store) 'exact-empty-inspect-array-absence'
+        Check (@($m.Calls|Where-Object {$_ -like 'rm|*'}).Count -eq 0) 'no-removal-for-held-absent-reply'
+    }
+    foreach($kind in @('stdout','id')){
+        $m=New-CustodyModel;Claim-CustodyModel $m;$m.Absent=$true
+        if($kind -ceq 'stdout'){$m.AbsentOutput='[{}]'}else{$m.WrongAbsentId=$true}
+        Refused {Remove-AuditDataStore $m.Context $m.Store} 'ambiguous-absence-never-closes'
+        Check (-not (Test-AuditDataStoreClosed $m.Context $m.Store)) 'invalid-absence-stays-live'
+        Check (@($m.Calls|Where-Object {$_ -like 'rm|*'}).Count -eq 0) 'invalid-absence-never-removes'
+    }
     $script:custodyModel=$null
 }finally{
     foreach($child in $children){
