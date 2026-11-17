@@ -233,3 +233,31 @@ that an original deployed Server/signer/Keycloak image was reproduced, that a
 registry currently serves a recorded digest, or that original release/build
 inputs are authenticated. The outside owner, original recovery and independent
 production controls remain separate open requirements.
+
+
+Before the historical controller accepts its private input, it now creates a
+separate, process-local native-probe profile with the original context/client
+references and a monotonic 600-second deadline. It permits only `audit-health`,
+`history-users`, `observation-history-read` and `observation-reader-denial`.
+The profile constructs the fixed Docker exec arguments itself, obtains the full
+container/image IDs from the original live custody claims and requires the
+historical target's 660-second lifetime. No command, endpoint, path or mount
+selector is accepted. Raw request bytes are bounded to 128 KiB, stdout to
+256 KiB, stderr to 4 KiB and the profile to 64 calls. That covers both existing
+20-attempt health loops and the normal historical operations.
+
+Each actual call is consumed before invocation. Its original request commitment
+and privately copied raw native reply are retained; mutable delivery bytes are
+cleared on success and failure. Changed input/arguments/identity, transport loss,
+null replies and output overflow permanently invalidate further probe calls for
+that profile. A copied context, replacement client or second begin cannot reset
+it. The original image/container cleanup claims remain available to their live
+creator. Application result validation is still separate from transport capture.
+
+This closes the historical command/request profile before OS-child lifetime
+integration. It does not authenticate the native child's executable/birth/fence
+or prove actual abrupt child death, input-loss cleanup, creator/daemon failure
+or a surviving outside owner. Killing a Docker client does not establish that
+its daemon-side exec workload has stopped. Those tests must retain the actual
+creator and confirm disposal/absence of the owned container independently.
+No original inputs, original secrets/private PKI or VPS operations are added.

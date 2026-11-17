@@ -45,7 +45,15 @@ function Invoke-ControllerProbe($Store,[string]$Mode,[string]$ExpectedType='',[s
     Read-AuditDataStore $context $Store
     $packet=@{fixture=$plan.nonce;admin=$context.Secrets['target-admin'];reader=$context.Secrets['target-reader'];writer=$context.Secrets['target-writer']}
     if($Mode -ceq 'observation-history-read'){$packet=@{fixture=$plan.nonce;reader=$(if($WrongPassword){$context.Secrets.wrong}else{$context.Secrets['target-reader']});observation=$script:expected}}
-    $result=Invoke-Docker @('exec','-i','-e','SSL_CERT_FILE=/tmp/ca.pem','-e','SSL_CERT_DIR=/tmp/empty-ca-dir',$Store.Id,'dotnet','/tool/ServerBackendProbe.dll',$Mode) ([Text.Encoding]::UTF8.GetBytes(($packet|ConvertTo-Json -Compress -Depth 8))) -AllowFailure
+    $bytes=[Text.Encoding]::UTF8.GetBytes(($packet|ConvertTo-Json -Compress -Depth 8))
+    $client=${function:Invoke-Docker}
+    $native=[Func[string[],byte[],Tuple[int,byte[],byte[]]]]{param([string[]]$Arguments,[byte[]]$InputBytes)
+        $reply=& $client $Arguments $InputBytes 60 -AllowFailure
+        return [Tuple[int,byte[],byte[]]]::new($reply.ExitCode,$reply.StdoutBytes,$reply.StderrBytes)
+    }.GetNewClosure()
+    try{$rawReply=[Fleetory.Pilot.AuditHistoricalProbeProfile]::Invoke($context,$Store,$client,$Mode,$bytes,$native)}
+    finally{[Array]::Clear($bytes,0,$bytes.Length)}
+    $result=@{ExitCode=$rawReply.Item1;Stdout=[Text.Encoding]::UTF8.GetString($rawReply.Item2);Stderr=[Text.Encoding]::UTF8.GetString($rawReply.Item3)}
     $value=$result.Stdout|ConvertFrom-Json -AsHashtable -Depth 16
     if($Mode.StartsWith('observation-',[StringComparison]::Ordinal)){Assert-AuditObservationProbe $result $value $Mode $ExpectedType}
     else{Assert-ImmuData ($result.ExitCode -eq 0 -and [string]::IsNullOrWhiteSpace($result.Stderr) -and $value.category -ceq $Mode) 'controller-probe'}
@@ -76,6 +84,7 @@ function Read-ControllerObservation {
     Assert-ImmuData ($checked.ExitCode -eq 0 -and [string]::IsNullOrWhiteSpace($checked.Stderr)) 'controller-observation-policy'
     return $checked.Stdout|ConvertFrom-Json -AsHashtable -Depth 12
 }
+[Fleetory.Pilot.AuditHistoricalProbeProfile]::Begin($context,${function:Invoke-Docker})
 try{
     [byte[]]$raw=Read-HistoricalControllerPacket
     $admitted=Invoke-NativeBytes $Python @('-B',(Join-Path $PSScriptRoot 'historical_audit_restore.py'),$ExpectedPlanSha256) $raw 10
@@ -129,7 +138,8 @@ try{
     $again=Read-ControllerObservation
     Assert-ImmuData ($first.observationSha256 -ceq $again.observationSha256) 'controller-stable-restart'
     $proof=@{schema='fleetory.historical-audit-owned-observation.v1';verified=$true;historicalComparisonOnly=$true;observation=$again;
-        nativeRestores=1;targetLifetimeSeconds=660;nativeDeadlineSeconds=600;sourceStateSignatureVerified=$true;targetStateSignaturesVerified=$true;
+        nativeRestores=1;targetLifetimeSeconds=660;nativeDeadlineSeconds=600;historicalWorkerCommandsPinned=$true;historicalWorkerRawRepliesRetained=$true;historicalWorkerOsFenceVerified=$false;
+        historicalWorkerCalls=[Fleetory.Pilot.AuditHistoricalProbeProfile]::Calls($context,${function:Invoke-Docker});sourceStateSignatureVerified=$true;targetStateSignaturesVerified=$true;
         codeAndProbePinsMatched=$true;inputDigestsMatched=$true;wrongPasswordRefused=$true;readerWriteRefused=$true;restartPreservedObservation=$true;
         freshTargetCredentialsAndKeys=$true;codeInventoryV2Matched=$true;publishedProbeBundleMatched=$true;containerProbeBundleMatched=$true;
         dataOriginAuthenticated=$false;externalGatesAuthenticated=$false;exclusiveUseLedgerVerified=$false;

@@ -382,6 +382,75 @@ try{
     $m=New-ImageModel;Claim-ImageModel $m;$m.Gone=$true
     Remove-AuditDataImage $m.Context
     Check ((Test-AuditDataImageClosed $m.Context) -and @($m.Calls|Where-Object {$_ -like 'image|rm|*'}).Count -eq 0) 'known-image-already-absent-no-rm'
+    # A closed native-call profile prepares OS lifetime integration; no OS claim is made here.
+    function New-HistoricalProfileModel {
+        $c=Context $directory;$c.LifetimeSeconds=660;$c.ProbeHash='e'*64;$c.ImageClaimed=$false
+        $client=[object]::new()
+        [Fleetory.Pilot.AuditHistoricalProbeProfile]::Begin($c,$client)
+        $imageReply=[Tuple[int,byte[],byte[]]]::new(0,[Text.Encoding]::ASCII.GetBytes('sha256:'+('d'*64)+"`n"),[byte[]]::new(0))
+        $image=[Func[Tuple[int,byte[],byte[]]]]{return $imageReply}.GetNewClosure()
+        $null=[Fleetory.Pilot.AuditImageCustody]::Build($c,$client,[byte[]]@(1,2,3),$image)
+        $nonce=[Guid]::NewGuid().ToString('D')
+        $s=@{Id=$null;Session=$nonce;Name=('fleetory-immu-store-'+$nonce.Replace('-',''));Started=[DateTimeOffset]::UtcNow;Role='target'}
+        $c.Stores.Add($s)
+        $create=[Func[Tuple[int,byte[],byte[]]]]{return [Tuple[int,byte[],byte[]]]::new(0,[Text.Encoding]::ASCII.GetBytes(('a'*64)+"`n"),[byte[]]::new(0))}
+        $null=[Fleetory.Pilot.AuditContainerCustody]::Create($c,$s,$client,$create)
+        return @{Context=$c;Store=$s;Client=$client;Calls=0;Throw=$false;MutateInput=$false;MutateArgs=$false;MutateStore=$false;LargeOutput=$false;LargeError=$false;
+            NullReply=$false;Reply=[Tuple[int,byte[],byte[]]]::new(0,[Text.Encoding]::UTF8.GetBytes('{"category":"model"}'),[byte[]]::new(0));Delivery=$null}
+    }
+    function Invoke-HistoricalProfileModel($Model,[string]$ProbeMode='audit-health',[byte[]]$Bytes=([Text.Encoding]::UTF8.GetBytes('{"generated":"private"}'))){
+        $operation=[Func[string[],byte[],Tuple[int,byte[],byte[]]]]{param([string[]]$Arguments,[byte[]]$InputBytes)
+            $Model.Calls++;$Model.Delivery=$InputBytes
+            Check (($Arguments -join '|') -ceq ('exec|-i|-e|SSL_CERT_FILE=/tmp/ca.pem|-e|SSL_CERT_DIR=/tmp/empty-ca-dir|'+$Model.Store.Id+'|dotnet|/tool/ServerBackendProbe.dll|'+$ProbeMode)) 'historical-fixed-argv'
+            if($Model.Throw){throw 'Generated native transport loss.'}
+            if($Model.MutateInput){$InputBytes[0]=$InputBytes[0] -bxor 1}
+            if($Model.MutateArgs){$Arguments[-1]='foreign-mode'}
+            if($Model.MutateStore){$Model.Store.Id='b'*64}
+            if($Model.LargeOutput){return [Tuple[int,byte[],byte[]]]::new(0,[byte[]]::new(262145),[byte[]]::new(0))}
+            if($Model.LargeError){return [Tuple[int,byte[],byte[]]]::new(0,[byte[]]::new(0),[byte[]]::new(4097))}
+            if($Model.NullReply){return $null}
+            return $Model.Reply
+        }.GetNewClosure()
+        return [Fleetory.Pilot.AuditHistoricalProbeProfile]::Invoke($Model.Context,$Model.Store,$Model.Client,$ProbeMode,$Bytes,$operation)
+    }
+    $m=New-HistoricalProfileModel;$original=[Text.Encoding]::UTF8.GetBytes('{"generated":"private"}');$frozen=$original.Clone()
+    foreach($ProbeMode in @('audit-health','history-users','observation-history-read','observation-reader-denial')){
+        $reply=Invoke-HistoricalProfileModel $m $ProbeMode $original
+        Check ($reply.Item1 -eq 0 -and [Text.Encoding]::UTF8.GetString($reply.Item2) -ceq '{"category":"model"}') 'historical-opaque-native-reply'
+        Check ([Convert]::ToHexString($original) -ceq [Convert]::ToHexString($frozen)) 'historical-original-request-unchanged'
+        Check (@($m.Delivery|Where-Object {$_ -ne 0}).Count -eq 0) 'historical-private-delivery-cleared'
+    }
+    $reply.Item2[0]=0;Check ($m.Reply.Item2[0] -eq 123) 'historical-returned-reply-is-copy'
+    Check ([Fleetory.Pilot.AuditHistoricalProbeProfile]::Calls($m.Context,$m.Client) -eq 4) 'historical-count-retained'
+    Refused {[Fleetory.Pilot.AuditHistoricalProbeProfile]::Begin($m.Context,$m.Client)} 'historical-begin-cannot-reset'
+    foreach($ProbeMode in @('','AUDIT-HEALTH','history-seed','audit-publish','restore','/bin/sh','--help')){
+        Refused {Invoke-HistoricalProfileModel $m $ProbeMode} 'historical-arbitrary-command-refused'
+    }
+    foreach($size in @(0,131073)){
+        Refused {Invoke-HistoricalProfileModel $m 'audit-health' ([byte[]]::new($size))} 'historical-request-bound'
+    }
+    Check ($m.Calls -eq 4) 'historical-invalid-calls-never-enter-native'
+    foreach($kind in @('context','store','client','root','image','role','lifetime')){
+        $m=New-HistoricalProfileModel;$c=$m.Context;$s=$m.Store;$client=$m.Client
+        switch($kind){'context'{$m.Context=$c.Clone()};'store'{$m.Store=$s.Clone()};'client'{$m.Client=[object]::new()};'root'{$c.Root='foreign'};
+            'image'{$c.ImageId='sha256:'+('b'*64)};'role'{$s.Role='source'};'lifetime'{$c.LifetimeSeconds=3300}}
+        Refused {Invoke-HistoricalProfileModel $m} 'historical-original-live-objects-required'
+        Check ($m.Calls -eq 0) 'historical-foreign-context-no-native-operation'
+    }
+    foreach($kind in @('Throw','MutateInput','MutateArgs','MutateStore','LargeOutput','LargeError','NullReply')){
+        $m=New-HistoricalProfileModel;$m[$kind]=$true;$originalId=$m.Store.Id
+        Refused {Invoke-HistoricalProfileModel $m} 'historical-unknown-native-outcome'
+        Check ($m.Calls -eq 1) 'historical-unknown-attempt-consumed-before-native'
+        $m[$kind]=$false;$m.Store.Id=$originalId
+        Refused {Invoke-HistoricalProfileModel $m} 'historical-no-next-call-after-unknown'
+        Refused {[Fleetory.Pilot.AuditHistoricalProbeProfile]::Begin($m.Context,$m.Client)} 'historical-unknown-profile-not-renewed'
+        Check ($m.Calls -eq 1 -and [Fleetory.Pilot.AuditContainerCustody]::Id($m.Context,$m.Store,$m.Client) -ceq $originalId) 'historical-failure-preserves-cleanup-authority'
+        Check (@($m.Delivery|Where-Object {$_ -ne 0}).Count -eq 0) 'historical-failed-delivery-cleared'
+    }
+    $m=New-HistoricalProfileModel
+    for($n=0;$n -lt 64;$n++){$null=Invoke-HistoricalProfileModel $m}
+    Refused {Invoke-HistoricalProfileModel $m} 'historical-native-call-count-bound'
+    Check ($m.Calls -eq 64) 'historical-count-bound-before-native'
     $script:imageModel=$null
     $script:custodyModel=$null
 }finally{
@@ -395,5 +464,5 @@ try{
         Remove-Item -LiteralPath $owned.FullName -Recurse -Force
     }
 }
-Write-Output ('AUDIT RESOURCE OWNERSHIP PASS:'+ $count +' assertions;exclusive claim,foreign preservation,atomic publication,100 concurrent replacements,live raw container/image replies,untagged build,no-prune and consumed attempts.')
+Write-Output ('AUDIT RESOURCE OWNERSHIP PASS:'+ $count +' assertions;exclusive claim,foreign preservation,atomic publication,100 concurrent replacements,live raw container/image replies,untagged build,no-prune,closed historical probe profile and consumed attempts.')
 $global:LASTEXITCODE=0

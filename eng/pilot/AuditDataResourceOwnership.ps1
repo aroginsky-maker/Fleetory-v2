@@ -187,6 +187,71 @@ namespace Fleetory.Pilot {
             if(System.Threading.Interlocked.CompareExchange(ref claim.State,3,expectedState)!=expectedState) throw Refused("outcome");
         }
     }
+    // Closed historical native-probe profile; the creator keeps all Docker authority.
+    public static class AuditHistoricalProbeProfile {
+        private sealed class Profile {
+            internal readonly System.Collections.IDictionary Context;
+            internal readonly object Client;
+            internal readonly object[] Values;
+            internal readonly int Process=Environment.ProcessId;
+            internal readonly long Started=System.Diagnostics.Stopwatch.GetTimestamp();
+            internal readonly System.Collections.Generic.List<Tuple<string,byte[],Tuple<int,byte[],byte[]>>> Replies=new();
+            internal int Busy, Calls;
+            internal bool Unknown;
+            internal Profile(System.Collections.IDictionary context,object client) {
+                Context=context;Client=client;Values=AuditNativeReply.Values(context,Keys);
+            }
+        }
+        private static readonly string[] Keys={"Fixture","Root","ImageName"};
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<object,Profile> Profiles=new();
+        private static InvalidOperationException Refused() => new("Historical probe profile refused.");
+        private static Profile Get(System.Collections.IDictionary context,object client) {
+            if(!Profiles.TryGetValue(context,out var p) || !ReferenceEquals(p.Context,context) || !ReferenceEquals(p.Client,client) ||
+                p.Process!=Environment.ProcessId || p.Unknown || !AuditNativeReply.Same(p.Values,AuditNativeReply.Values(context,Keys)) ||
+                System.Diagnostics.Stopwatch.GetElapsedTime(p.Started).TotalSeconds>=600) throw Refused();
+            return p;
+        }
+        public static void Begin(System.Collections.IDictionary context,object client) {
+            if(context==null || client==null || context["ImageId"]!=null || AuditImageCustody.Attempted(context) ||
+                context["Stores"] is not System.Collections.ICollection stores || stores.Count!=0) throw Refused();
+            Profiles.Add(context,new Profile(context,client)); // No reset, import or second begin.
+        }
+        private static string OwnedId(Profile p,System.Collections.IDictionary store) {
+            if(!Equals(p.Context["LifetimeSeconds"],660) || !Equals(store["Role"],"target")) throw Refused();
+            string image=AuditImageCustody.Id(p.Context,p.Client);
+            string id=AuditContainerCustody.Id(p.Context,store,p.Client);
+            if(!Equals(p.Context["ImageId"],image)) throw Refused();
+            return id;
+        }
+        public static int Calls(System.Collections.IDictionary context,object client) => Get(context,client).Calls;
+        public static Tuple<int,byte[],byte[]> Invoke(System.Collections.IDictionary context,System.Collections.IDictionary store,object client,
+            string mode,byte[] input,Func<string[],byte[],Tuple<int,byte[],byte[]>> operation) {
+            if(mode!="audit-health" && mode!="history-users" && mode!="observation-history-read" && mode!="observation-reader-denial") throw Refused();
+            if(input==null || input.Length==0 || input.Length>131072 || operation==null) throw Refused();
+            var p=Get(context,client);
+            if(System.Threading.Interlocked.CompareExchange(ref p.Busy,1,0)!=0) throw Refused();
+            byte[] frozen=(byte[])input.Clone(),delivery=null;
+            try {
+                string id=OwnedId(p,store);
+                if(p.Calls>=64) throw Refused();
+                var args=new[]{"exec","-i","-e","SSL_CERT_FILE=/tmp/ca.pem","-e","SSL_CERT_DIR=/tmp/empty-ca-dir",id,"dotnet","/tool/ServerBackendProbe.dll",mode};
+                var sent=(string[])args.Clone();delivery=(byte[])frozen.Clone();
+                p.Calls++;p.Unknown=true; // Consume before the actual fixed native operation.
+                var reply=AuditNativeReply.Hold(operation(sent,delivery));
+                p.Replies.Add(Tuple.Create(mode,System.Security.Cryptography.SHA256.HashData(frozen),reply));
+                if(reply.Item2.Length>262144 || reply.Item3.Length>4096 || !input.AsSpan().SequenceEqual(frozen) ||
+                    !delivery.AsSpan().SequenceEqual(frozen) || !sent.AsSpan().SequenceEqual(args) || OwnedId(p,store)!=id) throw Refused();
+                p.Unknown=false;
+                Get(context,client); // Deadline and original identity must still hold after the reply.
+                return AuditNativeReply.Hold(reply); // Opaque bytes, not application acceptance or OS fencing.
+            } catch {p.Unknown=true;throw;}
+            finally {
+                Array.Clear(frozen,0,frozen.Length);
+                if(delivery!=null) Array.Clear(delivery,0,delivery.Length);
+                System.Threading.Volatile.Write(ref p.Busy,0);
+            }
+        }
+    }
     public static class ExclusiveAuditDirectory {
         [DllImport("kernel32.dll", EntryPoint="CreateDirectoryW", CharSet=CharSet.Unicode, SetLastError=true)]
         [return: MarshalAs(UnmanagedType.Bool)]
