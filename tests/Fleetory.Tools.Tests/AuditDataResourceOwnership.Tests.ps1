@@ -399,9 +399,9 @@ try{
             NullReply=$false;Reply=[Tuple[int,byte[],byte[]]]::new(0,[Text.Encoding]::UTF8.GetBytes('{"category":"model"}'),[byte[]]::new(0));Delivery=$null}
     }
     function Invoke-HistoricalProfileModel($Model,[string]$ProbeMode='audit-health',[byte[]]$Bytes=([Text.Encoding]::UTF8.GetBytes('{"generated":"private"}'))){
+        $expectedId=$Model.Store.Id;$before=$Model.Calls
         $operation=[Func[string[],byte[],Tuple[int,byte[],byte[]]]]{param([string[]]$Arguments,[byte[]]$InputBytes)
-            $Model.Calls++;$Model.Delivery=$InputBytes
-            Check (($Arguments -join '|') -ceq ('exec|-i|-e|SSL_CERT_FILE=/tmp/ca.pem|-e|SSL_CERT_DIR=/tmp/empty-ca-dir|'+$Model.Store.Id+'|dotnet|/tool/ServerBackendProbe.dll|'+$ProbeMode)) 'historical-fixed-argv'
+            $Model.Calls++;$Model.Delivery=$InputBytes;$Model.Arguments=[string[]]$Arguments.Clone()
             if($Model.Throw){throw 'Generated native transport loss.'}
             if($Model.MutateInput){$InputBytes[0]=$InputBytes[0] -bxor 1}
             if($Model.MutateArgs){$Arguments[-1]='foreign-mode'}
@@ -411,7 +411,13 @@ try{
             if($Model.NullReply){return $null}
             return $Model.Reply
         }.GetNewClosure()
-        return [Fleetory.Pilot.AuditHistoricalProbeProfile]::Invoke($Model.Context,$Model.Store,$Model.Client,$ProbeMode,$Bytes,$operation)
+        try{return [Fleetory.Pilot.AuditHistoricalProbeProfile]::Invoke($Model.Context,$Model.Store,$Model.Client,$ProbeMode,$Bytes,$operation)}
+        finally{
+            if($Model.Calls -gt $before){
+                $Arguments=$Model.Arguments
+                Check (($Arguments -join '|') -ceq ('exec|-i|-e|SSL_CERT_FILE=/tmp/ca.pem|-e|SSL_CERT_DIR=/tmp/empty-ca-dir|'+$expectedId+'|dotnet|/tool/ServerBackendProbe.dll|'+$ProbeMode)) 'historical-fixed-argv'
+            }
+        }
     }
     $m=New-HistoricalProfileModel;$original=[Text.Encoding]::UTF8.GetBytes('{"generated":"private"}');$frozen=$original.Clone()
     foreach($ProbeMode in @('audit-health','history-users','observation-history-read','observation-reader-denial')){
