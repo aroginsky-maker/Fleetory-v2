@@ -3,6 +3,14 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'sonar-check-policy.ps1')
 
+$reportPath = Join-Path (Split-Path -Parent $PSScriptRoot) '.sonarqube/out/.sonar/report-task.txt'
+$receiptPath = Join-Path (Split-Path -Parent $reportPath) 'fleetory-verified-submission.json'
+# A failed invocation must not leave a previous generated success cache usable.
+if (Test-Path -LiteralPath $receiptPath) { Remove-Item -LiteralPath $receiptPath -Force }
+$runId = [Environment]::GetEnvironmentVariable('GITHUB_RUN_ID')
+$runAttempt = [Environment]::GetEnvironmentVariable('GITHUB_RUN_ATTEMPT')
+if ($runId -cnotmatch '^[1-9][0-9]{0,19}$' -or $runAttempt -cnotmatch '^[1-9][0-9]{0,19}$') { throw 'Exact GitHub run/attempt is required.' }
+
 $repository = [Environment]::GetEnvironmentVariable('GITHUB_REPOSITORY')
 $project = [Environment]::GetEnvironmentVariable('SONAR_PROJECT_KEY')
 $eventName = [Environment]::GetEnvironmentVariable('GITHUB_EVENT_NAME')
@@ -33,23 +41,7 @@ if ($revision -cnotmatch '^[0-9a-f]{40}$' -or
     throw 'Exact GitHub analysis revision/scope is required.'
 }
 
-$reportPath = Join-Path (Split-Path -Parent $PSScriptRoot) '.sonarqube/out/.sonar/report-task.txt'
-if (-not (Test-Path -LiteralPath $reportPath -PathType Leaf) -or
-    ((Get-Item -LiteralPath $reportPath).Length -lt 1 -or (Get-Item -LiteralPath $reportPath).Length -gt 16384)) {
-    throw 'This run has no bounded Sonar submission artifact.'
-}
-$submission = @{}
-foreach ($line in Get-Content -LiteralPath $reportPath) {
-    $pair = $line.Split('=', 2)
-    if ($pair.Count -ne 2 -or $submission.ContainsKey($pair[0])) {
-        throw 'Sonar submission artifact is malformed.'
-    }
-    $submission[$pair[0]] = $pair[1]
-}
-if ($submission['projectKey'] -cne $project -or
-    $submission['ceTaskId'] -cnotmatch '^[A-Za-z0-9_-]{1,128}$') {
-    throw 'Sonar submission project/task does not match this run.'
-}
+$submission = Get-FleetorySonarSubmission $reportPath $project
 $notBefore = [DateTimeOffset] (Get-Item -LiteralPath $reportPath).LastWriteTimeUtc
 $headers = @{ Accept = 'application/vnd.github+json'; 'X-GitHub-Api-Version' = '2022-11-28' }
 if ($token) { $headers.Authorization = 'Bearer ' + $token }
@@ -64,6 +56,17 @@ try {
         $check = Get-FleetorySonarCheck $response $revision $notBefore
         if ($null -ne $check) {
             Assert-FleetorySonarCheckClean $check $project $pullRequest $branch $notBefore
+            $verified = [ordered]@{
+                schema='fleetory.sonar-verified-submission.v1'; projectKey=$project; revision=$revision
+                pullRequest=$pullRequest; branch=$(if ($pullRequest) { '' } else { $branch })
+                ceTaskId=$submission['ceTaskId']; checkId=$check.id
+                completedAt=(Get-FleetorySonarCompletionTime $check).UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'")
+                submissionSha256=(Get-FileHash -LiteralPath $reportPath -Algorithm SHA256).Hash.ToLowerInvariant()
+                runId=$runId; runAttempt=$runAttempt
+            }
+            $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($verified | ConvertTo-Json -Compress) + "`n")
+            $stream = [IO.File]::Open($receiptPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+            try { $stream.Write($bytes, 0, $bytes.Length); $stream.Flush($true) } finally { $stream.Dispose() }
             Write-Host "SONAR ISSUE GATE PASS: revision $revision; check $($check.id); 0 new issues; 0 accepted issues."
             exit 0
         }

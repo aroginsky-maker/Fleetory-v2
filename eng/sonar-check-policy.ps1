@@ -87,3 +87,56 @@ function Assert-FleetorySonarCheckClean {
         }
     }
 }
+
+function Get-FleetorySonarSubmission {
+    param([string] $Path, [string] $ProjectKey)
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf) -or
+        (Get-Item -LiteralPath $Path).Length -lt 1 -or (Get-Item -LiteralPath $Path).Length -gt 16384) {
+        throw 'This run has no bounded Sonar submission artifact.'
+    }
+    $submission = @{}
+    foreach ($line in Get-Content -LiteralPath $Path) {
+        $pair = $line.Split('=', 2)
+        if ($pair.Count -ne 2 -or $submission.ContainsKey($pair[0])) { throw 'Sonar submission artifact is malformed.' }
+        $submission[$pair[0]] = $pair[1]
+    }
+    if ($submission['projectKey'] -cne $ProjectKey -or
+        $submission['ceTaskId'] -cnotmatch '^[A-Za-z0-9_-]{1,128}$') {
+        throw 'Sonar submission project/task does not match this run.'
+    }
+    return $submission
+}
+
+function Get-FleetoryVerifiedSonarSubmission {
+    param([string] $ReportPath, [string] $ReceiptPath, [string] $ProjectKey,
+          [string] $Revision, [string] $PullRequest, [string] $Branch)
+    $submission = Get-FleetorySonarSubmission $ReportPath $ProjectKey
+    if (-not (Test-Path -LiteralPath $ReceiptPath -PathType Leaf) -or
+        (Get-Item -LiteralPath $ReceiptPath).Length -lt 1 -or (Get-Item -LiteralPath $ReceiptPath).Length -gt 4096) { throw 'Current official Sonar verification receipt is unavailable.' }
+    $raw = [IO.File]::ReadAllText($ReceiptPath)
+    $value = $raw | ConvertFrom-Json
+    $runId = [Environment]::GetEnvironmentVariable('GITHUB_RUN_ID')
+    $runAttempt = [Environment]::GetEnvironmentVariable('GITHUB_RUN_ATTEMPT')
+    $keys = @('schema','projectKey','revision','pullRequest','branch','ceTaskId','checkId','completedAt','submissionSha256','runId','runAttempt')
+    if (@($value.PSObject.Properties.Name).Count -ne $keys.Count -or
+        @($value.PSObject.Properties.Name | Where-Object { $_ -notin $keys }).Count -ne 0 -or
+        $value.schema -cne 'fleetory.sonar-verified-submission.v1' -or $Revision -cnotmatch '^[a-f0-9]{40}$' -or
+        $value.revision -cne $Revision -or $value.projectKey -cne $ProjectKey -or
+        $value.pullRequest -cne $PullRequest -or $value.branch -cne $Branch -or
+        $value.ceTaskId -cne $submission['ceTaskId'] -or
+        ($value.checkId -isnot [int] -and $value.checkId -isnot [long]) -or $value.checkId -le 0 -or
+        $value.submissionSha256 -cne (Get-FileHash -LiteralPath $ReportPath -Algorithm SHA256).Hash.ToLowerInvariant() -or
+        $runId -cnotmatch '^[1-9][0-9]{0,19}$' -or $runAttempt -cnotmatch '^[1-9][0-9]{0,19}$' -or
+        $value.runId -isnot [string] -or $value.runId -cne $runId -or
+        $value.runAttempt -isnot [string] -or $value.runAttempt -cne $runAttempt) {
+        throw 'Official Sonar verification does not bind this submission/revision/scope.'
+    }
+    $completed = Get-FleetorySonarCompletionTime ([pscustomobject]@{completed_at=$value.completedAt})
+    $value.completedAt = $completed.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss.fffffff'Z'")
+    $canonical = [ordered]@{}
+    foreach ($key in $keys) { $canonical[$key] = $value.$key }
+    if ($raw.TrimEnd("`r", "`n") -cne ($canonical | ConvertTo-Json -Compress)) { throw 'Sonar verification receipt is not canonical.' }
+    $submitted = [DateTimeOffset](Get-Item -LiteralPath $ReportPath).LastWriteTimeUtc
+    if ($completed.ToUnixTimeSeconds() -lt $submitted.ToUnixTimeSeconds()) { throw 'Sonar verification predates this submission.' }
+    return $value
+}
