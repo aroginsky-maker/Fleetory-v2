@@ -1,5 +1,6 @@
 """Generated historical envelope contracts; no original archives, keys or backend."""
 import copy
+import io
 import json
 from pathlib import Path
 import subprocess
@@ -101,6 +102,45 @@ class HistoricalObservationTests(unittest.TestCase):
                 self.assertNotIn(b'observationSha256', outcome.stdout)
                 self.assertEqual(outcome.stderr.strip(),
                     b'Historical observation refused; no paths, values or credentials logged.')
+
+    def test_independent_history_sequence_and_attempt_binding(self):
+        auth = dict(category='unexpected', errorType='InvalidOperationException', authenticationDenied=True, controlStatus=500)
+        reader = dict(category='observation-reader-denial', readerWriteRefused=True)
+        restarted = dict(stopped=True, ready=True)
+        stages = (b'observe', b'authenticate', b'check-reader', b'restart', b'observe-after-restart')
+        replies = (self.observed, auth, reader, restarted, self.observed)
+
+        def execute(sequence, data, nonce=NONCE):
+            original = policy._creator_frame(policy.core.canonical(self.expected))
+            frames = (policy._creator_frame(b'R:' + stage + b':' + attempt.encode() + b'\n' + policy.core.canonical(reply))
+                      for stage, attempt, reply in zip(sequence, (NONCE, nonce, NONCE, NONCE, NONCE), data))
+            return subprocess.run((sys.executable, '-I', '-S', '-B', policy.__file__, '--independent-controller', NONCE),
+                                  input=original + b''.join(frames), capture_output=True, timeout=8, check=False)
+
+        accepted = execute(stages, replies)
+        self.assertEqual(accepted.returncode, 0)
+        self.assertFalse(accepted.stderr)
+        output = io.BytesIO(accepted.stdout)
+        self.assertEqual(policy._creator_read(output), policy.READY)
+        self.assertEqual(tuple(policy._creator_read(output) for _ in stages), stages)
+        decision = json.loads(policy._creator_read(output))
+        self.assertTrue(decision['authenticationRefused'])
+        self.assertTrue(decision['readerWriteRefused'])
+        self.assertTrue(decision['restartPreservedObservation'])
+        self.assertEqual(decision['before']['observationSha256'], decision['after']['observationSha256'])
+        self.assertFalse(output.read(1))
+
+        reused = 'abcdefab-1234-4123-8123-000000000001'
+        rejected = [
+            execute(stages, replies, reused),
+            execute((stages[0], *stages[:4]), replies),
+            execute(stages, (self.observed, dict(auth, controlStatus=500.0), reader, restarted, self.observed)),
+            execute(stages, (self.observed, auth, dict(reader, readerWriteRefused=False), restarted, self.observed)),
+            execute(stages, (self.observed, auth, reader, dict(restarted, ready=False), self.observed)),
+        ]
+        for result in rejected:
+            self.assertEqual(result.returncode, 1)
+            self.assertNotIn(b'observationSha256', result.stdout)
 
     def test_strict_and_historical_protocols_do_not_accept_each_other(self):
         with self.assertRaises(ValueError):

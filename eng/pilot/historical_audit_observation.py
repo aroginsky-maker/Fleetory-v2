@@ -259,8 +259,13 @@ def _run_worker(engine, operation, fault, request, executable_pin, source_pins):
 # A separate application controller for one generated historical observation.
 # These private frames convey data and a fixed observation request only.
 CREATOR_LIMIT_SECONDS = 55
-CREATOR_FLOWS = ('complete', 'controller-exit', 'lease-expired')
+HANDOFF_EXIT = 'between-operations-exit'
+CREATOR_FLOWS = ('complete', 'controller-exit', 'lease-expired', HANDOFF_EXIT)
 OBSERVE_REQUEST = b'observe'
+AUTH_REQUEST = b'authenticate'
+READER_REQUEST = b'check-reader'
+RESTART_REQUEST = b'restart'
+POST_RESTART_REQUEST = b'observe-after-restart'
 LIVE_STATUS = b'alive'
 
 
@@ -291,6 +296,35 @@ def _creator_write(stream, data):
     stream.flush()
 
 
+def _native_payload(frame, stage, nonce):
+    prefix = b'R:' + stage + b':' + nonce.encode('ascii') + b'\n'
+    packet.require(frame.startswith(prefix))
+    return frame[len(prefix):]
+
+
+def _request_native_value(source, sink, stage, nonce):
+    _creator_write(sink, stage)
+    return _native_payload(_creator_read(source), stage, nonce)
+
+
+def _finish_history_observation(source, sink, nonce, expected_bytes, reply):
+    pin = packet.digest(expected_bytes)
+    before = observe(expected_bytes, pin, _native_payload(reply, OBSERVE_REQUEST, nonce))
+    auth = packet.strict_json(_request_native_value(source, sink, AUTH_REQUEST, nonce), 512)
+    packet.keys(auth, 'category errorType authenticationDenied controlStatus')
+    packet.require(auth['category'] == 'unexpected' and auth['errorType'] == 'InvalidOperationException' and
+                   auth['authenticationDenied'] is True and type(auth['controlStatus']) is int and auth['controlStatus'] == 500)
+    reader = packet.strict_json(_request_native_value(source, sink, READER_REQUEST, nonce), 512)
+    packet.keys(reader, 'category readerWriteRefused')
+    packet.require(reader['category'] == 'observation-reader-denial' and reader['readerWriteRefused'] is True)
+    restart = packet.strict_json(_request_native_value(source, sink, RESTART_REQUEST, nonce), 512)
+    packet.keys(restart, 'stopped ready')
+    packet.require(restart['stopped'] is True and restart['ready'] is True)
+    after = observe(expected_bytes, pin, _request_native_value(source, sink, POST_RESTART_REQUEST, nonce))
+    packet.require(before['observationSha256'] == after['observationSha256'] and not source.read(1))
+    return dict(before=before, after=after, authenticationRefused=True, readerWriteRefused=True, restartPreservedObservation=True)
+
+
 def _application_controller(nonce):
     packet.identity(nonce)
     source, sink = sys.stdin.buffer, sys.stdout.buffer
@@ -306,9 +340,7 @@ def _application_controller(nonce):
         packet.require(_creator_read(source) == b'refuse' and not source.read(1))
         response = b'refused'
     else:
-        packet.require(reply.startswith(b'R') and not source.read(1))
-        result = observe(expected_bytes, packet.digest(expected_bytes), reply[1:])
-        response = core.canonical(result)
+        response = core.canonical(_finish_history_observation(source, sink, nonce, expected_bytes, reply))
     _creator_write(sink, response)
     return 0
 
@@ -433,15 +465,30 @@ def _creator_dialog(link, flow, nonce):
         link.child.stdin.close()
         packet.require(link.receive_application() == b'refused')
         return None
-    packet.require(decision.startswith(b'R'))
-    link.send_application(decision)
+    return _relay_history_sequence(link, flow, nonce, decision)
+
+
+def _relay_history_sequence(link, flow, nonce, first_reply):
+    _native_payload(first_reply, OBSERVE_REQUEST, nonce)
+    link.send_application(first_reply)
+    for stage in (AUTH_REQUEST, READER_REQUEST, RESTART_REQUEST, POST_RESTART_REQUEST):
+        packet.require(link.receive_application() == stage)
+        link.live()
+        _creator_write(sys.stdout.buffer, stage)
+        reply = link.receive_owner()
+        _native_payload(reply, stage, nonce)
+        if flow == HANDOFF_EXIT and stage == AUTH_REQUEST:
+            # The checked controller still awaits the reply. Consume this attempt without delivery or retry.
+            link.live()
+            return None
+        link.send_application(reply)
     link.child.stdin.close()
-    result = packet.strict_json(link.receive_application(), core.MAX_BODY)
-    return result
+    return packet.strict_json(link.receive_application(), core.MAX_BODY)
 
 
 def _run_creator_controller(engine, flow, nonce, executable_pin, source_pins):
     packet.require(flow in CREATOR_FLOWS)
+    stops_controller = flow in ('controller-exit', HANDOFF_EXIT)
     packet.identity(nonce)
     child = fence = link = end = None
     with ExitStack() as held:
@@ -455,7 +502,7 @@ def _run_creator_controller(engine, flow, nonce, executable_pin, source_pins):
             link = _CreatorControllerLink(engine, child, fence, tool)
             link.start()
             result = _creator_dialog(link, flow, nonce)
-            if flow == 'controller-exit':
+            if stops_controller:
                 end = fence.terminate()
             code = link.terminal_code()
         finally:
@@ -471,11 +518,12 @@ def _run_creator_controller(engine, flow, nonce, executable_pin, source_pins):
             packet.require(failure is None and (child is None or end is not None and end['noRunningMembersVerified']))
         for pin in (tool, *pins):
             pin.check()
-        packet.require(child.returncode == code and (code != 0) == (flow == 'controller-exit'))
-        proof = dict(schema='fleetory.historical-independent-controller.v1', nonce=nonce, flow=flow,
+        packet.require(child.returncode == code and (code != 0) == stops_controller)
+        proof = dict(schema='fleetory.historical-independent-controller.v2', nonce=nonce, flow=flow,
             controllerPid=child.pid, supervisorPid=os.getpid(), childIdentityVerified=True,
             controllerMembersAbsent=True, controllerExitObservedHeld=True, fence=end['kind'], controllerExitCode=code,
-            applicationResult=result, lateApplicationRequestRefused=flow == 'lease-expired')
+            applicationResult=result, lateApplicationRequestRefused=flow == 'lease-expired',
+            interruptedNativeOperation=AUTH_REQUEST.decode('ascii') if flow == HANDOFF_EXIT else None)
         _creator_write(sys.stdout.buffer, core.canonical(proof))
     return 0
 

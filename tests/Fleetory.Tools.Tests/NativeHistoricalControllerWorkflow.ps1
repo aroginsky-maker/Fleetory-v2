@@ -271,8 +271,12 @@ function Invoke-NativeHistoricalControllerWorkflow($Source,$Foreign){
     $independent=Invoke-GeneratedController $plan $packet -Resources 1 -Failure 'independent-complete'
     $app=$independent.independentController
     Assert-ImmuData ($app.flow -ceq 'complete' -and $app.creatorAliveDuringCleanup -eq $true -and $app.controllerMembersAbsent -eq $true -and
-        $app.childIdentityVerified -eq $true -and $app.controllerExitObservedHeld -eq $true -and $app.controllerExitCode -eq 0 -and $app.nativeObservationCalls -eq 1 -and
-        $app.applicationResult.observationSha256 -ceq $before.Parsed.observationSha256 -and
+        $app.childIdentityVerified -eq $true -and $app.controllerExitObservedHeld -eq $true -and $app.controllerExitCode -eq 0 -and $app.nativeObservationCalls -eq 3 -and
+        ($app.nativeStages -join '|') -ceq 'observe|authenticate|check-reader|restart|observe-after-restart' -and
+        $app.applicationResult.before.observationSha256 -ceq $before.Parsed.observationSha256 -and
+        $app.applicationResult.after.observationSha256 -ceq $before.Parsed.observationSha256 -and
+        $app.applicationResult.authenticationRefused -eq $true -and $app.applicationResult.readerWriteRefused -eq $true -and
+        $app.applicationResult.restartPreservedObservation -eq $true -and
         $app.creatorPid -ne $app.controllerPid -and $independent.restartPreservedObservation -eq $true) 'controller-independent-positive'
     $died=(Invoke-GeneratedController $plan $packet 'controller-independent-controller-exit' 1 'independent-controller-exit').independentController
     Assert-ImmuData ($died.flow -ceq 'controller-exit' -and $died.creatorAliveDuringCleanup -eq $true -and
@@ -283,6 +287,15 @@ function Invoke-NativeHistoricalControllerWorkflow($Source,$Foreign){
         $expired.childIdentityVerified -eq $true -and $expired.controllerExitObservedHeld -eq $true -and $expired.controllerMembersAbsent -eq $true -and $expired.controllerExitCode -eq 0 -and
         $expired.lateApplicationRequestRefused -eq $true -and $expired.controllerAliveAfterCleanup -eq $true -and
         $null -eq $expired.applicationResult -and $expired.nativeObservationCalls -eq 0 -and $expired.creatorPid -ne $expired.controllerPid) 'controller-independent-expiry'
+    $script:stage='controller-independent-handoff-exit'
+    $cut=Invoke-GeneratedController $plan $packet 'controller-independent-between-operations-exit' 1 'independent-between-operations-exit'
+    $handoff=$cut.independentController
+    Assert-ImmuData ($handoff.flow -ceq 'between-operations-exit' -and $handoff.creatorAliveDuringCleanup -eq $true -and
+        $handoff.childIdentityVerified -eq $true -and $handoff.controllerExitObservedHeld -eq $true -and
+        $handoff.controllerMembersAbsent -eq $true -and $handoff.controllerExitCode -ne 0 -and
+        $handoff.interruptedNativeOperation -ceq 'authenticate' -and $cut.independentNativeOutcomeUnconfirmed -ceq 'authenticate' -and
+        ($handoff.nativeStages -join '|') -ceq 'observe|authenticate' -and $handoff.nativeObservationCalls -eq 2 -and
+        $null -eq $handoff.applicationResult -and $handoff.creatorPid -ne $handoff.controllerPid) 'controller-independent-handoff-exit'
     $script:stage='controller-code-probe-refusals'
     foreach($name in @('codeSha256','probeSha256')){
         $bad=($plan|ConvertTo-Json -Depth 8)|ConvertFrom-Json -AsHashtable;$bad[$name]='0'*64
@@ -326,14 +339,15 @@ function Invoke-NativeHistoricalControllerWorkflow($Source,$Foreign){
     Assert-ImmuData $denied 'controller-foreign-lifetime-refused';Read-AuditDataStore $context $Foreign
     $after=Read-HistoricalObservation $Source $expected
     Assert-ImmuData ($after.Parsed.observationSha256 -ceq $before.Parsed.observationSha256) 'controller-source-unchanged'
-    Assert-ImmuData ($script:controllerCaseNonces.Count -eq 24 -and -not $script:controllerCaseNonces.Contains($fixture) -and
+    Assert-ImmuData ($script:controllerCaseNonces.Count -eq 25 -and -not $script:controllerCaseNonces.Contains($fixture) -and
         (ConvertTo-Json $plan -Depth 8 -Compress) -ceq $parentPlan -and
         (ConvertTo-Json $packet -Depth 8 -Compress) -ceq $parentPacket) 'controller-distinct-cases'
     return @{schema='fleetory.generated-historical-audit-controller.v1';verified=$true;scope='generated-only';privateOwnerPipeVerified=$true;
-        knownEvents=4;nullMembersPreserved=1;nativeTransactions=5;controllerCases=24;faultCleanupCases=15;comparisonWorkerFaultCases=2;dotnetObservationLeafFaultCases=2;dotnetOtherModeFaultCases=6;typedRefusals=7;nativeArchiveCorruptionRefused=$true;
-        distinctOperationNonces=24;operationNoncesDifferFromSource=$true;sourceIdentityPreserved=$true;parentInputsUnchanged=$true;
-        historicalWorkerCommandsPinned=$true;historicalWorkerRawRepliesRetained=$true;historicalWorkerOsFenceVerified=$false;historicalComparisonWorkerFenceVerified=$true;comparisonWorkerAbruptExitVerified=$true;comparisonWorkerPrematureEofVerified=$true;dotnetObservationLeafExitVerified=$true;dotnetObservationLeafEarlyEofVerified=$true;dotnetObservationLeafAbruptExitVerified=$true;dotnetAllModeExitsVerified=$true;dotnetAllModeEarlyEofAndAbruptExitVerified=$true;dotnetTransportLoss=$transport;independentCreatorCases=3;
+        knownEvents=4;nullMembersPreserved=1;nativeTransactions=5;controllerCases=25;faultCleanupCases=16;comparisonWorkerFaultCases=2;dotnetObservationLeafFaultCases=2;dotnetOtherModeFaultCases=6;typedRefusals=7;nativeArchiveCorruptionRefused=$true;
+        distinctOperationNonces=25;operationNoncesDifferFromSource=$true;sourceIdentityPreserved=$true;parentInputsUnchanged=$true;
+        historicalWorkerCommandsPinned=$true;historicalWorkerRawRepliesRetained=$true;historicalWorkerOsFenceVerified=$false;historicalComparisonWorkerFenceVerified=$true;comparisonWorkerAbruptExitVerified=$true;comparisonWorkerPrematureEofVerified=$true;dotnetObservationLeafExitVerified=$true;dotnetObservationLeafEarlyEofVerified=$true;dotnetObservationLeafAbruptExitVerified=$true;dotnetAllModeExitsVerified=$true;dotnetAllModeEarlyEofAndAbruptExitVerified=$true;dotnetTransportLoss=$transport;independentCreatorCases=4;
         independentControllerObservationVerified=$true;independentCreatorControllerDeathCleanupVerified=$true;
+        independentControllerFullSequenceVerified=$true;independentControllerHandoffExitCleanupVerified=$true;unconfirmedNativeOutcomeNotReplayed=$true;
         independentCreatorLiveLeaseExpiryCleanupVerified=$true;lateIndependentControllerReplayRefused=$true;codeInventoryV2Matched=$true;publishedProbeBundleMatched=$true;containerProbeBundleMatched=$true;revisionMismatchRefused=$true;probeBundleMismatchRefused=$true;
         foreignLifetimeRefused=$true;copiedContextRefusedBeforeLookup=$true;sourceUnchanged=$true;nativeOwnerCleanupVerified=$true;nativePartialBuildReplyRefused=$true;nativeImageIdAdoptionRefused=$true;nativeForeignImageReadbackRefused=$true;nativeUntaggedImageWitnessDisposed=$true;nativeImageNoPruneVerified=$true;nativeImageRemovalReplayRefused=$true;partialNativeCreateReplyRefused=$true;unknownCreateNameAdoptionRefused=$true;liveCompleteReplyWitnessDisposed=$true;containerRemovalReplayRefused=$true;nativeAutoRemovedAbsenceVerified=$true;alreadyAbsentCleanupPerformedNoRm=$true;targetLifetimeSeconds=660;nativeDeadlineSeconds=600;
         originalInputsRead=$false;originalPrivatePkiUsed=$false;sourceVpsAccessed=$false;externalGatesAuthenticated=$false;exclusiveUseLedgerVerified=$false;

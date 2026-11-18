@@ -316,15 +316,22 @@ creator loss and daemon or host loss remain open.
 
 The independent creator profile keeps the real container, image and payload
 creation and cleanup in the original PowerShell process. A distinct, measured
-Python application controller validates the expectation, requests one fixed
-historical read, and decides whether its native result matches. The creator
+Python application controller validates the expectation and requests the fixed
+sequence of historical read, authentication denial, reader-write denial,
+restart and post-restart read. It verifies both typed refusals and checks that
+the two observations have the same fingerprint. The creator
 verifies the target signatures and sends a projected producer identity instead
 of passing on Docker identifiers, credentials or cleanup authority. The
-private channel permits a bounded request, its reply and terminal evidence.
+private channel binds every bounded reply to the operation and attempt. The
+creator consumes each operation once and checks the same monotonic lease before
+and after its native call.
 The controller has no Docker command interface in this profile.
 
 The generated profile exercises normal completion, verified application
-controller death and a five-second creator-owned lease expiry. The wrapper
+controller death and a five-second creator-owned lease expiry. A separate
+handoff test terminates the held controller after the creator executes the
+authentication check and before the controller receives its reply. The creator
+keeps that request unconfirmed, performs no later operation and cleans up. The wrapper
 holds the actual controller process and verifies absence of its owned group or
 Job members before returning terminal evidence. On Linux it observes the
 controller exit without reaping until the group check. The creator closes its
