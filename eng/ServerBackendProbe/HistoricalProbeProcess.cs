@@ -8,7 +8,7 @@ using Microsoft.Win32.SafeHandles;
 namespace ServerBackendProbe;
 
 // A private Linux fixture entrypoint for exactly one real application operation.
-internal static class HistoricalProbeProcess
+internal static partial class HistoricalProbeProcess
 {
     internal const string Mode = "observation-history-read";
     private const string EntryAssembly = "/tool/ServerBackendProbe.dll";
@@ -32,7 +32,7 @@ internal static class HistoricalProbeProcess
                 if (request.Length < 2 || request[0] > 2)
                     throw Refused();
                 var result = await RunOwnedAsync(request[0], request.AsMemory(1), cancellation);
-                Console.WriteLine(JsonSerializer.Serialize(result));
+                await Console.Out.WriteLineAsync(JsonSerializer.Serialize(result).AsMemory(), cancellation);
                 return 0;
             }
             finally
@@ -42,7 +42,7 @@ internal static class HistoricalProbeProcess
         }
         catch (Exception)
         {
-            Console.Error.WriteLine("Historical probe process refused.");
+            await Console.Error.WriteLineAsync("Historical probe process refused.");
             return 1;
         }
     }
@@ -83,7 +83,7 @@ internal static class HistoricalProbeProcess
         }
         catch (Exception)
         {
-            Console.Error.WriteLine("Historical probe leaf refused.");
+            await Console.Error.WriteLineAsync("Historical probe leaf refused.");
             return 1;
         }
     }
@@ -98,29 +98,34 @@ internal static class HistoricalProbeProcess
         };
         command.ArgumentList.Add(EntryAssembly);
         command.ArgumentList.Add("--historical-leaf");
+        var trust = ReadPrivateFixtureTrust();
         command.Environment.Clear();
-        // OpenSSL-backed .NET chain evaluation requires a fixed home for the unmapped fixture UID.
-        command.Environment.Add("HOME", "/tmp");
-        command.Environment.Add("SSL_CERT_FILE", "/tmp/ca.pem");
-        command.Environment.Add("SSL_CERT_DIR", "/tmp/empty-ca-dir");
+        command.Environment.Add("HOME", trust.Home);
+        command.Environment.Add("SSL_CERT_FILE", trust.Certificate);
+        command.Environment.Add("SSL_CERT_DIR", trust.EmptyStore);
         using var process = Process.Start(command) ?? throw Refused();
         using var input = process.StandardInput.BaseStream;
-        using var held = Open(process.Id);
+        var descriptor = PidfdOpen(process.Id, 0);
+        if (descriptor < 0)
+            throw Refused();
+        using var held = new SafeFileHandle(new IntPtr(descriptor), ownsHandle: true);
         var bound = false;
+        bool clean;
+        object evidence;
         try
         {
             var stdout = process.StandardOutput.BaseStream;
             var ready = new byte[Ready.Length];
             await stdout.ReadExactlyAsync(ready, cancellation);
-            if (!ready.AsSpan().SequenceEqual(Ready) || HasExited(held, 0) || process.HasExited)
+            if (!ready.AsSpan().SequenceEqual(Ready) || HasExited(descriptor, 0) || process.HasExited)
                 throw Refused();
             var birth = ObserveOwnedBirth(process.Id, executable);
-            if (ObserveOwnedBirth(process.Id, executable) != birth || HasExited(held, 0) || process.HasExited)
+            if (ObserveOwnedBirth(process.Id, executable) != birth || HasExited(descriptor, 0) || process.HasExited)
                 throw Refused();
             bound = true;
 
             if (fault == 2)
-                Signal(held);
+                Signal(held, descriptor);
             else
                 await SendAsync(input, request, fault == 1, cancellation);
             await input.DisposeAsync();
@@ -128,9 +133,9 @@ internal static class HistoricalProbeProcess
             var errorTask = ReceiveAsync(process.StandardError.BaseStream, 4096, cancellation);
             await Task.WhenAll(replyTask, errorTask, process.WaitForExitAsync(cancellation));
             var reply = await replyTask;
-            if (!HasExited(held, 0) || (await errorTask).Length != 0 || !MatchesOutcome(fault, process.ExitCode, reply.Length))
+            if (!HasExited(descriptor, 0) || (await errorTask).Length != 0 || !MatchesOutcome(fault, process.ExitCode, reply.Length))
                 throw Refused();
-            return new
+            evidence = new
             {
                 schema = "fleetory.historical-dotnet-probe.v1",
                 mode = Mode,
@@ -144,12 +149,63 @@ internal static class HistoricalProbeProcess
         }
         finally
         {
-            if (bound && !HasExited(held, 0))
-                Signal(held);
-            await input.DisposeAsync();
-            if (bound && !HasExited(held, 3000))
-                throw Refused();
+            clean = await CloseOwnedAsync(input, held, descriptor, bound);
         }
+        if (!clean)
+            throw Refused();
+        return evidence;
+    }
+
+    private static async Task<bool> CloseOwnedAsync(Stream input, SafeFileHandle held, int descriptor, bool bound)
+    {
+        bool inputClosed;
+        try
+        {
+            await input.DisposeAsync();
+            inputClosed = true;
+        }
+        catch (Exception)
+        {
+            // A pipe failure cannot remove the obligation to stop the verified leaf.
+            inputClosed = false;
+        }
+        try
+        {
+            if (!bound || HasExited(descriptor, 0))
+                return inputClosed;
+            Signal(held, descriptor);
+            return HasExited(descriptor, 3000) && inputClosed;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
+    private static (string Home, string Certificate, string EmptyStore) ReadPrivateFixtureTrust()
+    {
+        if (!OperatingSystem.IsLinux())
+            throw Refused();
+        var parent = Path.TrimEndingDirectorySeparator(Path.GetTempPath());
+        var certificate = Path.Combine(parent, "ca.pem");
+        var empty = Path.Combine(parent, "empty-ca-dir");
+        if (Environment.GetEnvironmentVariable("SSL_CERT_FILE") != certificate || Environment.GetEnvironmentVariable("SSL_CERT_DIR") != empty)
+            throw Refused();
+        var directory = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+        RequirePrivatePath(parent, directory, FileAttributes.Directory);
+        RequirePrivatePath(certificate, UnixFileMode.UserRead | UnixFileMode.UserWrite, 0);
+        RequirePrivatePath(empty, directory, FileAttributes.Directory);
+        if (Directory.EnumerateFileSystemEntries(empty).Any())
+            throw Refused();
+        return (parent, certificate, empty);
+    }
+
+    private static void RequirePrivatePath(string path, UnixFileMode mode, FileAttributes kind)
+    {
+        if (!OperatingSystem.IsLinux() ||
+            (File.GetAttributes(path) & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != kind ||
+            File.GetUnixFileMode(path) != mode)
+            throw Refused();
     }
 
     private static bool MatchesOutcome(byte fault, int exit, int replyLength) => fault switch
@@ -208,21 +264,15 @@ internal static class HistoricalProbeProcess
         return birth;
     }
 
-    private static SafeFileHandle Open(int pid)
+    private static void Signal(SafeFileHandle held, int descriptor)
     {
-        var fd = PidfdOpen(pid, 0);
-        return fd >= 0 ? new SafeFileHandle(new IntPtr(fd), ownsHandle: true) : throw Refused();
-    }
-
-    private static void Signal(SafeFileHandle held)
-    {
-        if (PidfdSendSignal(held, 9, IntPtr.Zero, 0) != 0 && !HasExited(held, 0))
+        if (PidfdSendSignal(held, 9, IntPtr.Zero, 0) != 0 && !HasExited(descriptor, 0))
             throw Refused();
     }
 
-    private static bool HasExited(SafeFileHandle held, int milliseconds)
+    private static bool HasExited(int descriptor, int milliseconds)
     {
-        var poll = new PollDescriptor(held.DangerousGetHandle().ToInt32());
+        var poll = new PollDescriptor(descriptor);
         var ready = Poll(ref poll, 1, milliseconds);
         if (ready < 0 || (ready != 0 && (poll.Returned & 1) == 0))
             throw Refused();
@@ -237,14 +287,14 @@ internal static class HistoricalProbeProcess
         internal short Returned = 0;
     }
 
-    [DllImport("libc", EntryPoint = "pidfd_open", SetLastError = true)]
-    private static extern int PidfdOpen(int pid, uint flags);
+    [LibraryImport("libc", EntryPoint = "pidfd_open", SetLastError = true)]
+    private static partial int PidfdOpen(int pid, uint flags);
 
-    [DllImport("libc", EntryPoint = "pidfd_send_signal", SetLastError = true)]
-    private static extern int PidfdSendSignal(SafeFileHandle fd, int signal, IntPtr info, uint flags);
+    [LibraryImport("libc", EntryPoint = "pidfd_send_signal", SetLastError = true)]
+    private static partial int PidfdSendSignal(SafeFileHandle fd, int signal, IntPtr info, uint flags);
 
-    [DllImport("libc", EntryPoint = "poll", SetLastError = true)]
-    private static extern int Poll(ref PollDescriptor descriptor, nuint count, int milliseconds);
+    [LibraryImport("libc", EntryPoint = "poll", SetLastError = true)]
+    private static partial int Poll(ref PollDescriptor descriptor, nuint count, int milliseconds);
 
     private static InvalidOperationException Refused() => new("Historical probe process refused.");
 }

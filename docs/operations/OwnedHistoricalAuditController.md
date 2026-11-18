@@ -283,7 +283,8 @@ request, holds the child with a pidfd, checks its executable, parent and birth
 before sending the private frame, and observes actual exit before publishing the
 result. Legacy program entrypoints and the other three controller modes retain
 their previous behavior. The child uses a fixed temporary home for .NET TLS chain evaluation and the
-existing fixture CA paths. The fault cases withhold the body or terminate the held
+existing fixture CA paths after checking user-only modes and rejecting links.
+Generated interop targets the held Linux descriptor without extracting its native handle. The fault cases withhold the body or terminate the held
 child before releasing it, and the original live controller verifies cleanup of
 its own target. A Docker transport failure cannot supply successful exit
 evidence. This covers one fixed leaf and its observed exit through the native
