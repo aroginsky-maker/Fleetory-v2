@@ -352,5 +352,21 @@ and requests no post-restart read. The live creator verifies cleanup of the
 owned resources. The surrounding test verifies that the source and foreign
 fixture remain. The original
 creator's live Docker custody remains required, including complete native
-replies at creation. Creator loss, daemon loss and host loss require separate
-work.
+replies at creation. A separate recovery coordinator now gates the historical profile's allocation
+and use. The PowerShell owner retains the context and original native replies
+from payload, image and container creation through cleanup. The held
+coordinator requests allocation, checks the receipt against the fixed
+per-attempt exchange, and asks the owner to run the historical sequence.
+Its receipt contains a digest bound to the fresh attempt and actual owned
+resources. Docker commands, paths, identifiers and credentials stay with
+the owner.
+
+The generated tests terminate the exact coordinator while it waits for
+admission and after it accepts the complete resource projection. They also
+exercise a five-second lease while the coordinator is still live. The owner
+finishes cleanup before rejecting the request sent after expiry. A normal
+handoff runs the existing independent application logic through all five
+stages and verifies cleanup. The tests check the actual generated image and
+container are absent and the source and foreign fixture survive. A separate
+witness still verifies that unknown creation replies confer no cleanup claim.
+Loss of the live resource owner, Docker daemon or host remains open.

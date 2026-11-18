@@ -5,7 +5,8 @@ param([Parameter(Mandatory)][string]$ExpectedPlanSha256,[string]$Python='',
         'dotnet-health-early-eof','dotnet-health-abrupt-exit','dotnet-users-early-eof','dotnet-users-abrupt-exit',
         'dotnet-denial-early-eof','dotnet-denial-abrupt-exit','dotnet-transport-loss',
         'independent-complete','independent-controller-exit','independent-lease-expired','independent-between-operations-exit',
-        'independent-restart-reply-lost','independent-restart-reply-malformed')][string]$FailurePoint='none',[switch]$PreparationOnly,[string]$PreparationGitPath='',
+        'independent-restart-reply-lost','independent-restart-reply-malformed',
+        'coordinator-before-acquire','coordinator-after-acquire','coordinator-lease-expired')][string]$FailurePoint='none',[switch]$PreparationOnly,[string]$PreparationGitPath='',
     [switch]$PayloadReservationOnly,[switch]$ResourceAcknowledgementOnly,[switch]$ProbeRuntimeAcknowledgementOnly,[switch]$ProbeRuntimeCreationOnly,[switch]$PublicProbePublicationOnly,[string]$PublicationDotnetPath='')
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
@@ -29,7 +30,7 @@ if($PreparationOnly -or $PayloadReservationOnly -or $ResourceAcknowledgementOnly
     }
     exit (Invoke-HistoricalPreparation $ExpectedPlanSha256 $Python $repo $PreparationGitPath)
 }
-foreach($helper in @('PilotNativeProcess.ps1','ProviderRecoveryTransport.ps1','ProviderRecoveryPolicy.ps1','ImmuDataRoundtripPolicy.ps1','AuditObservationPolicy.ps1','HistoricalAuditControllerPolicy.ps1')){. (Join-Path $PSScriptRoot $helper)}
+foreach($helper in @('PilotNativeProcess.ps1','ProviderRecoveryTransport.ps1','ProviderRecoveryPolicy.ps1','ImmuDataRoundtripPolicy.ps1','AuditObservationPolicy.ps1','HistoricalAuditControllerPolicy.ps1','HistoricalRecoveryCoordinator.ps1')){. (Join-Path $PSScriptRoot $helper)}
 foreach($helper in @('PilotDisposableTls.ps1','NativeSignerFixture.ps1','NativeAuditFixture.ps1','NativeWorkerRuntime.ps1','NativeAuditDataFixture.ps1')){. (Join-Path $testRoot $helper)}
 if(-not $Python){$Python=(Get-Command $(if($IsLinux){'python3'}else{'python'})).Source}
 $fixture=[Guid]::NewGuid().ToString('D');$root=Join-Path $repo ('artifacts/native-audit-controller-'+$fixture)
@@ -40,6 +41,7 @@ $stage='input';$refusal='operational';$failure=$false;$cleanup=$false;$proof=$nu
 $cleanupAttempted=$false;$independentAttempted=$false;$independentProof=$null
 $independentNativeStages=[Collections.Generic.List[string]]::new();$independentNativeOutcomeUnconfirmed=$null
 $restartReplyFault=$null
+$recoveryCoordinator=$null;$recoveryCoordinatorProof=$null
 $comparisonCalls=0;$comparisonFault=$null;$managedCalls=[hashtable]::new([StringComparer]::Ordinal);$managedFault=$null;$transportFault=$null;$managedApplicationRefusal=@{}
 $oldBuildKit=$env:DOCKER_BUILDKIT;$env:DOCKER_BUILDKIT='0'
 function Invoke-Docker([string[]]$Arguments,[byte[]]$InputBytes=$null,[int]$TimeoutSeconds=60,[switch]$AllowFailure){
@@ -177,16 +179,16 @@ function Send-IndependentFrame([IO.Stream]$Stream,[byte[]]$Bytes,[Threading.Canc
     }
     $null=$Stream.FlushAsync($Token).WaitAsync($Token).GetAwaiter().GetResult()
 }
-function Read-IndependentFrame([IO.Stream]$Stream,[Threading.CancellationToken]$Token){
+function Read-IndependentFrame([IO.Stream]$Stream,[Threading.CancellationToken]$Token,[int]$Maximum=184320){
     $header=[byte[]]::new(4)
     $null=$Stream.ReadExactlyAsync([Memory[byte]]::new($header),$Token).AsTask().WaitAsync($Token).GetAwaiter().GetResult()
     $size=[Net.IPAddress]::NetworkToHostOrder([BitConverter]::ToInt32($header,0))
-    Assert-ImmuData ($size -gt 0 -and $size -le 184320) 'independent-output-bound'
+    Assert-ImmuData ($size -gt 0 -and $size -le $Maximum) 'independent-output-bound'
     $bytes=[byte[]]::new($size)
     $null=$Stream.ReadExactlyAsync([Memory[byte]]::new($bytes),$Token).AsTask().WaitAsync($Token).GetAwaiter().GetResult()
     return [Text.UTF8Encoding]::new($false,$true).GetString($bytes)
 }
-function New-IndependentControllerStart([string]$Flow){
+function New-IndependentControllerStart([string]$Flow,[ValidateSet('--independent-owner','--recovery-owner')][string]$Mode='--independent-owner'){
     $start=[Diagnostics.ProcessStartInfo]::new($comparisonPython)
     $start.UseShellExecute=$false;$start.CreateNoWindow=$true
     $start.RedirectStandardInput=$true;$start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true
@@ -197,7 +199,7 @@ function New-IndependentControllerStart([string]$Flow){
         if($null -ne $value){$start.Environment[$name]=$value}
     }
     $start.WorkingDirectory=$PSScriptRoot
-    foreach($part in @('-I','-S','-B',(Join-Path $PSScriptRoot 'historical_audit_observation.py'),'--independent-owner',
+    foreach($part in @('-I','-S','-B',(Join-Path $PSScriptRoot 'historical_audit_observation.py'),$Mode,
         $Flow,$plan.nonce,$comparisonPythonHash,$codeSnapshot.comparisonSourcePins)){
         $start.ArgumentList.Add($part)
     }
@@ -421,6 +423,21 @@ try{
     $resolved=$interpreter.ResolveLinkTarget($true)
     if($null -ne $resolved){$comparisonPython=$resolved.FullName}
     $comparisonPythonHash=(Get-HistoricalInputFileHash $comparisonPython 67108864).sha256
+    $coordinatorFlow=switch -CaseSensitive ($FailurePoint){
+        'independent-complete' {'complete'}
+        'coordinator-before-acquire' {'before-acquire'}
+        'coordinator-after-acquire' {'after-acquire'}
+        'coordinator-lease-expired' {'lease-expired'}
+    }
+    if($coordinatorFlow){
+        $stage='coordinator'
+        $recoveryCoordinator=Open-HistoricalRecoveryCoordinator $coordinatorFlow
+        if($coordinatorFlow -ceq 'before-acquire'){
+            $recoveryCoordinatorProof=Finish-HistoricalRecoveryCoordinator $recoveryCoordinator 'terminate'
+            Assert-ImmuData $false 'controller-coordinator-before-acquire'
+        }
+        Enter-HistoricalCoordinatorAllocation $recoveryCoordinator
+    }
     New-AuditDataPublicPayload $repo $context
     $published=Publish-NativeProbe $repo 'ServerBackendProbe' $root
     $context.ProbeHash=(Get-FileHash -LiteralPath (Join-Path $published 'ServerBackendProbe.dll') -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -441,6 +458,22 @@ try{
     try{$context.SigningPems.target=$key.ExportECPrivateKeyPem();[IO.File]::WriteAllText((Join-Path $root 'target-public.pem'),$key.ExportSubjectPublicKeyInfoPem(),[Text.UTF8Encoding]::new($false))}finally{$key.Dispose()}
     foreach($pem in @($context.Tls.ServerPrivateKeyPem,$context.Tls.ClientPrivateKeyPem,$context.SigningPems.target)){foreach($line in ($pem -split "`n")){if($line.Length -ge 40 -and -not $line.StartsWith('-----')){$canaries.Add($line.Substring(0,40))}}}
     $stage='container';$store=New-AuditDataStore $context 'target'
+    if($null -ne $recoveryCoordinator){
+        Set-HistoricalCoordinatorProjection $recoveryCoordinator
+        switch -CaseSensitive ($coordinatorFlow){
+            'after-acquire' {
+                $recoveryCoordinatorProof=Finish-HistoricalRecoveryCoordinator $recoveryCoordinator 'terminate'
+                Assert-ImmuData $false 'controller-coordinator-after-acquire'
+            }
+            'lease-expired' {
+                $recoveryCoordinatorProof=Remove-ExpiredHistoricalCoordinatorResources $recoveryCoordinator
+                Assert-ImmuData $false 'controller-coordinator-lease-expired'
+            }
+        }
+        Read-HistoricalCoordinatorWork $recoveryCoordinator
+        Assert-ImmuData ($recoveryCoordinator.lease.Elapsed.TotalSeconds -lt 5) 'coordinator-work-lease'
+        $recoveryCoordinator.workAdmitted=$true
+    }
     if($FailurePoint -ceq 'after-container'){throw 'Injected controller refusal.'}
     $stage='restore';$archive=[Convert]::FromBase64String($body.archiveBase64)
     Invoke-ControllerArchiveAction 'verify'
@@ -485,6 +518,9 @@ try{
         $comparisonCalls++
     }
     Assert-ImmuData ($first.observationSha256 -ceq $again.observationSha256) 'controller-stable-restart'
+    if($null -ne $recoveryCoordinator){
+        $recoveryCoordinatorProof=Finish-HistoricalRecoveryCoordinator $recoveryCoordinator 'completed'
+    }
     $proof=@{schema='fleetory.historical-audit-owned-observation.v1';verified=$true;historicalComparisonOnly=$true;observation=$again;
         nativeRestores=1;targetLifetimeSeconds=660;nativeDeadlineSeconds=600;historicalWorkerCommandsPinned=$true;historicalWorkerRawRepliesRetained=$true;historicalWorkerOsFenceVerified=$false;
         historicalComparisonWorkerFenceVerified=$true;historicalComparisonWorkerCalls=$comparisonCalls;
@@ -504,20 +540,26 @@ try{
     elseif($_.Exception.Message -ceq 'The immudb state signature is invalid.'){$refusal='controller-source-signature'}
     elseif($_.Exception.Message -ceq 'Injected controller refusal.'){$refusal='controller-injected-failure'}
 }finally{
-    if(-not $script:cleanupAttempted){Remove-OwnedHistoricalResources}
+    try{Close-HistoricalRecoveryCoordinator $recoveryCoordinator}finally{
+        if(-not $script:cleanupAttempted){Remove-OwnedHistoricalResources}
+    }
+    if($null -ne $recoveryCoordinatorProof){
+        $recoveryCoordinatorProof.ownerAliveDuringCleanup=$cleanup -and $recoveryCoordinatorProof.ownerPid -eq $PID
+    }
     if($null -ne $independentProof){
         $independentProof.creatorAliveDuringCleanup=$cleanup -and $independentProof.creatorPid -eq $PID
     }
-    $resources=@{fixture=$fixture;ids=@($context.Stores|ForEach-Object {$_.Id});image=$context.ImageName;payloadClaimed=($context.PayloadClaimed -or $context.PayloadRemoved);payloadRemoved=$context.PayloadRemoved;
+    $resources=@{fixture=$fixture;ids=@($context.Stores|ForEach-Object {$_.Id});image=$context.ImageName;imageId=$context.ImageId;payloadClaimed=($context.PayloadClaimed -or $context.PayloadRemoved);payloadRemoved=$context.PayloadRemoved;
         payloadAbsent=(-not (Test-Path -LiteralPath $root))}
     $context.Secrets.Clear();$context.SigningPems.Clear();$context.Tls=$null;$canaries.Clear();$archive=$body=$raw=$sourceState=$null
     $watch.Stop();$env:DOCKER_BUILDKIT=$oldBuildKit
 }
 if($failure -or -not $cleanup){
-    @{schema='fleetory.historical-audit-controller-cleanup.v1';stage=$stage;refusal=$refusal;cleanupVerified=$cleanup;resources=$resources;comparisonFault=$comparisonFault;dotnetFault=$managedFault;dotnetTransportFault=$transportFault;independentController=$independentProof;independentNativeOutcomeUnconfirmed=$independentNativeOutcomeUnconfirmed;nativeRestartReplyFault=$restartReplyFault;dotnetApplicationRefusal=$managedApplicationRefusal}|ConvertTo-Json -Compress -Depth 5
+    @{schema='fleetory.historical-audit-controller-cleanup.v1';stage=$stage;refusal=$refusal;cleanupVerified=$cleanup;resources=$resources;comparisonFault=$comparisonFault;dotnetFault=$managedFault;dotnetTransportFault=$transportFault;independentController=$independentProof;independentNativeOutcomeUnconfirmed=$independentNativeOutcomeUnconfirmed;nativeRestartReplyFault=$restartReplyFault;recoveryCoordinator=$recoveryCoordinatorProof;dotnetApplicationRefusal=$managedApplicationRefusal}|ConvertTo-Json -Compress -Depth 5
     [Console]::Error.WriteLine('Historical native controller refused; no input contents or credentials logged.')
     exit 1
 }
 $proof.cleanupVerified=$true;$proof.resources=$resources
+if($null -ne $recoveryCoordinatorProof){$proof.recoveryCoordinator=$recoveryCoordinatorProof}
 if($null -ne $independentProof){$proof.independentController=$independentProof}
 $proof|ConvertTo-Json -Compress -Depth 16

@@ -142,6 +142,33 @@ class HistoricalObservationTests(unittest.TestCase):
             self.assertEqual(result.returncode, 1)
             self.assertNotIn(b'observationSha256', result.stdout)
 
+    def test_recovery_coordinator_frame_scope_and_attempt(self):
+        nonce = NONCE.encode('ascii')
+        projection = b'a' * 64
+        frames = (b'admit:' + nonce, b'owned:' + projection, b'work:' + projection, b'completed')
+
+        def execute(parts, trailing=b''):
+            payload = b''.join(policy._creator_frame(part) for part in parts) + trailing
+            return subprocess.run((sys.executable, '-I', '-S', '-B', policy.__file__, '--recovery-coordinator', NONCE),
+                                  input=payload, capture_output=True, timeout=8, check=False)
+
+        for outcome in (b'completed', b'refused'):
+            result = execute((*frames[:3], outcome))
+            self.assertEqual(result.returncode, 0)
+            self.assertFalse(result.stderr)
+            output = io.BytesIO(result.stdout)
+            expected = (policy.READY, b'acquire:' + nonce, b'received:' + projection, b'run:' + projection, outcome)
+            self.assertEqual(tuple(policy._creator_read(output) for _ in expected), expected)
+            self.assertFalse(output.read(1))
+
+        for mutated in ((b'admit:' + b'0' * 36, *frames[1:]),
+                        (frames[0], b'owned:/var/run/docker.sock', *frames[2:]),
+                        (frames[0], b'owned:' + b'a' * 97, *frames[2:]),
+                        (*frames[:2], b'work:' + b'b' * 64, frames[3]),
+                        (*frames[:2], frames[0], frames[3])):
+            self.assertEqual(execute(mutated).returncode, 1)
+        self.assertEqual(execute(frames, b'extra').returncode, 1)
+
     def test_strict_and_historical_protocols_do_not_accept_each_other(self):
         with self.assertRaises(ValueError):
             policy.core.expectation(self.expected)

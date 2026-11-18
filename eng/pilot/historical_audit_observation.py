@@ -259,6 +259,8 @@ def _run_worker(engine, operation, fault, request, executable_pin, source_pins):
 # A separate application controller for one generated historical observation.
 # These private frames convey data and a fixed observation request only.
 CREATOR_LIMIT_SECONDS = 55
+COORDINATOR_LIMIT_SECONDS = 105
+COORDINATOR_FLOWS = ('complete', 'before-acquire', 'after-acquire', 'lease-expired')
 HANDOFF_EXIT = 'between-operations-exit'
 RESTART_UNCONFIRMED = 'restart-unconfirmed'
 CREATOR_FLOWS = ('complete', 'controller-exit', 'lease-expired', HANDOFF_EXIT, RESTART_UNCONFIRMED)
@@ -284,11 +286,11 @@ def _creator_exact(stream, count):
     return bytes(result)
 
 
-def _creator_read(stream):
+def _creator_read(stream, maximum=core.MAX_BODY):
     header = _creator_exact(stream, 4)
     packet.require(len(header) == 4)
     size = int.from_bytes(header, 'big')
-    packet.require(0 < size <= core.MAX_BODY)
+    packet.require(0 < size <= maximum)
     return _creator_exact(stream, size)
 
 
@@ -349,10 +351,11 @@ def _application_controller(nonce):
 class _CreatorControllerLink:
     """Owns the measured application's private streams and process-fence handle."""
 
-    def __init__(self, engine, child, fence, tool):
+    def __init__(self, engine, child, fence, tool, time_limit):
         self.child, self.fence, self.tool = child, fence, tool
         self.identity = fence.identity(child, tool)
         self.started = time.monotonic()
+        self.time_limit = time_limit
         self.offset = 0
         self.pumps = engine._Pumps(child, b'')
 
@@ -367,7 +370,7 @@ class _CreatorControllerLink:
             thread.start()
 
     def _remaining(self):
-        remaining = CREATOR_LIMIT_SECONDS - (time.monotonic() - self.started)
+        remaining = self.time_limit - (time.monotonic() - self.started)
         packet.require(remaining > 0 and not self.pumps.errors and not self.pumps.stderr)
         return remaining
 
@@ -384,12 +387,12 @@ class _CreatorControllerLink:
         thread.join(self._remaining())
         packet.require(not thread.is_alive())
 
-    def receive_owner(self):
+    def receive_owner(self, maximum=core.MAX_BODY):
         values = []
 
         def read():
             try:
-                values.append(_creator_read(sys.stdin.buffer.raw))
+                values.append(_creator_read(sys.stdin.buffer.raw, maximum))
             except (ValueError, OSError):
                 pass
 
@@ -416,11 +419,11 @@ class _CreatorControllerLink:
                 break
             time.sleep(0.01)
 
-    def receive_application(self):
+    def receive_application(self, maximum=core.MAX_BODY):
         self._wait_bytes(self.offset + 4)
         start = self.offset + 4
         size = int.from_bytes(self.pumps.stdout[self.offset:start], 'big')
-        packet.require(0 < size <= core.MAX_BODY)
+        packet.require(0 < size <= maximum)
         self._wait_bytes(start + size)
         self.offset = start + size
         return bytes(self.pumps.stdout[start:self.offset])
@@ -491,31 +494,28 @@ def _relay_history_sequence(link, flow, nonce, first_reply):
     return packet.strict_json(link.receive_application(), core.MAX_BODY)
 
 
-def _run_creator_controller(engine, flow, nonce, executable_pin, source_pins):
-    packet.require(flow in CREATOR_FLOWS)
-    interrupted_stage = {HANDOFF_EXIT: AUTH_REQUEST, RESTART_UNCONFIRMED: RESTART_REQUEST}.get(flow)
-    stops_controller = flow == 'controller-exit' or interrupted_stage is not None
+def _run_history_peer(engine, nonce, executable_pin, source_pins, mode, dialog, time_limit):
     packet.identity(nonce)
     child = fence = link = end = None
     with ExitStack() as held:
         tool, pins = _hold(held, engine, executable_pin, source_pins)
         command = SimpleNamespace(executable=tool,
-            arguments=('-I', '-S', '-B', str(pins[0].path), '--independent-controller', nonce),
+            arguments=('-I', '-S', '-B', str(pins[0].path), mode, nonce),
             directory=DIRECTORY, env=engine.environment(tool))
         try:
             child = engine._spawn(command)
             fence = engine._create_fence(child)
-            link = _CreatorControllerLink(engine, child, fence, tool)
+            link = _CreatorControllerLink(engine, child, fence, tool, time_limit)
             link.start()
-            result = _creator_dialog(link, flow, nonce)
-            if stops_controller:
+            result, stops_peer = dialog(link)
+            if stops_peer:
                 end = fence.terminate()
             code = link.terminal_code()
         finally:
             if end is None:
                 end, failure = engine._finish_owned(child, fence, link.pumps if link is not None else None)
             else:
-                # The group is already checked, and terminal_code observed Linux exit with WNOWAIT.
+                # The held Linux exit was observed without reaping until after the group check.
                 try:
                     child.wait(timeout=3)
                     link.pumps.finish()
@@ -524,13 +524,112 @@ def _run_creator_controller(engine, flow, nonce, executable_pin, source_pins):
             packet.require(failure is None and (child is None or end is not None and end['noRunningMembersVerified']))
         for pin in (tool, *pins):
             pin.check()
-        packet.require(child.returncode == code and (code != 0) == stops_controller)
-        proof = dict(schema='fleetory.historical-independent-controller.v2', nonce=nonce, flow=flow,
-            controllerPid=child.pid, supervisorPid=os.getpid(), childIdentityVerified=True,
-            controllerMembersAbsent=True, controllerExitObservedHeld=True, fence=end['kind'], controllerExitCode=code,
-            applicationResult=result, lateApplicationRequestRefused=flow == 'lease-expired',
-            interruptedNativeOperation=interrupted_stage.decode('ascii') if interrupted_stage is not None else None)
-        _creator_write(sys.stdout.buffer, core.canonical(proof))
+        packet.require(child.returncode == code and (code != 0) == stops_peer)
+        return child.pid, result, code, end
+
+
+def _run_creator_controller(engine, flow, nonce, executable_pin, source_pins):
+    packet.require(flow in CREATOR_FLOWS)
+    interrupted_stage = {HANDOFF_EXIT: AUTH_REQUEST, RESTART_UNCONFIRMED: RESTART_REQUEST}.get(flow)
+    stops_controller = flow == 'controller-exit' or interrupted_stage is not None
+    pid, result, code, end = _run_history_peer(engine, nonce, executable_pin, source_pins,
+        '--independent-controller', lambda link: (_creator_dialog(link, flow, nonce), stops_controller), CREATOR_LIMIT_SECONDS)
+    proof = dict(schema='fleetory.historical-independent-controller.v2', nonce=nonce, flow=flow,
+        controllerPid=pid, supervisorPid=os.getpid(), childIdentityVerified=True,
+        controllerMembersAbsent=True, controllerExitObservedHeld=True, fence=end['kind'], controllerExitCode=code,
+        applicationResult=result, lateApplicationRequestRefused=flow == 'lease-expired',
+        interruptedNativeOperation=interrupted_stage.decode('ascii') if interrupted_stage is not None else None)
+    _creator_write(sys.stdout.buffer, core.canonical(proof))
+    return 0
+
+
+def _coordinator_child(nonce):
+    packet.identity(nonce)
+    source, sink = sys.stdin.buffer, sys.stdout.buffer
+    bound = nonce.encode('ascii')
+    _creator_write(sink, READY)
+    packet.require(_creator_read(source, 96) == b'admit:' + bound)
+    _creator_write(sink, b'acquire:' + bound)
+    commitment = _recovery_projection(_creator_read(source, 96))
+    _creator_write(sink, b'received:' + commitment)
+    packet.require(_creator_read(source, 96) == b'work:' + commitment)
+    _creator_write(sink, b'run:' + commitment)
+    outcome = _creator_read(source, 96)
+    packet.require(outcome in (b'completed', b'refused') and not source.read(1))
+    _creator_write(sink, outcome)
+    return 0
+
+
+def _recovery_projection(frame):
+    prefix = b'owned:'
+    packet.require(frame.startswith(prefix))
+    value = frame[len(prefix):]
+    packet.hex_value(value.decode('ascii'))
+    return value
+
+
+def _coordinator_handoff(link, flow, nonce):
+    output = sys.stdout.buffer
+    bound = nonce.encode('ascii')
+    packet.require(link.receive_application(96) == READY)
+    link.live()
+    _creator_write(output, b'ready:' + bound)
+    request = link.receive_owner(96)
+    if flow == 'before-acquire':
+        packet.require(request == b'terminate')
+        link.live()
+        return None, True
+    packet.require(request == b'allocate')
+    link.send_application(b'admit:' + bound)
+    packet.require(link.receive_application(96) == b'acquire:' + bound)
+    link.live()
+    _creator_write(output, b'acquire:' + bound)
+    receipt = link.receive_owner(96)
+    commitment = _recovery_projection(receipt)
+    link.send_application(receipt)
+    packet.require(link.receive_application(96) == b'received:' + commitment)
+    link.live()
+    _creator_write(output, b'received:' + commitment)
+    return commitment, False
+
+
+def _coordinator_dialog(link, flow, nonce):
+    commitment, stopped = _coordinator_handoff(link, flow, nonce)
+    if stopped:
+        return {'projection': None, 'lateRequestRefused': False}, True
+    output = sys.stdout.buffer
+    command = link.receive_owner(96)
+    if flow == 'after-acquire':
+        packet.require(command == b'terminate')
+        link.live()
+        return {'projection': commitment.decode('ascii'), 'lateRequestRefused': False}, True
+    if flow == 'lease-expired':
+        packet.require(command == b'status')
+        link.live()
+        _creator_write(output, LIVE_STATUS)
+        command = link.receive_owner(96)
+    packet.require(command == b'work')
+    link.live()
+    request = b'run:' + commitment
+    link.send_application(b'work:' + commitment)
+    packet.require(link.receive_application(96) == request)
+    _creator_write(output, request)
+    outcome = b'refused' if flow == 'lease-expired' else b'completed'
+    packet.require(link.receive_owner(96) == outcome)
+    link.send_application(outcome)
+    link.child.stdin.close()
+    packet.require(link.receive_application(96) == outcome)
+    return {'projection': commitment.decode('ascii'), 'lateRequestRefused': outcome == b'refused'}, False
+
+
+def _run_recovery_coordinator(engine, flow, nonce, executable_pin, source_pins):
+    packet.require(flow in COORDINATOR_FLOWS)
+    pid, result, code, end = _run_history_peer(engine, nonce, executable_pin, source_pins,
+        '--recovery-coordinator', lambda link: _coordinator_dialog(link, flow, nonce), COORDINATOR_LIMIT_SECONDS)
+    proof = dict(schema='fleetory.historical-recovery-coordinator.v1', nonce=nonce, flow=flow,
+        coordinatorPid=pid, supervisorPid=os.getpid(), coordinatorExitCode=code,
+        identityVerified=True, exitObservedHeld=True, membersAbsent=True, fence=end['kind'], **result)
+    _creator_write(sys.stdout.buffer, core.canonical(proof))
     return 0
 
 
@@ -540,7 +639,12 @@ def _fenced_cli():
         return _serve_worker(sys.argv[2])
     if len(sys.argv) == 3 and sys.argv[1] == '--independent-controller':
         return _application_controller(sys.argv[2])
+    if len(sys.argv) == 3 and sys.argv[1] == '--recovery-coordinator':
+        return _coordinator_child(sys.argv[2])
     import audit_process_fence as engine
+    if len(sys.argv) == 6 and sys.argv[1] == '--recovery-owner':
+        flow, nonce, executable_pin, source_pins = sys.argv[2:]
+        return _run_recovery_coordinator(engine, flow, nonce, executable_pin, source_pins.split(','))
     if len(sys.argv) == 6 and sys.argv[1] == '--independent-owner':
         flow, nonce, executable_pin, source_pins = sys.argv[2:]
         return _run_creator_controller(engine, flow, nonce, executable_pin, source_pins.split(','))
@@ -556,7 +660,8 @@ def _fenced_cli():
 
 if __name__ == '__main__':
     try:
-        if len(sys.argv) > 1 and sys.argv[1] in ('--fenced', '--child', '--independent-owner', '--independent-controller'):
+        if len(sys.argv) > 1 and sys.argv[1] in ('--fenced', '--child', '--independent-owner', '--independent-controller',
+                                                  '--recovery-owner', '--recovery-coordinator'):
             sys.exit(_fenced_cli())
         result = run()
     except Exception:
