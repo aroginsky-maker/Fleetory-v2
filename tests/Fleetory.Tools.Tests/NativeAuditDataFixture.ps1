@@ -48,10 +48,11 @@ function Write-AuditDataSlot($Context,$Store,[string]$Path,[string]$Value){
 }
 function Start-AuditDataServer($Context,$Store){
     Read-AuditDataStore $Context $Store
+    $pidFile=if((Get-AuditDataLifetime $Context) -eq 660){'/data/immudb.pid'}else{'/tmp/immudb.pid'}
     $null=Invoke-Docker @('exec','-d','-e','SSL_CERT_FILE=/tmp/ca.pem','-e','SSL_CERT_DIR=/tmp/empty-ca-dir',$Store.Id,'/usr/sbin/immudb','--config=/tmp/immudb.toml','--dir=/data','--address=127.0.0.1','--port=3322',
         '--auth=true','--devmode=false','--web-server=true','--web-server-port=8090','--pgsql-server=false','--metrics-server=false',
         '--certificate=/tmp/server.crt','--pkey=/tmp/server.key','--clientcas=/tmp/ca.pem','--signingKey=/tmp/state.key',
-        '--pidfile=/tmp/immudb.pid','--logdir=/tmp','--logfile=fixture.log','--max-active-databases=3')
+        ("--pidfile="+$pidFile),'--logdir=/tmp','--logfile=fixture.log','--max-active-databases=3')
     $ready=$false
     for($n=0;$n -lt 20;$n++){try{Invoke-AuditDataHealth $Store;$ready=$true;break}catch{Start-Sleep -Milliseconds 200}}
     Assert-ImmuData $ready 'server-ready'

@@ -89,7 +89,8 @@ internal static partial class HistoricalProbeProcess
     }
 
     private const string DaemonPath = "/usr/sbin/immudb";
-    private const string DaemonPidFile = "/tmp/immudb.pid";
+    private const string DaemonDirectory = "/data";
+    private const string DaemonPidFile = DaemonDirectory + "/immudb.pid";
     private const string RestartAcknowledgement = "fleetory historical restart stop dispatched";
 
     internal static async Task<int> ObserveRestartAsync()
@@ -101,13 +102,13 @@ internal static partial class HistoricalProbeProcess
             using var input = Console.OpenStandardInput();
             using var output = Console.OpenStandardOutput();
             var daemon = ReadDaemonPid();
-            using var held = HoldDaemon(daemon, out var birth);
+            using var held = HoldDaemon(daemon, out var birth, out var descriptor);
             var claim = new byte[12];
             BinaryPrimitives.WriteInt32LittleEndian(claim, daemon);
             BinaryPrimitives.WriteUInt64LittleEndian(claim.AsSpan(4), birth);
             await output.WriteAsync(claim, deadline.Token);
             await output.FlushAsync(deadline.Token);
-            if (await input.ReadAsync(new byte[1], deadline.Token) != 0 || !HasExited(held.DangerousGetHandle().ToInt32(), 12000))
+            if (await input.ReadAsync(new byte[1], deadline.Token) != 0 || !HasExited(descriptor, 12000))
                 throw Refused();
             await WriteTransportByteAsync(output, 3, deadline.Token);
             return 0;
@@ -129,7 +130,7 @@ internal static partial class HistoricalProbeProcess
             if (Convert.ToHexStringLower(claim) != encoded)
                 throw Refused();
             var daemon = ReadDaemonPid();
-            using var held = HoldDaemon(daemon, out var birth);
+            using var held = HoldDaemon(daemon, out var birth, out _);
             if (daemon != BinaryPrimitives.ReadInt32LittleEndian(claim) ||
                 birth != BinaryPrimitives.ReadUInt64LittleEndian(claim.AsSpan(4)) ||
                 PidfdSendSignal(held, 15, IntPtr.Zero, 0) != 0)
@@ -145,6 +146,7 @@ internal static partial class HistoricalProbeProcess
 
     private static int ReadDaemonPid()
     {
+        RequirePrivatePath(DaemonDirectory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute, FileAttributes.Directory);
         var file = new FileInfo(DaemonPidFile);
         if (file.Length is < 1 or > 12 ||
             (file.Attributes & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0)
@@ -156,9 +158,9 @@ internal static partial class HistoricalProbeProcess
         return pid;
     }
 
-    private static SafeFileHandle HoldDaemon(int pid, out ulong birth)
+    private static SafeFileHandle HoldDaemon(int pid, out ulong birth, out int descriptor)
     {
-        var descriptor = PidfdOpen(pid, 0);
+        descriptor = PidfdOpen(pid, 0);
         if (descriptor < 0)
             throw Refused();
         var held = new SafeFileHandle(new IntPtr(descriptor), ownsHandle: true);
