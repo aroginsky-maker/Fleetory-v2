@@ -1,7 +1,7 @@
 #requires -Version 7.3
 # Private stdin/stdout pipe. Receives frozen bytes, never an operator file path or address.
 param([Parameter(Mandatory)][string]$ExpectedPlanSha256,[string]$Python='',
-    [ValidateSet('none','after-container','after-restore')][string]$FailurePoint='none',[switch]$PreparationOnly,[string]$PreparationGitPath='',
+    [ValidateSet('none','after-container','after-restore','worker-early-eof','worker-abrupt-exit')][string]$FailurePoint='none',[switch]$PreparationOnly,[string]$PreparationGitPath='',
     [switch]$PayloadReservationOnly,[switch]$ResourceAcknowledgementOnly,[switch]$ProbeRuntimeAcknowledgementOnly,[switch]$ProbeRuntimeCreationOnly,[switch]$PublicProbePublicationOnly,[string]$PublicationDotnetPath='')
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
@@ -33,6 +33,7 @@ $context=@{Fixture=$fixture;Root=$root;ImageName=(Get-ImmuDataImageName $fixture
     PayloadClaimed=$false;PayloadRemoved=$false;LifetimeSeconds=660;Stores=[Collections.Generic.List[object]]::new();Tls=$null;SigningPems=@{};Secrets=@{}}
 $canaries=[Collections.Generic.List[string]]::new();$watch=[Diagnostics.Stopwatch]::StartNew();$cleaning=$false
 $stage='input';$refusal='operational';$failure=$false;$cleanup=$false;$proof=$null;$store=$null;$body=$null;$archive=$null;$raw=$null
+$comparisonCalls=0;$comparisonFault=$null
 $oldBuildKit=$env:DOCKER_BUILDKIT;$env:DOCKER_BUILDKIT='0'
 function Invoke-Docker([string[]]$Arguments,[byte[]]$InputBytes=$null,[int]$TimeoutSeconds=60,[switch]$AllowFailure){
     Assert-ImmuData ($cleaning -or $watch.Elapsed.TotalSeconds -lt 600) 'controller-deadline'
@@ -69,6 +70,28 @@ function Invoke-ControllerArchiveAction([string]$Mode){
         throw 'Native archive operation failed.'
     }
 }
+function Invoke-HistoricalComparison([ValidateSet('build','observe')][string]$Operation,$Request,[string]$Fault='none'){
+    Assert-ImmuData ($watch.Elapsed.TotalSeconds -lt 590) 'controller-deadline'
+    $bytes=[Text.Encoding]::UTF8.GetBytes(($Request|ConvertTo-Json -Compress -Depth 8 -WarningAction Stop))
+    try{
+        $reply=Invoke-NativeBytes $comparisonPython @('-I','-S','-B',(Join-Path $PSScriptRoot 'historical_observation_worker.py'),
+            $Operation,$Fault,$comparisonPythonHash,$codeSnapshot.comparisonSourcePins) $bytes 10
+    }finally{[Array]::Clear($bytes,0,$bytes.Length)}
+    Assert-ImmuData ($reply.ExitCode -eq 0 -and [string]::IsNullOrWhiteSpace($reply.Stderr)) 'controller-comparison-worker'
+    $value=$reply.Stdout|ConvertFrom-Json -AsHashtable -Depth 18
+    $platformFence=if($IsLinux){'linux-process-group'}else{'windows-job-object'}
+    Assert-ImmuData ($value.schema -ceq 'fleetory.historical-comparison-worker.v1' -and $value.operation -ceq $Operation -and
+        $value.fault -ceq $Fault -and $value.childImageAndBirthVerified -eq $true -and $value.childMembersAbsent -eq $true -and
+        $value.fence -ceq $platformFence) 'controller-comparison-evidence'
+    if($Fault -ceq 'none'){
+        Assert-ImmuData ($value.childExitCode -eq 0 -and $value.requestBytes -eq ($bytes.Length+4) -and
+            $value.result -is [System.Collections.IDictionary]) 'controller-comparison-result'
+        return $value.result
+    }
+    $expectedBytes=if($Fault -ceq 'early-eof'){4}else{0}
+    Assert-ImmuData ($null -eq $value.result -and $value.childExitCode -ne 0 -and $value.requestBytes -eq $expectedBytes) 'controller-comparison-fault'
+    return $value
+}
 function Read-ControllerObservation {
     $native=Invoke-ControllerProbe $store 'observation-history-read'
     foreach($side in @('stateBefore','stateAfter')){
@@ -80,9 +103,7 @@ function Read-ControllerObservation {
     $expectedBytes=[Text.Encoding]::UTF8.GetBytes(($script:expected|ConvertTo-Json -Depth 8 -Compress))
     $request=@{expectedBase64=[Convert]::ToBase64String($expectedBytes);expectedSha256=(Get-ImmuDataHash $expectedBytes);
         observedBase64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($native|ConvertTo-Json -Depth 16 -Compress)))}
-    $checked=Invoke-NativeBytes $Python @('-B',(Join-Path $PSScriptRoot 'historical_audit_observation.py'),'observe') ([Text.Encoding]::UTF8.GetBytes(($request|ConvertTo-Json -Compress))) 10
-    Assert-ImmuData ($checked.ExitCode -eq 0 -and [string]::IsNullOrWhiteSpace($checked.Stderr)) 'controller-observation-policy'
-    return $checked.Stdout|ConvertFrom-Json -AsHashtable -Depth 12
+    return Invoke-HistoricalComparison 'observe' $request
 }
 [Fleetory.Pilot.AuditHistoricalProbeProfile]::Begin($context,${function:Invoke-Docker})
 try{
@@ -92,9 +113,14 @@ try{
     $admission=$admitted.Stdout|ConvertFrom-Json -AsHashtable -Depth 8
     $body=([Text.UTF8Encoding]::new($false,$true).GetString($raw))|ConvertFrom-Json -AsHashtable -Depth 16
     $plan=([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($body.planBase64)))|ConvertFrom-Json -AsHashtable -Depth 8
-    $stage='code';$codeSnapshot=Get-HistoricalAuditCodeSnapshot $repo
+    $stage='code';$codeSnapshot=Get-HistoricalAuditCodeSnapshot $repo -IncludeComparisonWorkerPins
     Assert-ImmuData ($codeSnapshot.revision -ceq $plan.revision) 'controller-code-revision'
     Assert-ImmuData ($codeSnapshot.sha256 -ceq $plan.codeSha256) 'controller-code-pin'
+    $comparisonPython=(Get-Command $Python -CommandType Application).Source
+    $interpreter=[IO.FileInfo]::new($comparisonPython)
+    $resolved=$interpreter.ResolveLinkTarget($true)
+    if($null -ne $resolved){$comparisonPython=$resolved.FullName}
+    $comparisonPythonHash=(Get-HistoricalInputFileHash $comparisonPython 67108864).sha256
     New-AuditDataPublicPayload $repo $context
     $published=Publish-NativeProbe $repo 'ServerBackendProbe' $root
     $context.ProbeHash=(Get-FileHash -LiteralPath (Join-Path $published 'ServerBackendProbe.dll') -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -123,10 +149,15 @@ try{
     $null=Invoke-ControllerProbe $store 'history-users'
     $stage='expectation';$request=@{sourceBase64=$body.valuesBase64;sourceSha256=$plan.inputs.valuesSha256;nonce=$plan.nonce;point=$admission.point;
         producer=@{containerId=$store.Id;imageId=$context.ImageId;probeSha256=$context.ProbeHash}}
-    $built=Invoke-NativeBytes $Python @('-B',(Join-Path $PSScriptRoot 'historical_audit_observation.py'),'build') ([Text.Encoding]::UTF8.GetBytes(($request|ConvertTo-Json -Compress -Depth 8))) 10
-    Assert-ImmuData ($built.ExitCode -eq 0 -and [string]::IsNullOrWhiteSpace($built.Stderr)) 'controller-expectation'
-    $script:expected=$built.Stdout|ConvertFrom-Json -AsHashtable -Depth 12
+    Read-AuditDataStore $context $store
+    if($FailurePoint -cin @('worker-early-eof','worker-abrupt-exit')){
+        $comparisonFault=Invoke-HistoricalComparison 'build' $request $FailurePoint.Substring(7)
+        Assert-ImmuData $false ('controller-'+$FailurePoint)
+    }
+    $script:expected=Invoke-HistoricalComparison 'build' $request
+    $comparisonCalls++
     $stage='observe';$first=Read-ControllerObservation
+    $comparisonCalls++
     $null=Invoke-ControllerProbe $store 'observation-history-read' 'authentication' -WrongPassword
     $null=Invoke-ControllerProbe $store 'observation-reader-denial'
     $stage='restart';Read-AuditDataStore $context $store
@@ -136,9 +167,11 @@ try{
     for($n=0;$n -lt 40;$n++){$r=Invoke-Docker @('exec',$store.Id,'/bin/kill','-0',$pidText) -AllowFailure;if($r.ExitCode -ne 0){$stopped=$true;break};Start-Sleep -Milliseconds 200}
     Assert-ImmuData $stopped 'controller-server-stopped';Start-AuditDataServer $context $store
     $again=Read-ControllerObservation
+    $comparisonCalls++
     Assert-ImmuData ($first.observationSha256 -ceq $again.observationSha256) 'controller-stable-restart'
     $proof=@{schema='fleetory.historical-audit-owned-observation.v1';verified=$true;historicalComparisonOnly=$true;observation=$again;
         nativeRestores=1;targetLifetimeSeconds=660;nativeDeadlineSeconds=600;historicalWorkerCommandsPinned=$true;historicalWorkerRawRepliesRetained=$true;historicalWorkerOsFenceVerified=$false;
+        historicalComparisonWorkerFenceVerified=$true;historicalComparisonWorkerCalls=$comparisonCalls;
         historicalWorkerCalls=[Fleetory.Pilot.AuditHistoricalProbeProfile]::Calls($context,${function:Invoke-Docker});sourceStateSignatureVerified=$true;targetStateSignaturesVerified=$true;
         codeAndProbePinsMatched=$true;inputDigestsMatched=$true;wrongPasswordRefused=$true;readerWriteRefused=$true;restartPreservedObservation=$true;
         freshTargetCredentialsAndKeys=$true;codeInventoryV2Matched=$true;publishedProbeBundleMatched=$true;containerProbeBundleMatched=$true;
@@ -163,7 +196,7 @@ try{
     $watch.Stop();$env:DOCKER_BUILDKIT=$oldBuildKit
 }
 if($failure -or -not $cleanup){
-    @{schema='fleetory.historical-audit-controller-cleanup.v1';stage=$stage;refusal=$refusal;cleanupVerified=$cleanup;resources=$resources}|ConvertTo-Json -Compress -Depth 5
+    @{schema='fleetory.historical-audit-controller-cleanup.v1';stage=$stage;refusal=$refusal;cleanupVerified=$cleanup;resources=$resources;comparisonFault=$comparisonFault}|ConvertTo-Json -Compress -Depth 5
     [Console]::Error.WriteLine('Historical native controller refused; no input contents or credentials logged.')
     exit 1
 }

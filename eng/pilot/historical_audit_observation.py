@@ -107,14 +107,19 @@ def observe(expected_bytes, expected_pin, observed_bytes):
     return checked
 
 
-def run():
-    packet.require(len(sys.argv) == 2 and sys.argv[1] in ('build', 'observe'))
-    body = packet.strict_json(sys.stdin.buffer.read(core.MAX_BODY + 1), core.MAX_BODY)
-    if sys.argv[1] == 'build':
+def evaluate_request(operation, request):
+    packet.require(operation in ('build', 'observe'))
+    body = packet.strict_json(request, core.MAX_BODY)
+    if operation == 'build':
         packet.keys(body, 'sourceBase64 sourceSha256 nonce point producer')
         return build(packet.decode(body['sourceBase64'], core.MAX_EXPECTED), body['sourceSha256'], body['nonce'], body['point'], body['producer'])
     packet.keys(body, 'expectedBase64 expectedSha256 observedBase64')
     return observe(packet.decode(body['expectedBase64'], core.MAX_EXPECTED), body['expectedSha256'], packet.decode(body['observedBase64'], core.MAX_OBSERVED))
+
+
+def run():
+    packet.require(len(sys.argv) == 2)
+    return evaluate_request(sys.argv[1], sys.stdin.buffer.read(core.MAX_BODY + 1))
 
 
 if __name__ == '__main__':

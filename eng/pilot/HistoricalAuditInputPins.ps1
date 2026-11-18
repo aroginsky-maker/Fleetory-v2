@@ -24,7 +24,7 @@ function Get-HistoricalInputFileHash([string]$Path,[long]$Limit){
         return @{bytes=$count;sha256=[Convert]::ToHexString($hash.GetHashAndReset()).ToLowerInvariant()}
     }finally{if($null -ne $hash){$hash.Dispose()};if($null -ne $stream){$stream.Dispose()}}
 }
-function Get-HistoricalAuditCodeSnapshot([string]$Repository,[string]$Git='git'){
+function Get-HistoricalAuditCodeSnapshot([string]$Repository,[string]$Git='git',[switch]$IncludeComparisonWorkerPins){
     $root=Get-ProviderOrdinaryItem $Repository
     Assert-ImmuData ($root.PSIsContainer -and $root.FullName -ceq $Repository) 'controller-code-root'
     $revision=Get-HistoricalAuditRevision $Repository $Git
@@ -42,18 +42,30 @@ function Get-HistoricalAuditCodeSnapshot([string]$Repository,[string]$Git='git')
     Assert-ImmuData ($names.Count -gt $roots.Count -and $names.Count -le 768) 'controller-code-count'
     $ordered=[string[]]@($names);[Array]::Sort($ordered,[StringComparer]::Ordinal)
     $lines=[Text.StringBuilder]::new("fleetory.historical.native-controller-code.v2`n$revision`n")
+    $comparisonSources=@('eng/pilot/historical_observation_worker.py','eng/pilot/historical_audit_observation.py',
+        'eng/pilot/audit_observation.py','eng/pilot/audit_process_fence.py',
+        'eng/pilot/audit_process_posix.py','eng/pilot/audit_process_windows.py',
+        'eng/pilot/audit_control_identity.py','eng/pilot/recovery_files.py',
+        'eng/pilot/fresh_server_pair.py','eng/pilot/audit_archive.py')
+    $selected=@{}
     [long]$total=0
     foreach($name in $ordered){
         $path=[IO.Path]::GetFullPath((Join-Path $Repository $name))
         Assert-ImmuData ($path.StartsWith($Repository+[IO.Path]::DirectorySeparatorChar,[StringComparison]::Ordinal)) 'controller-code-containment'
         $file=Get-HistoricalInputFileHash $path 1048576
+        if($IncludeComparisonWorkerPins -and $name -cin $comparisonSources){$selected[$name]=$file.sha256}
         $total+=$file.bytes;Assert-ImmuData ($total -le 67108864) 'controller-code-total'
         $null=$lines.Append($name).Append("`n").Append($file.bytes.ToString([Globalization.CultureInfo]::InvariantCulture)).Append("`n").Append($file.sha256).Append("`n")
     }
     Assert-ImmuData ((Get-HistoricalAuditRevision $Repository $Git) -ceq $revision) 'controller-code-revision-changed'
-    return @{schema='fleetory.historical-code-snapshot.v2';revision=$revision;sha256=(Get-ImmuDataHash ([Text.Encoding]::UTF8.GetBytes($lines.ToString())));
+    $snapshot=@{schema='fleetory.historical-code-snapshot.v2';revision=$revision;sha256=(Get-ImmuDataHash ([Text.Encoding]::UTF8.GetBytes($lines.ToString())));
         files=$ordered.Length;rootBuildInputs=$roots.Count;bytes=$total;activeSdkInputMeasured=$true;repositoryCleanClaimed=$false;
         softwareOriginAuthenticated=$false;executionContinuityVerified=$false}
+    if($IncludeComparisonWorkerPins){
+        Assert-ImmuData ($selected.Count -eq $comparisonSources.Count) 'controller-worker-source-set'
+        $snapshot.comparisonSourcePins=($comparisonSources|ForEach-Object {$selected[$_]}) -join ','
+    }
+    return $snapshot
 }
 function Get-HistoricalProbeBundle([string]$Directory){
     $root=Get-ProviderOrdinaryItem $Directory

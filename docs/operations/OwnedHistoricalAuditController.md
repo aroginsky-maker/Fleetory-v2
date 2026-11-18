@@ -261,3 +261,18 @@ or a surviving outside owner. Killing a Docker client does not establish that
 its daemon-side exec workload has stopped. Those tests must retain the actual
 creator and confirm disposal/absence of the owned container independently.
 No original inputs, original secrets/private PKI or VPS operations are added.
+
+The historical expectation and observation comparison run in a dedicated Python
+child. The launcher uses the Windows Job object or an unreaped Linux process
+group with a pidfd. It verifies the child executable and birth identity before
+sending a length-prefixed request, and checks that no child group member remains
+before accepting the result. The controller supplies hashes from its existing
+code snapshot for the fixed worker source set and hashes its local interpreter.
+The child performs the same historical comparison without Docker authority.
+
+Two generated restore cases stop that exact comparison child or close its input
+after the frame length and before the body. The original creator remains alive
+to remove its own container, image and payload. These checks cover the host
+comparison child. The in-container dotnet probe, the Docker daemon workload,
+loss of the original resource creator, and retention outside that creator still
+require separate evidence.
