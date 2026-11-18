@@ -7,17 +7,19 @@ using Microsoft.Win32.SafeHandles;
 
 namespace ServerBackendProbe;
 
-// A private Linux fixture entrypoint for exactly one real application operation.
+// The fixed private Linux fixture entrypoint for historical controller probes.
 internal static partial class HistoricalProbeProcess
 {
-    internal const string Mode = "observation-history-read";
     private const string EntryAssembly = "/tool/ServerBackendProbe.dll";
     private const int RequestLimit = 4096;
     private const int ReplyLimit = 128 * 1024;
     private const int IncompleteExit = 65;
     private static readonly byte[] Ready = "fleetory historical probe ready\n"u8.ToArray();
 
-    internal static async Task<int> SuperviseAsync()
+    internal static bool IsMode(string mode) => mode is
+        "audit-health" or "history-users" or "observation-history-read" or "observation-reader-denial";
+
+    internal static async Task<int> SuperviseAsync(string mode)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(35));
         var cancellation = timeout.Token;
@@ -29,9 +31,9 @@ internal static partial class HistoricalProbeProcess
             var request = await ReceiveAsync(input, RequestLimit + 1, cancellation);
             try
             {
-                if (request.Length < 2 || request[0] > 2)
+                if (!IsMode(mode) || request.Length < 2 || request[0] > 2)
                     throw Refused();
-                var result = await RunOwnedAsync(request[0], request.AsMemory(1), cancellation);
+                var result = await RunOwnedAsync(mode, request[0], request.AsMemory(1), cancellation);
                 await Console.Out.WriteLineAsync(JsonSerializer.Serialize(result).AsMemory(), cancellation);
                 return 0;
             }
@@ -88,7 +90,7 @@ internal static partial class HistoricalProbeProcess
         }
     }
 
-    private static async Task<object> RunOwnedAsync(byte fault, ReadOnlyMemory<byte> request, CancellationToken cancellation)
+    private static async Task<object> RunOwnedAsync(string mode, byte fault, ReadOnlyMemory<byte> request, CancellationToken cancellation)
     {
         var executable = Environment.ProcessPath ?? throw Refused();
         var command = new ProcessStartInfo(executable)
@@ -98,6 +100,7 @@ internal static partial class HistoricalProbeProcess
         };
         command.ArgumentList.Add(EntryAssembly);
         command.ArgumentList.Add("--historical-leaf");
+        command.ArgumentList.Add(mode);
         var trust = ReadPrivateFixtureTrust();
         command.Environment.Clear();
         command.Environment.Add("HOME", trust.Home);
@@ -138,7 +141,7 @@ internal static partial class HistoricalProbeProcess
             evidence = new
             {
                 schema = "fleetory.historical-dotnet-probe.v1",
-                mode = Mode,
+                mode,
                 fault,
                 heldBirthVerified = true,
                 heldExitVerified = true,

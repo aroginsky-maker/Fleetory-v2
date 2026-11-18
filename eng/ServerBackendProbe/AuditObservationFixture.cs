@@ -7,9 +7,9 @@ namespace ServerBackendProbe;
 // Generated setup and intentional denial probes, separate from the read-only observer.
 internal static class AuditObservationFixture
 {
-    internal static async Task<object> ExecuteAsync(string mode, CancellationToken cancellation)
+    internal static async Task<object> ExecuteAsync(string mode, CancellationToken cancellation, Stream? packetSource = null)
     {
-        using var input = await ReadPacketAsync(cancellation);
+        using var input = await ReadPacketAsync(cancellation, packetSource);
         var packet = input.RootElement;
         var fixture = FreshPairModel.Fixture(packet);
         using var admin = new FixtureAuditClient();

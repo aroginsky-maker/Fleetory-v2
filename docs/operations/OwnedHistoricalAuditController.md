@@ -277,16 +277,20 @@ comparison child. The in-container dotnet probe, the Docker daemon workload,
 loss of the original resource creator, and retention outside that creator still
 require separate evidence.
 
-The generated historical observation command runs its real .NET read operation
-in a fixed child within the target container. A Linux supervisor reads a bounded
+The generated historical controller runs its four .NET probes in fixed
+children within the target container. The mode list consists of audit-health,
+history-users, observation-history-read and observation-reader-denial. A Linux supervisor reads a bounded
 request, holds the child with a pidfd, checks its executable, parent and birth
 before sending the private frame, and observes actual exit before publishing the
-result. Legacy program entrypoints and the other three controller modes retain
-their previous behavior. The child uses a fixed temporary home for .NET TLS chain evaluation and the
+result. Legacy program entrypoints retain their previous behavior. Within the owned
+controller, the completed private frame is the only input passed to the existing
+operations. The child uses a fixed temporary home for .NET TLS chain evaluation and the
 existing fixture CA paths after checking user-only modes and rejecting links.
 Generated interop targets the held Linux descriptor without extracting its native handle. The fault cases withhold the body or terminate the held
 child before releasing it, and the original live controller verifies cleanup of
-its own target. A Docker transport failure cannot supply successful exit
-evidence. This covers one fixed leaf and its observed exit through the native
-exec reply. Process group containment and independent owner or daemon loss still
+its own target. Normal tests verify health before and after restart, generated
+user provisioning, observation and reader write denial through all four held
+leaves. Each mode has separate real early EOF and abrupt-exit cases. A lost
+Docker transport cannot supply successful exit evidence. This input and exit
+proof requires a complete native exec reply. Process group containment and independent owner or daemon loss still
 require separate evidence.

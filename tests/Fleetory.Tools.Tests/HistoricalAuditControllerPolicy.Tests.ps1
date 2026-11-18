@@ -33,7 +33,7 @@ function Refused-Case([scriptblock]$Action,[string]$Category){
     if(-not $seen){throw 'Generated controller case accepted invalid preparation.'}
 }
 $registry=New-CaseRegistry
-foreach($n in 1..14){
+foreach($n in 1..20){
     $case=New-HistoricalControllerCase $plan $packet (Case-Nonce $n) $registry
     $body=[Text.Encoding]::UTF8.GetString($case.bytes)|ConvertFrom-Json -AsHashtable
     $declared=[Convert]::FromBase64String($body.planBase64)
@@ -43,9 +43,9 @@ foreach($n in 1..14){
         $body.valuesBase64 -ceq $packet.valuesBase64 -and
         ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($body.valuesBase64))|ConvertFrom-Json).nonce -ceq $parent) 'case-roundtrip'
 }
-Assert-ImmuData ($registry.Count -eq 14 -and (ConvertTo-Json $plan -Depth 8 -Compress) -ceq $beforePlan -and
+Assert-ImmuData ($registry.Count -eq 20 -and (ConvertTo-Json $plan -Depth 8 -Compress) -ceq $beforePlan -and
     (ConvertTo-Json $packet -Depth 8 -Compress) -ceq $beforePacket) 'case-parent-unchanged'
-Refused-Case {New-HistoricalControllerCase $plan $packet (Case-Nonce 15) $registry} 'controller-case-registry'
+Refused-Case {New-HistoricalControllerCase $plan $packet (Case-Nonce 21) $registry} 'controller-case-registry'
 foreach($nonce in @($parent,[Guid]::Empty.ToString('D'),(Case-Nonce 1).ToUpperInvariant(),(Case-Nonce 1).Replace('-',''),'bad',$true,42)){
     Refused-Case {New-HistoricalControllerCase $plan $packet $nonce (New-CaseRegistry)} 'controller-case-nonce'
 }
@@ -69,4 +69,4 @@ foreach($nonce in @([Guid]::Empty.ToString('D'),'BAD')){
     $bad=$plan.Clone();$bad.nonce=$nonce
     Refused-Case {New-HistoricalControllerCase $bad $packet (Case-Nonce 5) (New-CaseRegistry)} 'controller-case-nonce'
 }
-Write-Output 'HISTORICAL CONTROLLER CASE PASS:14 distinct child nonces;source identity and parent bytes preserved;replay,changed-plan,preparation failure,bounds,canonical identities andregistry refusals verified. Generated-only in-memory consumption;no native launch orauthority.'
+Write-Output 'HISTORICAL CONTROLLER CASE PASS:20 distinct child nonces;source identity and parent bytes preserved;replay,changed-plan,preparation failure,bounds,canonical identities andregistry refusals verified. Generated-only in-memory consumption;no native launch orauthority.'

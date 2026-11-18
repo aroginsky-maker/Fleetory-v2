@@ -1,7 +1,9 @@
 #requires -Version 7.3
 # Private stdin/stdout pipe. Receives frozen bytes, never an operator file path or address.
 param([Parameter(Mandatory)][string]$ExpectedPlanSha256,[string]$Python='',
-    [ValidateSet('none','after-container','after-restore','worker-early-eof','worker-abrupt-exit','dotnet-early-eof','dotnet-abrupt-exit')][string]$FailurePoint='none',[switch]$PreparationOnly,[string]$PreparationGitPath='',
+    [ValidateSet('none','after-container','after-restore','worker-early-eof','worker-abrupt-exit','dotnet-early-eof','dotnet-abrupt-exit',
+        'dotnet-health-early-eof','dotnet-health-abrupt-exit','dotnet-users-early-eof','dotnet-users-abrupt-exit',
+        'dotnet-denial-early-eof','dotnet-denial-abrupt-exit')][string]$FailurePoint='none',[switch]$PreparationOnly,[string]$PreparationGitPath='',
     [switch]$PayloadReservationOnly,[switch]$ResourceAcknowledgementOnly,[switch]$ProbeRuntimeAcknowledgementOnly,[switch]$ProbeRuntimeCreationOnly,[switch]$PublicProbePublicationOnly,[string]$PublicationDotnetPath='')
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
@@ -33,7 +35,7 @@ $context=@{Fixture=$fixture;Root=$root;ImageName=(Get-ImmuDataImageName $fixture
     PayloadClaimed=$false;PayloadRemoved=$false;LifetimeSeconds=660;Stores=[Collections.Generic.List[object]]::new();Tls=$null;SigningPems=@{};Secrets=@{}}
 $canaries=[Collections.Generic.List[string]]::new();$watch=[Diagnostics.Stopwatch]::StartNew();$cleaning=$false
 $stage='input';$refusal='operational';$failure=$false;$cleanup=$false;$proof=$null;$store=$null;$body=$null;$archive=$null;$raw=$null
-$comparisonCalls=0;$comparisonFault=$null;$managedCalls=[Collections.Generic.List[int]]::new();$managedFault=$null;$managedApplicationRefusal=@{}
+$comparisonCalls=0;$comparisonFault=$null;$managedCalls=[hashtable]::new([StringComparer]::Ordinal);$managedFault=$null;$managedApplicationRefusal=@{}
 $oldBuildKit=$env:DOCKER_BUILDKIT;$env:DOCKER_BUILDKIT='0'
 function Invoke-Docker([string[]]$Arguments,[byte[]]$InputBytes=$null,[int]$TimeoutSeconds=60,[switch]$AllowFailure){
     Assert-ImmuData ($cleaning -or $watch.Elapsed.TotalSeconds -lt 600) 'controller-deadline'
@@ -46,17 +48,12 @@ function Invoke-ControllerProbe($Store,[string]$Mode,[string]$ExpectedType='',[s
     Read-AuditDataStore $context $Store
     $packet=@{fixture=$plan.nonce;admin=$context.Secrets['target-admin'];reader=$context.Secrets['target-reader'];writer=$context.Secrets['target-writer']}
     if($Mode -ceq 'observation-history-read'){$packet=@{fixture=$plan.nonce;reader=$(if($WrongPassword){$context.Secrets.wrong}else{$context.Secrets['target-reader']});observation=$script:expected}}
-    $bytes=[Text.Encoding]::UTF8.GetBytes(($packet|ConvertTo-Json -Compress -Depth 8))
-    $managed=$Mode -ceq 'observation-history-read'
-    Assert-ImmuData ($managed -or $ManagedFault -eq 0) 'controller-unmanaged-fault'
-    $applicationInputLength=$bytes.Length
-    if($managed){
-        $framed=[byte[]]::new($bytes.Length+1)
-        $framed[0]=$ManagedFault
-        [Array]::Copy($bytes,0,$framed,1,$bytes.Length)
-        [Array]::Clear($bytes,0,$bytes.Length)
-        $bytes=$framed
-    }
+    $packetBytes=[Text.Encoding]::UTF8.GetBytes(($packet|ConvertTo-Json -Compress -Depth 8))
+    $applicationInputLength=$packetBytes.Length
+    $bytes=[byte[]]::new($applicationInputLength+1)
+    $bytes[0]=$ManagedFault
+    [Array]::Copy($packetBytes,0,$bytes,1,$applicationInputLength)
+    [Array]::Clear($packetBytes,0,$applicationInputLength)
     $client=${function:Invoke-Docker}
     $native=[Func[string[],byte[],Tuple[int,byte[],byte[]]]]{param([string[]]$Arguments,[byte[]]$InputBytes)
         $reply=& $client $Arguments $InputBytes 60 -AllowFailure
@@ -65,25 +62,23 @@ function Invoke-ControllerProbe($Store,[string]$Mode,[string]$ExpectedType='',[s
     try{$rawReply=[Fleetory.Pilot.AuditHistoricalProbeProfile]::Invoke($context,$Store,$client,$Mode,$bytes,$native)}
     finally{[Array]::Clear($bytes,0,$bytes.Length)}
     $result=@{ExitCode=$rawReply.Item1;Stdout=[Text.Encoding]::UTF8.GetString($rawReply.Item2);Stderr=[Text.Encoding]::UTF8.GetString($rawReply.Item3)}
-    if($managed){
-        Assert-ImmuData ($result.ExitCode -eq 0 -and [string]::IsNullOrWhiteSpace($result.Stderr)) 'controller-dotnet-supervisor'
-        $supervised=$result.Stdout|ConvertFrom-Json -AsHashtable -Depth 5
-        Assert-ImmuData ($supervised.Count -eq 8 -and $supervised.schema -ceq 'fleetory.historical-dotnet-probe.v1' -and
-            $supervised.mode -ceq $Mode -and $supervised.fault -eq $ManagedFault -and
-            $supervised.heldBirthVerified -eq $true -and $supervised.heldExitVerified -eq $true -and
-            $supervised.stdout -is [string]) 'controller-dotnet-exit-evidence'
-        if($ManagedFault -ne 0){
-            $expectedExit=if($ManagedFault -eq 1){65}else{137}
-            Assert-ImmuData ($supervised.childExitCode -eq $expectedExit -and $supervised.payloadBytesReleased -eq 0 -and
-                $supervised.stdout -ceq '') 'controller-dotnet-fault-evidence'
-            return $supervised
-        }
-        Assert-ImmuData ($supervised.childExitCode -cin @(0,1) -and $supervised.payloadBytesReleased -eq $applicationInputLength) 'controller-dotnet-complete-evidence'
-        $result=@{ExitCode=$supervised.childExitCode;Stdout=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($supervised.stdout));Stderr=''}
-        foreach($value in $canaries){Assert-ImmuData (-not $result.Stdout.Contains($value,[StringComparison]::Ordinal)) 'controller-canary'}
+    Assert-ImmuData ($result.ExitCode -eq 0 -and [string]::IsNullOrWhiteSpace($result.Stderr)) 'controller-dotnet-supervisor'
+    $supervised=$result.Stdout|ConvertFrom-Json -AsHashtable -Depth 5
+    Assert-ImmuData ($supervised.Count -eq 8 -and $supervised.schema -ceq 'fleetory.historical-dotnet-probe.v1' -and
+        $supervised.mode -ceq $Mode -and $supervised.fault -eq $ManagedFault -and
+        $supervised.heldBirthVerified -eq $true -and $supervised.heldExitVerified -eq $true -and
+        $supervised.stdout -is [string]) 'controller-dotnet-exit-evidence'
+    if($ManagedFault -ne 0){
+        $expectedExit=if($ManagedFault -eq 1){65}else{137}
+        Assert-ImmuData ($supervised.childExitCode -eq $expectedExit -and $supervised.payloadBytesReleased -eq 0 -and
+            $supervised.stdout -ceq '') 'controller-dotnet-fault-evidence'
+        return $supervised
     }
+    Assert-ImmuData ($supervised.childExitCode -cin @(0,1) -and $supervised.payloadBytesReleased -eq $applicationInputLength) 'controller-dotnet-complete-evidence'
+    $result=@{ExitCode=$supervised.childExitCode;Stdout=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($supervised.stdout));Stderr=''}
+    foreach($value in $canaries){Assert-ImmuData (-not $result.Stdout.Contains($value,[StringComparison]::Ordinal)) 'controller-canary'}
     $value=$result.Stdout|ConvertFrom-Json -AsHashtable -Depth 16
-    if($managed -and $result.ExitCode -ne 0 -and -not $ExpectedType){
+    if($result.ExitCode -ne 0 -and -not $ExpectedType){
         foreach($name in @('errorType','causeType','location')){
             if($value[$name] -is [string] -and $value[$name] -cmatch '^[A-Za-z0-9_]{1,80}\z'){
                 $managedApplicationRefusal[$name]=$value[$name]
@@ -92,10 +87,26 @@ function Invoke-ControllerProbe($Store,[string]$Mode,[string]$ExpectedType='',[s
     }
     if($Mode.StartsWith('observation-',[StringComparison]::Ordinal)){Assert-AuditObservationProbe $result $value $Mode $ExpectedType}
     else{Assert-ImmuData ($result.ExitCode -eq 0 -and [string]::IsNullOrWhiteSpace($result.Stderr) -and $value.category -ceq $Mode) 'controller-probe'}
-    if($managed){$managedCalls.Add($result.ExitCode)}
+    if($Mode -ceq 'history-users'){
+        Assert-ImmuData ($value.targetOnlyUsersCreated -eq $true) 'controller-dotnet-users-result'
+    }
+    if($Mode -ceq 'observation-reader-denial'){
+        Assert-ImmuData ($value.readerWriteRefused -eq $true) 'controller-dotnet-reader-result'
+    }
+    $managedCalls[$Mode]=[int]$managedCalls[$Mode]+1
     return $value
 }
 function Invoke-AuditDataHealth($Store){$null=Invoke-ControllerProbe $Store 'audit-health'}
+function Invoke-SelectedDotnetFault($Store,[string]$Mode,[string]$Prefix){
+    $fault=switch -CaseSensitive ($FailurePoint){
+        ($Prefix+'early-eof'){1;break}
+        ($Prefix+'abrupt-exit'){2;break}
+        default{0}
+    }
+    if($fault -eq 0){return}
+    $script:managedFault=Invoke-ControllerProbe $Store $Mode -ManagedFault $fault
+    Assert-ImmuData $false ('controller-'+$FailurePoint)
+}
 function Invoke-ControllerArchiveAction([string]$Mode){
     Assert-ImmuData ($Mode -cin @('verify','restore')) 'controller-archive-mode'
     Read-AuditDataStore $context $store
@@ -181,6 +192,8 @@ try{
     Invoke-ControllerArchiveAction 'verify'
     Invoke-ControllerArchiveAction 'restore'
     if($FailurePoint -ceq 'after-restore'){throw 'Injected controller refusal.'}
+    Invoke-SelectedDotnetFault $store 'audit-health' 'dotnet-health-'
+    Invoke-SelectedDotnetFault $store 'history-users' 'dotnet-users-'
     $null=Invoke-ControllerProbe $store 'history-users'
     $stage='expectation';$request=@{sourceBase64=$body.valuesBase64;sourceSha256=$plan.inputs.valuesSha256;nonce=$plan.nonce;point=$admission.point;
         producer=@{containerId=$store.Id;imageId=$context.ImageId;probeSha256=$context.ProbeHash}}
@@ -192,11 +205,8 @@ try{
     $script:expected=Invoke-HistoricalComparison 'build' $request
     $comparisonCalls++
     $stage='observe'
-    if($FailurePoint -cin @('dotnet-early-eof','dotnet-abrupt-exit')){
-        $fault=if($FailurePoint -ceq 'dotnet-early-eof'){1}else{2}
-        $managedFault=Invoke-ControllerProbe $store 'observation-history-read' -ManagedFault $fault
-        Assert-ImmuData $false ('controller-'+$FailurePoint)
-    }
+    Invoke-SelectedDotnetFault $store 'observation-history-read' 'dotnet-'
+    Invoke-SelectedDotnetFault $store 'observation-reader-denial' 'dotnet-denial-'
     $first=Read-ControllerObservation
     $comparisonCalls++
     $null=Invoke-ControllerProbe $store 'observation-history-read' 'authentication' -WrongPassword
@@ -213,7 +223,8 @@ try{
     $proof=@{schema='fleetory.historical-audit-owned-observation.v1';verified=$true;historicalComparisonOnly=$true;observation=$again;
         nativeRestores=1;targetLifetimeSeconds=660;nativeDeadlineSeconds=600;historicalWorkerCommandsPinned=$true;historicalWorkerRawRepliesRetained=$true;historicalWorkerOsFenceVerified=$false;
         historicalComparisonWorkerFenceVerified=$true;historicalComparisonWorkerCalls=$comparisonCalls;
-        dotnetObservationLeafExitVerified=($managedCalls.Count -eq 3);dotnetObservationLeafCalls=$managedCalls.Count;
+        dotnetObservationLeafExitVerified=($managedCalls['observation-history-read'] -eq 3);
+        dotnetObservationLeafCalls=$managedCalls['observation-history-read'];dotnetModeExitCounts=$managedCalls;
         historicalWorkerCalls=[Fleetory.Pilot.AuditHistoricalProbeProfile]::Calls($context,${function:Invoke-Docker});sourceStateSignatureVerified=$true;targetStateSignaturesVerified=$true;
         codeAndProbePinsMatched=$true;inputDigestsMatched=$true;wrongPasswordRefused=$true;readerWriteRefused=$true;restartPreservedObservation=$true;
         freshTargetCredentialsAndKeys=$true;codeInventoryV2Matched=$true;publishedProbeBundleMatched=$true;containerProbeBundleMatched=$true;

@@ -415,8 +415,7 @@ try{
         finally{
             if($Model.Calls -gt $before){
                 $Arguments=$Model.Arguments
-                $managedPrefix=if($ProbeMode -ceq 'observation-history-read'){'--historical-supervise|'}else{''}
-                Check (($Arguments -join '|') -ceq ('exec|-i|-e|SSL_CERT_FILE=/tmp/ca.pem|-e|SSL_CERT_DIR=/tmp/empty-ca-dir|'+$expectedId+'|dotnet|/tool/ServerBackendProbe.dll|'+$managedPrefix+$ProbeMode)) 'historical-fixed-argv'
+                Check (($Arguments -join '|') -ceq ('exec|-i|-e|SSL_CERT_FILE=/tmp/ca.pem|-e|SSL_CERT_DIR=/tmp/empty-ca-dir|'+$expectedId+'|dotnet|/tool/ServerBackendProbe.dll|--historical-supervise|'+$ProbeMode)) 'historical-fixed-argv'
             }
         }
     }

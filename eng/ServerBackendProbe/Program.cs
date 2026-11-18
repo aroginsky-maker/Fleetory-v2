@@ -33,9 +33,9 @@ internal static class Program
 
     public static Task<int> Main(string[] args) => args switch
     {
-        ["--historical-supervise", HistoricalProbeProcess.Mode] => HistoricalProbeProcess.SuperviseAsync(),
-        ["--historical-leaf"] => HistoricalProbeProcess.RunLeafAsync(
-            packet => ExecuteAsync([HistoricalProbeProcess.Mode], packet)),
+        ["--historical-supervise", var mode] when HistoricalProbeProcess.IsMode(mode) => HistoricalProbeProcess.SuperviseAsync(mode),
+        ["--historical-leaf", var mode] when HistoricalProbeProcess.IsMode(mode) =>
+            HistoricalProbeProcess.RunLeafAsync(packet => ExecuteAsync([mode], packet)),
         _ => ExecuteAsync(args)
     };
 
@@ -71,9 +71,9 @@ internal static class Program
         if (mode == "observation-read") { return await AuditObservation.ExecuteAsync(deadline.Token); }
         if (mode == "observation-history-read") { return await AuditObservation.ExecuteAsync(deadline.Token, true, packet); }
         if (mode == "observation-history-seed") { return await HistoricalObservationFixture.SeedAsync(deadline.Token); }
-        if (mode.StartsWith("observation-", StringComparison.Ordinal)) { return await AuditObservationFixture.ExecuteAsync(mode, deadline.Token); }
+        if (mode.StartsWith("observation-", StringComparison.Ordinal)) { return await AuditObservationFixture.ExecuteAsync(mode, deadline.Token, packet); }
         if (mode.StartsWith("history-", StringComparison.Ordinal))
-        { return await AuditHistoryControl.ExecuteAsync(mode, deadline.Token); }
+        { return await AuditHistoryControl.ExecuteAsync(mode, deadline.Token, packet); }
         if (mode.StartsWith("v2pair-", StringComparison.Ordinal) && mode != "v2pair-host")
         { return await V2PairControl.ExecuteAsync(mode, deadline.Token); }
         if (mode.StartsWith("pair-", StringComparison.Ordinal) && mode != "pair-host")
