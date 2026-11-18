@@ -260,7 +260,9 @@ def _run_worker(engine, operation, fault, request, executable_pin, source_pins):
 # These private frames convey data and a fixed observation request only.
 CREATOR_LIMIT_SECONDS = 55
 COORDINATOR_LIMIT_SECONDS = 105
-COORDINATOR_FLOWS = ('complete', 'before-acquire', 'after-acquire', 'lease-expired')
+CREATE_REFUSED = 'create-refused'
+ALLOCATION_REFUSED = b'allocation-refused'
+COORDINATOR_FLOWS = ('complete', 'before-acquire', 'after-acquire', 'lease-expired', CREATE_REFUSED)
 HANDOFF_EXIT = 'between-operations-exit'
 RESTART_UNCONFIRMED = 'restart-unconfirmed'
 CREATOR_FLOWS = ('complete', 'controller-exit', 'lease-expired', HANDOFF_EXIT, RESTART_UNCONFIRMED)
@@ -550,7 +552,13 @@ def _coordinator_child(nonce):
     _creator_write(sink, READY)
     packet.require(_creator_read(source, 96) == b'admit:' + bound)
     _creator_write(sink, b'acquire:' + bound)
-    commitment = _recovery_projection(_creator_read(source, 96))
+    receipt = _creator_read(source, 96)
+    if receipt == b'unavailable:' + bound:
+        _creator_write(sink, b'retry:' + bound)
+        packet.require(_creator_read(source, 96) == ALLOCATION_REFUSED and not source.read(1))
+        _creator_write(sink, ALLOCATION_REFUSED)
+        return 0
+    commitment = _recovery_projection(receipt)
     _creator_write(sink, b'received:' + commitment)
     packet.require(_creator_read(source, 96) == b'work:' + commitment)
     _creator_write(sink, b'run:' + commitment)
@@ -585,6 +593,18 @@ def _coordinator_handoff(link, flow, nonce):
     link.live()
     _creator_write(output, b'acquire:' + bound)
     receipt = link.receive_owner(96)
+    if flow == CREATE_REFUSED:
+        packet.require(receipt == b'unavailable:' + bound)
+        link.send_application(receipt)
+        replay = b'retry:' + bound
+        packet.require(link.receive_application(96) == replay)
+        link.live()
+        _creator_write(output, replay)
+        packet.require(link.receive_owner(96) == ALLOCATION_REFUSED)
+        link.send_application(ALLOCATION_REFUSED)
+        link.child.stdin.close()
+        packet.require(link.receive_application(96) == ALLOCATION_REFUSED)
+        return None, False
     commitment = _recovery_projection(receipt)
     link.send_application(receipt)
     packet.require(link.receive_application(96) == b'received:' + commitment)
@@ -595,8 +615,8 @@ def _coordinator_handoff(link, flow, nonce):
 
 def _coordinator_dialog(link, flow, nonce):
     commitment, stopped = _coordinator_handoff(link, flow, nonce)
-    if stopped:
-        return {'projection': None, 'lateRequestRefused': False}, True
+    if commitment is None:
+        return {'projection': None, 'lateRequestRefused': False}, stopped
     output = sys.stdout.buffer
     command = link.receive_owner(96)
     if flow == 'after-acquire':
@@ -628,7 +648,8 @@ def _run_recovery_coordinator(engine, flow, nonce, executable_pin, source_pins):
         '--recovery-coordinator', lambda link: _coordinator_dialog(link, flow, nonce), COORDINATOR_LIMIT_SECONDS)
     proof = dict(schema='fleetory.historical-recovery-coordinator.v1', nonce=nonce, flow=flow,
         coordinatorPid=pid, supervisorPid=os.getpid(), coordinatorExitCode=code,
-        identityVerified=True, exitObservedHeld=True, membersAbsent=True, fence=end['kind'], **result)
+        identityVerified=True, exitObservedHeld=True, membersAbsent=True, fence=end['kind'],
+        allocationReplayRefused=flow == CREATE_REFUSED, **result)
     _creator_write(sys.stdout.buffer, core.canonical(proof))
     return 0
 

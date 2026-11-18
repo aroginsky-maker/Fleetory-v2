@@ -226,6 +226,24 @@ function Assert-HistoricalCoordinator($Result,[string]$Flow,[bool]$Acquired,[boo
         Assert-ImmuData ($null -eq $Result.independentController -and $null -eq $Result.independentNativeOutcomeUnconfirmed) ('coordinator-no-historical-work-'+$Flow)
     }
 }
+function Assert-HistoricalRoutedCreateFault($Result,[string]$Fault){
+    $proof=$Result.routedCreateFault
+    $peer=$Result.recoveryCoordinator
+    Assert-ImmuData ($peer.flow -ceq 'create-refused' -and $peer.ownerAliveDuringCleanup -eq $true -and
+        $peer.identityVerified -eq $true -and $peer.exitObservedHeld -eq $true -and $peer.membersAbsent -eq $true -and
+        $peer.allocationRequests -eq 1 -and $peer.allocationReplayRefused -eq $true -and
+        $null -eq $peer.projection -and $peer.workRequests -eq 0 -and -not $peer.workAdmitted -and
+        $null -eq $Result.independentController -and $null -eq $Result.independentNativeOutcomeUnconfirmed) ('create-routed-admission-'+$Fault)
+    Assert-ImmuData ($proof.fault -ceq $Fault -and $proof.createDispatches -eq 1 -and
+        $proof.witnessPid -gt 0 -and $proof.witnessPid -notin @($peer.ownerPid,$peer.coordinatorPid,$peer.supervisorPid) -and
+        $proof.replySeenOnlyAfterCleanup -eq $true -and $proof.unknownCleanupRefused -eq $true -and
+        $proof.lateReplyRefused -eq $true -and $proof.idAdoptionRefused -eq $true -and $proof.witnessOwnedAbsenceVerified -eq $true -and
+        $proof.containerId -cmatch '^[a-f0-9]{64}\z' -and
+        $proof.containerId -cnotin @($script:controllerSourceId,$script:controllerForeignId)) ('create-routed-ownership-'+$Fault)
+    $r=Invoke-Docker @('inspect',$proof.containerId) -AllowFailure
+    Assert-ImmuData ($r.ExitCode -ne 0 -and ($r.Stdout+$r.Stderr) -match '(?i)no such (object|container)') ('create-routed-exact-absence-'+$Fault)
+}
+
 function Invoke-NativeHistoricalControllerWorkflow($Source,$Foreign){
     $script:controllerCaseNonces=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     $script:controllerSourceId=$Source.Id;$script:controllerForeignId=$Foreign.Id
@@ -351,6 +369,11 @@ function Invoke-NativeHistoricalControllerWorkflow($Source,$Foreign){
         $lost=Invoke-GeneratedController $plan $packet $script:stage $count ('coordinator-'+$flow)
         Assert-HistoricalCoordinator $lost $flow ($count -eq 1) ($flow -ceq 'lease-expired') $false
     }
+    foreach($fault in @('lost','truncated')){
+        $script:stage='controller-coordinator-create-'+$fault
+        $unknown=Invoke-GeneratedController $plan $packet $script:stage 0 ('coordinator-create-'+$fault)
+        Assert-HistoricalRoutedCreateFault $unknown $fault
+    }
     $script:stage='controller-code-probe-refusals'
     foreach($name in @('codeSha256','probeSha256')){
         $bad=($plan|ConvertTo-Json -Depth 8)|ConvertFrom-Json -AsHashtable;$bad[$name]='0'*64
@@ -396,15 +419,17 @@ function Invoke-NativeHistoricalControllerWorkflow($Source,$Foreign){
     Assert-ImmuData ($after.Parsed.observationSha256 -ceq $before.Parsed.observationSha256) 'controller-source-unchanged'
     $remainingBases=@($parents|ForEach-Object {(Invoke-Docker @('image','inspect','--format','{{.Id}}',$_)).Stdout.Trim()})
     Assert-ImmuData (($remainingBases -join '|') -ceq ($baseIds -join '|')) 'coordinator-base-images-preserved'
-    Assert-ImmuData ($script:controllerCaseNonces.Count -eq 30 -and -not $script:controllerCaseNonces.Contains($fixture) -and
+    Assert-ImmuData ($script:controllerCaseNonces.Count -eq 32 -and -not $script:controllerCaseNonces.Contains($fixture) -and
         (ConvertTo-Json $plan -Depth 8 -Compress) -ceq $parentPlan -and
         (ConvertTo-Json $packet -Depth 8 -Compress) -ceq $parentPacket) 'controller-distinct-cases'
     return @{schema='fleetory.generated-historical-audit-controller.v1';verified=$true;scope='generated-only';privateOwnerPipeVerified=$true;
-        knownEvents=4;nullMembersPreserved=1;nativeTransactions=5;controllerCases=30;faultCleanupCases=21;comparisonWorkerFaultCases=2;dotnetObservationLeafFaultCases=2;dotnetOtherModeFaultCases=6;typedRefusals=7;nativeArchiveCorruptionRefused=$true;
-        distinctOperationNonces=30;operationNoncesDifferFromSource=$true;sourceIdentityPreserved=$true;parentInputsUnchanged=$true;
+        knownEvents=4;nullMembersPreserved=1;nativeTransactions=5;controllerCases=32;faultCleanupCases=23;comparisonWorkerFaultCases=2;dotnetObservationLeafFaultCases=2;dotnetOtherModeFaultCases=6;typedRefusals=7;nativeArchiveCorruptionRefused=$true;
+        distinctOperationNonces=32;operationNoncesDifferFromSource=$true;sourceIdentityPreserved=$true;parentInputsUnchanged=$true;
         historicalWorkerCommandsPinned=$true;historicalWorkerRawRepliesRetained=$true;historicalWorkerOsFenceVerified=$false;historicalComparisonWorkerFenceVerified=$true;comparisonWorkerAbruptExitVerified=$true;comparisonWorkerPrematureEofVerified=$true;dotnetObservationLeafExitVerified=$true;dotnetObservationLeafEarlyEofVerified=$true;dotnetObservationLeafAbruptExitVerified=$true;dotnetAllModeExitsVerified=$true;dotnetAllModeEarlyEofAndAbruptExitVerified=$true;dotnetTransportLoss=$transport;independentCreatorCases=6;
         nativeRestartReplyFaultCases=2;nativeRestartReplyLossRefused=$true;nativeRestartMalformedReplyRefused=$true;nativeRestartLateReplyReplayRefused=$true;
-        recoveryCoordinatorCases=4;recoveryCoordinatorBeforeAcquireExitVerified=$true;recoveryCoordinatorAfterAcquireExitCleanupVerified=$true;recoveryCoordinatorLiveExpiryCleanupVerified=$true;recoveryCoordinatorFullSequenceVerified=$true;
+        recoveryCoordinatorCases=6;
+        routedCreateFaultCases=2;routedCreateMissingReplyRefused=$true;routedCreateTruncatedReplyRefused=$true;
+        routedCreateNativeReplayRefused=$true;routedCreateCoordinatorReplayRefused=$true;routedCreateSeparateWitnessCleanupVerified=$true;recoveryCoordinatorBeforeAcquireExitVerified=$true;recoveryCoordinatorAfterAcquireExitCleanupVerified=$true;recoveryCoordinatorLiveExpiryCleanupVerified=$true;recoveryCoordinatorFullSequenceVerified=$true;
         independentControllerObservationVerified=$true;independentCreatorControllerDeathCleanupVerified=$true;
         independentControllerFullSequenceVerified=$true;independentControllerHandoffExitCleanupVerified=$true;unconfirmedNativeOutcomeNotReplayed=$true;
         independentCreatorLiveLeaseExpiryCleanupVerified=$true;lateIndependentControllerReplayRefused=$true;codeInventoryV2Matched=$true;publishedProbeBundleMatched=$true;containerProbeBundleMatched=$true;revisionMismatchRefused=$true;probeBundleMismatchRefused=$true;

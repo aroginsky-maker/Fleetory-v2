@@ -367,6 +367,15 @@ exercise a five-second lease while the coordinator is still live. The owner
 finishes cleanup before rejecting the request sent after expiry. A normal
 handoff runs the existing independent application logic through all five
 stages and verifies cleanup. The tests check the actual generated image and
-container are absent and the source and foreign fixture survive. A separate
-witness still verifies that unknown creation replies confer no cleanup claim.
+container are absent and the source and foreign fixture survive. For a missing or truncated
+Docker create acknowledgement during allocation, the owner consumes the
+attempt and refuses the coordinator's replay without a second Docker call.
+A separate PowerShell witness runs the one fixed create command and retains
+the complete native reply and its own claim. The witness inherits only the
+environment needed to run the local CLI. It reports the exact generated
+ID and the complete reply to the test owner only after it verifies container
+absence. The owner refuses the authentic late reply and rejects cleanup by
+the supplied ID. The coordinator receives an allocation refusal and sees no
+resource projection or request to start the historical workload. The owner
+then cleans its original image and temporary payload from its own claims.
 Loss of the live resource owner, Docker daemon or host remains open.

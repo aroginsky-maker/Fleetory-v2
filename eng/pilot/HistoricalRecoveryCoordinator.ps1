@@ -2,7 +2,7 @@
 function Open-HistoricalRecoveryCoordinator([string]$Flow){
     $cancel=[Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds(108))
     $peer=@{flow=$Flow;holder=$null;cancel=$cancel;input=$null;output=$null;projection=$null;
-        lease=$null;allocationRequests=0;workRequests=0;workAdmitted=$false;expiredLiveCleanup=$false}
+        lease=$null;allocationRequests=0;workRequests=0;workAdmitted=$false;expiredLiveCleanup=$false;allocationReplayRefused=$false}
     try{
         $peer.holder=[Diagnostics.Process]::Start((New-IndependentControllerStart $Flow '--recovery-owner'))
         Assert-ImmuData ($null -ne $peer.holder -and $peer.holder.Id -ne $PID) 'coordinator-supervisor'
@@ -46,7 +46,7 @@ function Read-HistoricalCoordinatorWork($Peer){
     Receive-HistoricalCoordinatorFrame $Peer ('run:'+$Peer.projection)
     $Peer.workRequests++
 }
-function Finish-HistoricalRecoveryCoordinator($Peer,[ValidateSet('terminate','completed','refused')][string]$Outcome){
+function Finish-HistoricalRecoveryCoordinator($Peer,[ValidateSet('terminate','completed','refused','allocation-refused')][string]$Outcome){
     Send-HistoricalCoordinatorFrame $Peer $Outcome
     $Peer.input.Dispose()
     $token=$Peer.cancel.Token
@@ -55,13 +55,15 @@ function Finish-HistoricalRecoveryCoordinator($Peer,[ValidateSet('terminate','co
     $null=$holder.WaitForExitAsync($token).GetAwaiter().GetResult()
     $fence=if($IsLinux){'linux-process-group'}else{'windows-job-object'}
     Assert-ImmuData ($holder.ExitCode -eq 0 -and $Peer.output.ReadByte() -eq -1 -and $holder.StandardError.BaseStream.ReadByte() -eq -1 -and
-        $result.Count -eq 12 -and $result.schema -ceq 'fleetory.historical-recovery-coordinator.v1' -and
+        $result.Count -eq 13 -and $result.schema -ceq 'fleetory.historical-recovery-coordinator.v1' -and
         $result.nonce -ceq $plan.nonce -and $result.flow -ceq $Peer.flow -and $result.projection -ceq $Peer.projection -and
         $result.supervisorPid -eq $holder.Id -and $result.coordinatorPid -is [long] -and $result.coordinatorPid -gt 0 -and
         $result.coordinatorPid -notin @($PID,$holder.Id) -and $result.identityVerified -eq $true -and
         $result.membersAbsent -eq $true -and $result.exitObservedHeld -eq $true -and $result.fence -ceq $fence -and
         ($result.coordinatorExitCode -ne 0) -eq ($Outcome -ceq 'terminate') -and
-        $result.lateRequestRefused -eq ($Outcome -ceq 'refused')) 'coordinator-evidence'
+        $result.lateRequestRefused -eq ($Outcome -ceq 'refused') -and
+        $result.allocationReplayRefused -eq $Peer.allocationReplayRefused -and
+        $result.allocationReplayRefused -eq ($Outcome -ceq 'allocation-refused')) 'coordinator-evidence'
     $result.ownerPid=$PID
     $result.allocationRequests=$Peer.allocationRequests
     $result.workRequests=$Peer.workRequests
@@ -69,6 +71,21 @@ function Finish-HistoricalRecoveryCoordinator($Peer,[ValidateSet('terminate','co
     $result.expiredLiveCleanup=$Peer.expiredLiveCleanup
     return $result
 }
+function Complete-HistoricalCoordinatorCreateRefusal($Peer){
+    Assert-ImmuData ($Peer.allocationRequests -eq 1 -and $null -eq $Peer.projection -and
+        $Peer.workRequests -eq 0 -and -not $Peer.workAdmitted) 'coordinator-allocation-unavailable'
+    Send-HistoricalCoordinatorFrame $Peer ('unavailable:'+$plan.nonce)
+    Receive-HistoricalCoordinatorFrame $Peer ('retry:'+$plan.nonce)
+    $blocked=$false
+    try{Enter-HistoricalCoordinatorAllocation $Peer}catch{
+        if($_.Exception.GetBaseException().Message -cne 'Audit data fixture refused: coordinator-allocation-replay'){throw}
+        $blocked=$true
+    }
+    Assert-ImmuData ($blocked -and $Peer.allocationRequests -eq 1) 'coordinator-did-not-repeat-allocation'
+    $Peer.allocationReplayRefused=$true
+    return Finish-HistoricalRecoveryCoordinator $Peer 'allocation-refused'
+}
+
 function Close-HistoricalRecoveryCoordinator($Peer){
     if($null -eq $Peer){return}
     try{

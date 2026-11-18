@@ -57,17 +57,30 @@ function Start-AuditDataServer($Context,$Store){
     for($n=0;$n -lt 20;$n++){try{Invoke-AuditDataHealth $Store;$ready=$true;break}catch{Start-Sleep -Milliseconds 200}}
     Assert-ImmuData $ready 'server-ready'
 }
-function New-AuditDataStore($Context,[string]$Role){
-    Assert-ImmuData ($Role -cin @('source','target','corrupt') -and $Context.SigningPems.ContainsKey($Role)) 'generated-store-role'
-    $imageId=[Fleetory.Pilot.AuditImageCustody]::Id($Context,${function:Invoke-Docker})
-    $session=[Guid]::NewGuid().ToString('D');$name='fleetory-immu-store-'+$session.Replace('-','')
-    $absent=Invoke-Docker @('inspect',$name) -AllowFailure
+function Assert-FreshAuditDataStoreName([string]$Name){
+    $absent=Invoke-Docker @('inspect',$Name) -AllowFailure
     Assert-ImmuData ($absent.ExitCode -ne 0 -and ($absent.Stderr+$absent.Stdout) -match '(?i)no such (object|container)') 'fresh-name'
-    $s=@{Id=$null;Session=$session;Name=$name;Started=[DateTimeOffset]::UtcNow;Role=$Role};$Context.Stores.Add($s);Write-AuditDataLedger $Context
-    $arguments=@('run','-d','--rm','--name',$name,'--label',('fleetory.immu-data.session='+$session),'--network','none','--read-only','--user','3322:3322',
+}
+function New-AuditDataStoreIntent($Context,[string]$Role,[switch]$WitnessChecksName){
+    Assert-ImmuData ($Role -cin @('source','target','corrupt') -and $Context.SigningPems.ContainsKey($Role)) 'generated-store-role'
+    $null=[Fleetory.Pilot.AuditImageCustody]::Id($Context,${function:Invoke-Docker})
+    $session=[Guid]::NewGuid().ToString('D');$name='fleetory-immu-store-'+$session.Replace('-','')
+    if(-not $WitnessChecksName){Assert-FreshAuditDataStoreName $name}
+    $store=@{Id=$null;Session=$session;Name=$name;Started=[DateTimeOffset]::UtcNow;Role=$Role}
+    $Context.Stores.Add($store)
+    Write-AuditDataLedger $Context
+    return $store
+}
+function Get-AuditDataStoreArguments($Context,$Store,[string]$ImageId){
+    @('run','-d','--rm','--name',$Store.Name,'--label',('fleetory.immu-data.session='+$Store.Session),'--network','none','--read-only','--user','3322:3322',
         '--cap-drop','ALL','--security-opt','no-new-privileges','--memory','384m','--cpus','1','--pids-limit','128','--ulimit','core=0',
         '--tmpfs',('/data:'+$script:nativeAuditTmpfs['/data']),'--tmpfs',('/tmp:'+$script:nativeAuditTmpfs['/tmp']),
-        '--entrypoint','/bin/sh',$imageId,'-c',('exec /bin/sleep '+(Get-AuditDataLifetime $Context)))
+        '--entrypoint','/bin/sh',$ImageId,'-c',('exec /bin/sleep '+(Get-AuditDataLifetime $Context)))
+}
+function New-AuditDataStore($Context,[string]$Role){
+    $s=New-AuditDataStoreIntent $Context $Role
+    $imageId=[Fleetory.Pilot.AuditImageCustody]::Id($Context,${function:Invoke-Docker})
+    $arguments=Get-AuditDataStoreArguments $Context $s $imageId
     $null=Invoke-AuditDataContainerOperation $Context $s 'Create' $arguments
     Write-AuditDataLedger $Context;Read-AuditDataStore $Context $s
     Assert-ImmuData ((Invoke-Docker @('exec',$s.Id,'sha256sum','/tool/ServerBackendProbe.dll')).Stdout.Split(' ')[0] -ceq $Context.ProbeHash) 'probe-code-identity'

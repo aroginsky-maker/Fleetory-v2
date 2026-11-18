@@ -169,6 +169,27 @@ class HistoricalObservationTests(unittest.TestCase):
             self.assertEqual(execute(mutated).returncode, 1)
         self.assertEqual(execute(frames, b'extra').returncode, 1)
 
+    def test_recovery_coordinator_refuses_allocation_without_projection(self):
+        nonce = NONCE.encode('ascii')
+        frames = (b'admit:' + nonce, b'unavailable:' + nonce, policy.ALLOCATION_REFUSED)
+
+        def execute(parts):
+            payload = b''.join(policy._creator_frame(part) for part in parts)
+            return subprocess.run((sys.executable, '-I', '-S', '-B', policy.__file__, '--recovery-coordinator', NONCE),
+                                  input=payload, capture_output=True, timeout=8, check=False)
+
+        result = execute(frames)
+        self.assertEqual(result.returncode, 0)
+        self.assertFalse(result.stderr)
+        expected = (policy.READY, b'acquire:' + nonce, b'retry:' + nonce, policy.ALLOCATION_REFUSED)
+        output = io.BytesIO(result.stdout)
+        self.assertEqual(tuple(policy._creator_read(output) for _ in expected), expected)
+        self.assertFalse(output.read(1))
+        for invalid in ((frames[0], b'unavailable:' + b'0' * 36, frames[2]),
+                        (*frames[:2], b'owned:' + b'a' * 64),
+                        (*frames, b'work:' + b'a' * 64)):
+            self.assertEqual(execute(invalid).returncode, 1)
+
     def test_strict_and_historical_protocols_do_not_accept_each_other(self):
         with self.assertRaises(ValueError):
             policy.core.expectation(self.expected)
