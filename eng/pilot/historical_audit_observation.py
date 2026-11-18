@@ -1,7 +1,16 @@
-"""Historical-only observation envelopes. No file, process, restore or connection API."""
+"""Historical audit comparison and its private, fenced CLI."""
+from contextlib import ExitStack
 import hashlib
 import json
+import os
+from pathlib import Path
 import sys
+import threading
+import time
+from types import SimpleNamespace
+
+if __name__ == '__main__' and sys.flags.isolated and sys.flags.no_site:
+    sys.path.append(str(Path(__file__).resolve().parent))
 
 import audit_observation as core
 import fresh_server_pair as packet
@@ -122,11 +131,151 @@ def run():
     return evaluate_request(sys.argv[1], sys.stdin.buffer.read(core.MAX_BODY + 1))
 
 
+DIRECTORY = Path(__file__).resolve().parent
+SOURCES = ('historical_audit_observation', 'audit_observation',
+           'audit_process_fence', 'audit_process_posix', 'audit_process_windows',
+           'audit_control_identity', 'recovery_files', 'fresh_server_pair', 'audit_archive')
+OPERATIONS = ('build', 'observe')
+FAULTS = ('none', 'early-eof', 'abrupt-exit')
+READY = b'fleetory historical comparison ready\n'
+EARLY_EOF = b'fleetory historical comparison input incomplete\n'
+WORK_LIMIT_SECONDS = 7
+
+
+def _read_worker_input(stream, maximum):
+    header = stream.read(4)
+    if len(header) != 4:
+        raise EOFError
+    size = int.from_bytes(header, 'big')
+    if not 0 < size <= maximum:
+        raise ValueError('Historical comparison frame size refused.')
+    body = stream.read(size)
+    if len(body) != size:
+        raise EOFError
+    if stream.read(1):
+        raise ValueError('Historical comparison frame has trailing data.')
+    return body
+
+
+def _serve_worker(operation):
+    output = sys.stdout.buffer
+    output.write(READY)
+    output.flush()
+    try:
+        request = _read_worker_input(sys.stdin.buffer, core.MAX_BODY)
+    except EOFError:
+        sys.stderr.buffer.write(EARLY_EOF)
+        return 2
+    output.write(json.dumps(evaluate_request(operation, request), sort_keys=True).encode('ascii'))
+    output.flush()
+    return 0
+
+
+def _capture(engine, child, request, fault):
+    class FramedPumps(engine._Pumps):
+        def __init__(self):
+            super().__init__(child, request)
+            self.release = threading.Event()
+            self.expected_input_bytes = 4 + (len(request) if fault == 'none' else 0)
+
+        def _write(self):
+            while not self.release.wait(0.02):
+                if self.stopping.is_set():
+                    return
+            try:
+                self._send(len(self.data).to_bytes(4, 'big'))
+                if fault == 'none':
+                    self._send(self.data)
+            except OSError:
+                self.errors.append('input-io')
+            finally:
+                self._close_input()
+
+    return FramedPumps()
+
+
+def _hold(held, engine, executable_pin, source_pins):
+    tool = held.enter_context(engine.PinnedFile(sys.executable, executable_pin, executable=True))
+    if len(source_pins) != len(SOURCES):
+        raise ValueError('Historical comparison source set refused.')
+    pins = tuple(held.enter_context(engine.PinnedFile(DIRECTORY / (name + '.py'), digest))
+                 for name, digest in zip(SOURCES, source_pins))
+    return tool, pins
+
+
+def _await_ready(engine, child, fence, pumps, start):
+    while len(pumps.stdout) < len(READY):
+        engine._check_deadline(start, WORK_LIMIT_SECONDS)
+        if pumps.errors or pumps.stderr or (child.poll() is not None if os.name == 'nt' else fence.exited()):
+            raise engine.LaunchError('historical-worker-ready')
+        time.sleep(0.01)
+    if pumps.stdout != READY or pumps.stderr or pumps.errors:
+        raise engine.LaunchError('historical-worker-ready')
+
+
+def _run_worker(engine, operation, fault, request, executable_pin, source_pins):
+    start = time.monotonic_ns()
+    child = fence = pumps = None
+    with ExitStack() as held:
+        tool, pins = _hold(held, engine, executable_pin, source_pins)
+        command = SimpleNamespace(executable=tool, arguments=('-I', '-S', '-B', str(pins[0].path), '--child', operation),
+                                  directory=DIRECTORY, env=engine.environment(tool))
+        try:
+            child = engine._spawn(command)
+            fence = engine._create_fence(child)
+            identity = fence.identity(child, tool)
+            pumps = _capture(engine, child, request, fault)
+            pumps.start()
+            _await_ready(engine, child, fence, pumps, start)
+            packet.require(fence.identity(child, tool) == identity)
+            for pin in pins:
+                pin.check()
+            engine._check_deadline(start, WORK_LIMIT_SECONDS)
+            if fault != 'abrupt-exit':
+                pumps.release.set()
+                # An exact early EOF emits its own refusal on stderr. It is not a pipe failure.
+                engine._wait_for_owner(child, fence, pumps, start, WORK_LIMIT_SECONDS)
+        finally:
+            end, close_error = engine._finish_owned(child, fence, pumps)
+            packet.require(close_error is None and (child is None or end is not None and end['noRunningMembersVerified']))
+        for pin in pins:
+            pin.check()
+        packet.require(not pumps.errors)
+        if fault == 'abrupt-exit':
+            packet.require(child.returncode != 0 and not pumps.input_written and pumps.stdout == READY and not pumps.stderr)
+            result = None
+        elif fault == 'early-eof':
+            packet.require(child.returncode == 2 and pumps.input_written == 4 and pumps.stdout == READY and pumps.stderr == EARLY_EOF)
+            result = None
+        else:
+            packet.require(child.returncode == 0 and pumps.input_written == pumps.expected_input_bytes and not pumps.stderr)
+            result = packet.strict_json(bytes(pumps.stdout[len(READY):]), engine.MAX_STDOUT)
+        return dict(schema='fleetory.historical-comparison-worker.v1', operation=operation, fault=fault,
+                    childImageAndBirthVerified=True, childMembersAbsent=True, childExitCode=child.returncode,
+                    fence=end['kind'], requestBytes=pumps.input_written, result=result)
+
+
+def _fenced_cli():
+    packet.require(sys.flags.isolated and sys.flags.no_site)
+    if len(sys.argv) == 3 and sys.argv[1] == '--child' and sys.argv[2] in OPERATIONS:
+        return _serve_worker(sys.argv[2])
+    import audit_process_fence as engine
+    packet.require(len(sys.argv) == 6 and sys.argv[1] == '--fenced')
+    operation, fault, executable_pin, source_pins = sys.argv[2:]
+    packet.require(operation in OPERATIONS and fault in FAULTS and (fault == 'none' or operation == 'build'))
+    request = sys.stdin.buffer.read(core.MAX_BODY + 1)
+    packet.require(0 < len(request) <= core.MAX_BODY)
+    result = _run_worker(engine, operation, fault, request, executable_pin, source_pins.split(','))
+    print(json.dumps(result, sort_keys=True))
+    return 0
+
+
 if __name__ == '__main__':
     try:
+        if len(sys.argv) > 1 and sys.argv[1] in ('--fenced', '--child'):
+            sys.exit(_fenced_cli())
         result = run()
     except Exception:
         print('Historical observation refused; no paths, values or credentials logged.', file=sys.stderr)
         sys.exit(1)
-    # build emits hash/identity metadata for a private owning pipe; never log original packets.
     print(json.dumps(result, sort_keys=True))

@@ -74,7 +74,7 @@ function Invoke-HistoricalComparison([ValidateSet('build','observe')][string]$Op
     Assert-ImmuData ($watch.Elapsed.TotalSeconds -lt 590) 'controller-deadline'
     $bytes=[Text.Encoding]::UTF8.GetBytes(($Request|ConvertTo-Json -Compress -Depth 8 -WarningAction Stop))
     try{
-        $reply=Invoke-NativeBytes $comparisonPython @('-I','-S','-B',(Join-Path $PSScriptRoot 'historical_observation_worker.py'),
+        $reply=Invoke-NativeBytes $comparisonPython @('-I','-S','-B',(Join-Path $PSScriptRoot 'historical_audit_observation.py'),'--fenced',
             $Operation,$Fault,$comparisonPythonHash,$codeSnapshot.comparisonSourcePins) $bytes 10
     }finally{[Array]::Clear($bytes,0,$bytes.Length)}
     Assert-ImmuData ($reply.ExitCode -eq 0 -and [string]::IsNullOrWhiteSpace($reply.Stderr)) 'controller-comparison-worker'

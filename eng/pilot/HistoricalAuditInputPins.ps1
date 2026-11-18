@@ -42,11 +42,11 @@ function Get-HistoricalAuditCodeSnapshot([string]$Repository,[string]$Git='git',
     Assert-ImmuData ($names.Count -gt $roots.Count -and $names.Count -le 768) 'controller-code-count'
     $ordered=[string[]]@($names);[Array]::Sort($ordered,[StringComparer]::Ordinal)
     $lines=[Text.StringBuilder]::new("fleetory.historical.native-controller-code.v2`n$revision`n")
-    $comparisonSources=@('eng/pilot/historical_observation_worker.py','eng/pilot/historical_audit_observation.py',
-        'eng/pilot/audit_observation.py','eng/pilot/audit_process_fence.py',
-        'eng/pilot/audit_process_posix.py','eng/pilot/audit_process_windows.py',
-        'eng/pilot/audit_control_identity.py','eng/pilot/recovery_files.py',
-        'eng/pilot/fresh_server_pair.py','eng/pilot/audit_archive.py')
+    $comparisonSources=@('eng/pilot/historical_audit_observation.py','eng/pilot/audit_observation.py',
+        'eng/pilot/audit_process_fence.py','eng/pilot/audit_process_posix.py',
+        'eng/pilot/audit_process_windows.py','eng/pilot/audit_control_identity.py',
+        'eng/pilot/recovery_files.py','eng/pilot/fresh_server_pair.py',
+        'eng/pilot/audit_archive.py')
     $selected=@{}
     [long]$total=0
     foreach($name in $ordered){
