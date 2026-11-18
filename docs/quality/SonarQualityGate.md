@@ -163,6 +163,13 @@ tests/end sequence. Those tests exercise different build outputs. This change
 does not reuse a prior report across those gates or add a skip/reuse option to
 standalone verify-sonar.ps1. The working coverage target remains about 90%.
 
+The combined quality entrypoint checks and prints `NATIVE COVERAGE` immediately
+after successful collection and before scanner end submits the report and
+waits for the external Quality Gate. A runner interrupted during that wait
+can retain the native result. A failed collector cannot publish its partial
+report as verified coverage. The final summary and exit code continue to
+require the external gate in configured mode.
+
 ### Orchestration regression
 
 Run tests/Fleetory.Tools.Tests/QualityOrchestration.Tests.ps1 with PowerShell 7.3+

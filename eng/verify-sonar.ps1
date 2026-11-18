@@ -1,4 +1,6 @@
-﻿$ErrorActionPreference = 'Stop'
+﻿param([scriptblock] $OnCoverageReady)
+
+$ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 # Keep local/CI output deterministic and avoid Windows console mojibake.
@@ -116,6 +118,10 @@ try {
         '--no-incremental', '--disable-build-servers'
     )
 
+    if (Test-Path -LiteralPath $CoveragePath) {
+        throw "Coverage report already exists before collection at '$CoveragePath'."
+    }
+
     $testCommand = 'dotnet test Fleetory.sln -c Release --no-build --no-restore'
     Invoke-Dotnet @(
         'tool', 'run', 'dotnet-coverage', '--allow-roll-forward', '--',
@@ -130,6 +136,10 @@ try {
 
     if ((Get-Item -LiteralPath $CoveragePath).Length -le 0) {
         throw "Coverage report '$CoveragePath' is empty."
+    }
+
+    if ($null -ne $OnCoverageReady) {
+        & $OnCoverageReady $CoveragePath
     }
 
     Invoke-Dotnet @(

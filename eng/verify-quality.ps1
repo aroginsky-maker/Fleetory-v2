@@ -18,8 +18,7 @@ $StrictBuildStatus = 'NOT RUN'
 $DependencyAuditStatus = 'NOT RUN'
 $TestsStatus = 'NOT RUN'
 $ArchitectureTestsStatus = 'NOT RUN'
-$CoverageStatus = 'NOT RUN'
-$CoverageDisplay = 'NOT VERIFIED'
+$Coverage = @{ Status = 'NOT RUN'; Display = 'NOT VERIFIED' }
 $SonarAnalysisStatus = 'NOT VERIFIED'
 $SonarQualityGateStatus = 'NOT VERIFIED'
 
@@ -31,7 +30,7 @@ function Write-Summary {
     Write-Host ("DEPENDENCY AUDIT    {0}" -f $DependencyAuditStatus)
     Write-Host ("TESTS               {0}" -f $TestsStatus)
     Write-Host ("ARCHITECTURE TESTS  {0}" -f $ArchitectureTestsStatus)
-    Write-Host ("COVERAGE            {0} / {1}" -f $CoverageDisplay, $CoverageStatus)
+    Write-Host ("COVERAGE            {0} / {1}" -f $Coverage.Display, $Coverage.Status)
     Write-Host ("SONAR ANALYSIS      {0}" -f $SonarAnalysisStatus)
     Write-Host ("SONAR QUALITY GATE  {0}" -f $SonarQualityGateStatus)
 }
@@ -72,6 +71,21 @@ function Get-ProductionLineCoverage([string] $Path) {
     }
 
     return [math]::Round(($covered * 100.0) / $total, 2)
+}
+
+function Publish-ProductionCoverage([string] $Path) {
+    try {
+        $percent = Get-ProductionLineCoverage $Path
+        $Coverage.Display = $percent.ToString('0.00', [Globalization.CultureInfo]::InvariantCulture) + '%'
+        $Coverage.Status = if ($percent -ge 80.0) { 'PASS' } else { 'FAIL' }
+    }
+    catch {
+        $Coverage.Status = 'FAIL'
+        $Coverage.Display = 'NOT AVAILABLE'
+        Write-Warning $_.Exception.Message
+    }
+
+    Write-Host ("NATIVE COVERAGE     {0} / {1}" -f $Coverage.Display, $Coverage.Status)
 }
 
 $SonarHostUrl = [Environment]::GetEnvironmentVariable('SONAR_HOST_URL')
@@ -158,7 +172,7 @@ try {
     $testArguments = @('test', 'Fleetory.sln', '-c', 'Release', '--no-build', '--no-restore')
     if ($setSonarValues -eq 0) {
         if ((Invoke-DotnetStep @('tool', 'restore')) -ne 0) {
-            $CoverageStatus = 'FAIL (tool restore)'
+            $Coverage.Status = 'FAIL (tool restore)'
             Write-Summary
             exit 1
         }
@@ -204,30 +218,30 @@ try {
 
     if ($setSonarValues -eq 3) {
         try {
-            & (Join-Path $PSScriptRoot 'verify-sonar.ps1')
+            & (Join-Path $PSScriptRoot 'verify-sonar.ps1') -OnCoverageReady {
+                param([string] $FreshReport)
+                Publish-ProductionCoverage $FreshReport
+            }
             $SonarAnalysisStatus = 'PASS'
             $SonarQualityGateStatus = 'PASS'
         }
         catch {
             $SonarAnalysisStatus = 'FAIL'
             $SonarQualityGateStatus = 'FAIL'
+            if ($Coverage.Status -eq 'NOT RUN') {
+                $Coverage.Status = 'FAIL'
+                $Coverage.Display = 'NOT AVAILABLE'
+            }
             Write-Warning $_.Exception.Message
         }
     }
-    try {
-        $coveragePercent = Get-ProductionLineCoverage $CoveragePath
-        $CoverageDisplay = ('{0:N2}%' -f $coveragePercent)
-        $CoverageStatus = if ($coveragePercent -ge 80.0) { 'PASS' } else { 'FAIL' }
-    }
-    catch {
-        $CoverageStatus = 'FAIL'
-        $CoverageDisplay = 'NOT AVAILABLE'
-        Write-Warning $_.Exception.Message
+    else {
+        Publish-ProductionCoverage $CoveragePath
     }
 
     Write-Summary
 
-    if ($CoverageStatus -ne 'PASS') {
+    if ($Coverage.Status -ne 'PASS') {
         exit 1
     }
 

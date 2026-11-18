@@ -73,6 +73,12 @@ function global:dotnet {
     }
     if (-not $kind) { throw 'Unexpected fixture dotnet command.' }
     Write-FixtureTrace $kind $arguments
+    if ($kind -eq 'scanner-end') {
+        Write-Host 'FIXTURE SCANNER END'
+        if ($global:QualityFixtureMode -eq 'scanner-end-interrupted') {
+            [Environment]::Exit(124)
+        }
+    }
     if ($kind -eq 'solution-tests' -and
         ($arguments -join ' ') -cne 'test Fleetory.sln -c Release --no-build --no-restore') {
         throw 'Strict gate did not request the unfiltered Release solution suite.'
@@ -98,6 +104,10 @@ function global:dotnet {
         $global:LASTEXITCODE = 17
         return
     }
+    if ($kind -eq 'test-owner-build' -and $global:QualityFixtureMode -eq 'scanner-stale-report') {
+        $report = Join-Path $PSScriptRoot 'artifacts/coverage/coverage.xml'
+        [IO.File]::WriteAllText($report, '<results><modules><module name="Fleetory.Core.dll" lines_covered="100" lines_partially_covered="0" lines_not_covered="0" /></modules></results>')
+    }
     if ($kind -eq 'coverage-collect') {
         $collectIndex = [Array]::IndexOf($arguments, 'collect')
         if ($collectIndex + 1 -ge $arguments.Count -or
@@ -109,13 +119,17 @@ function global:dotnet {
         $index = [Array]::IndexOf($arguments, '-o')
         if ($index -lt 0 -or $index + 1 -ge $arguments.Count) { throw 'Missing coverage output path.' }
         $report = $arguments[$index + 1]
-        $covered = if ($global:QualityFixtureMode -eq 'coverage-low') { 79 } elseif ($global:QualityFixtureMode -eq 'minimum') { 80 } else { 90 }
+        $covered = if ($global:QualityFixtureMode -in @('coverage-low','scanner-coverage-low')) { 79 } elseif ($global:QualityFixtureMode -eq 'minimum') { 80 } else { 90 }
         $module = if ($global:QualityFixtureMode -eq 'coverage-tests-only') { 'Fleetory.Core.Tests.dll' } else { 'Fleetory.Core.dll' }
         $xml = '<results><modules><module name="' + $module + '" lines_covered="' + $covered +
             '" lines_partially_covered="0" lines_not_covered="' + (100 - $covered) + '" /></modules></results>'
         if ($global:QualityFixtureMode -eq 'coverage-empty') { $xml = '' }
         if ($global:QualityFixtureMode -eq 'coverage-malformed') { $xml = '<invalid' }
         [IO.File]::WriteAllText($report, $xml)
+        if ($global:QualityFixtureMode -eq 'scanner-collector-partial') {
+            $global:LASTEXITCODE = 17
+            return
+        }
     }
     $global:LASTEXITCODE = 0
 }
@@ -207,6 +221,8 @@ try {
             $end = [Array]::IndexOf($kinds, 'scanner-end')
             Assert-True ($begin -gt [Array]::IndexOf($kinds,'scanner-clean') -and $build -gt $begin -and $owner -gt $build -and $collect -gt $owner -and $end -gt $collect) 'Standalone Sonar sequence changed.'
             if ($mode -eq 'configured') {
+                Assert-True ($result.Text -match '(?m)^NATIVE COVERAGE\s+90\.00% / PASS\r?$' -and
+                    $result.Text.IndexOf('NATIVE COVERAGE') -lt $result.Text.IndexOf('FIXTURE SCANNER END')) 'Fresh coverage was not emitted before scanner end.'
                 Assert-True ([Array]::IndexOf($kinds,'strict-build') -lt [Array]::IndexOf($kinds,'solution-tests') -and
                     [Array]::IndexOf($kinds,'solution-tests') -lt [Array]::IndexOf($kinds,'architecture-tests') -and
                     [Array]::IndexOf($kinds,'architecture-tests') -lt [Array]::IndexOf($kinds,'scanner-clean')) 'Sonar ran before independent strict prerequisites.'
@@ -241,7 +257,29 @@ try {
         }
         $script:passed++
     }
-    Write-Host ("QUALITY ORCHESTRATION TESTS PASS: " + $passed + " CLI scenarios and native collector exit 17; one covered local suite, independent strict/Sonar builds, architecture, fresh coverage, fail-closed errors and unconfigured exit 2.")
+    $interrupted = Invoke-QualityFixture 'scanner-end-interrupted'
+    Assert-True ($interrupted.Code -eq 124 -and $interrupted.Text -match '(?m)^NATIVE COVERAGE\s+90\.00% / PASS\r?$' -and
+        $interrupted.Text.IndexOf('NATIVE COVERAGE') -lt $interrupted.Text.IndexOf('FIXTURE SCANNER END') -and
+        $interrupted.Text -notmatch 'Fleetory quality verification summary|SONAR QUALITY GATE\s+PASS') 'Scanner interruption lost native evidence or claimed a successful external gate.'
+    $script:passed++
+
+    $low = Invoke-QualityFixture 'scanner-coverage-low'
+    Assert-True ($low.Code -eq 1 -and $low.Text -match '(?m)^NATIVE COVERAGE\s+79\.00% / FAIL\r?$' -and
+        $low.Text.IndexOf('NATIVE COVERAGE') -lt $low.Text.IndexOf('FIXTURE SCANNER END')) 'Configured coverage below the floor was accepted or reported late.'
+    $script:passed++
+
+    $partial = Invoke-QualityFixture 'scanner-collector-partial'
+    Assert-True ($partial.Code -eq 1 -and $partial.Text -match '(?m)^COVERAGE\s+NOT AVAILABLE / FAIL\r?$' -and
+        $partial.Text -notmatch '(?m)^NATIVE COVERAGE|FIXTURE SCANNER END|SONAR QUALITY GATE\s+PASS') 'A report from a failing collector was used.'
+    $script:passed++
+
+    $stale = Invoke-QualityFixture 'scanner-stale-report'
+    Assert-True ($stale.Code -eq 1 -and $stale.Text -match 'Coverage report already exists before collection' -and
+        @($stale.Trace | Where-Object { $_.kind -in @('coverage-collect','scanner-end') }).Count -eq 0 -and
+        $stale.Text -notmatch '(?m)^NATIVE COVERAGE') 'A stale report reached collection or the external gate.'
+    $script:passed++
+
+    Write-Host ("QUALITY ORCHESTRATION TESTS PASS: " + $passed + " CLI scenarios and native collector exit 17; one covered local suite, independent strict/Sonar builds, architecture, fresh coverage before scanner end, scanner interruption, fail-closed errors and unconfigured exit 2.")
 }
 finally { Remove-FleetoryTestArtifacts -Work $work -RepoRoot $repo }
 $global:LASTEXITCODE = 0
