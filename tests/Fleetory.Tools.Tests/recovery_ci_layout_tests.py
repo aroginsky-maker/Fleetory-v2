@@ -14,10 +14,21 @@ DATA = (
     ('NativePgInventoryV2.Tests.ps1', ''), ('NativeImmuDataRoundtrip.Tests.ps1', ''),
     ('NativeAuditHistory.Tests.ps1', ''), ('NativeAuditHistory.Tests.ps1', '-Profile observation'),
     ('NativeAuditHistory.Tests.ps1', '-Profile historical-observation'),
-    ('NativeAuditHistory.Tests.ps1', '-Profile historical-controller'),
-    ('NativeServerPair.Tests.ps1', ''), ('NativeServerPair.Tests.ps1', '-Profile v2'))
-PROVIDER = tuple((name, '') for name in ('PilotProvisioning.Tests.ps1', 'IdentityBackup.Tests.ps1',
-    'OpenBaoRaftRecovery.Tests.ps1', 'NativeSignerBackend.Tests.ps1', 'NativeJournalBackend.Tests.ps1'))
+    ('NativeAuditHistory.Tests.ps1', '-Profile historical-controller'))
+PROVIDER = (
+    ('PilotProvisioning.Tests.ps1', ''), ('IdentityBackup.Tests.ps1', ''),
+    ('OpenBaoRaftRecovery.Tests.ps1', ''), ('NativeSignerBackend.Tests.ps1', ''),
+    ('NativeJournalBackend.Tests.ps1', ''), ('NativeServerPair.Tests.ps1', ''),
+    ('NativeServerPair.Tests.ps1', '-Profile v2'))
+PAIR_ADMISSION = (
+    '      - name: Verify coherent native Server pair restore and lifecycle\n'
+    '        shell: pwsh\n'
+    '        run: |\n'
+    '          python3 -B ./tests/Fleetory.Tools.Tests/fresh_server_pair_tests.py\n'
+    "          if ($LASTEXITCODE -ne 0) { throw 'Fresh pair admission contract failed.' }\n"
+    '          dotnet restore ./eng/ServerBackendProbe/ServerBackendProbe.csproj --disable-parallel\n'
+    "          if ($LASTEXITCODE -ne 0) { throw 'Server backend probe restore failed.' }\n"
+    '          ./tests/Fleetory.Tools.Tests/NativeServerPair.Tests.ps1 -Python (Get-Command python3).Source\n')
 
 
 WINDOWS_POLICY = (
@@ -92,6 +103,13 @@ def validate(text):
             matches = [line for line in commands if line == prefix or line.startswith(prefix + ' -Python ')]
             assert len(matches) == 1, (key, name, profile)
         assert len(commands) == len(cases)
+    provider = blocks['native-provider-recovery']
+    assert provider.count(PAIR_ADMISSION) == 1
+    start = provider.index(PAIR_ADMISSION)
+    end = provider.find('      - name:', start + len(PAIR_ADMISSION))
+    assert provider[start:end if end >= 0 else len(provider)].strip() == PAIR_ADMISSION.strip()
+    assert provider.count('dotnet restore ./eng/ServerBackendProbe/ServerBackendProbe.csproj') == 1
+    assert text.count('python3 -B ./tests/Fleetory.Tools.Tests/fresh_server_pair_tests.py') == 1
     for key, platform, executable in (('windows-tls-chain', ' on Windows', 'python'), ('quality', '', 'python3')):
         for title, filename in (('held audit control namespace identity', 'audit_control_identity_tests.py'),
                 ('owned process identity and lifetime fence', 'audit_process_fence_tests.py'),
@@ -482,6 +500,13 @@ class RecoveryCiLayoutTests(unittest.TestCase):
             self.refused(self.text.replace(command, 'omitted', 1))
             self.refused(self.text.replace(command, command + '\n          ' + command, 1))
             self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
+
+    def test_moved_server_pair_keeps_cold_runner_restore_and_input_gate(self):
+        for line in PAIR_ADMISSION.splitlines()[3:7]:
+            with self.subTest(line=line):
+                self.refused(self.text.replace(PAIR_ADMISSION, PAIR_ADMISSION.replace(line + '\n', '')))
+        self.refused(self.text.replace(PAIR_ADMISSION, '').replace(
+            '  native-provider-recovery:\n', PAIR_ADMISSION + '\n  native-provider-recovery:\n', 1))
 
     def test_actual_aggregate_rejects_failed_cancelled_skipped_or_missing_jobs(self):
         block = jobs(self.text)['quality-gate']
