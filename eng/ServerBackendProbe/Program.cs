@@ -31,7 +31,15 @@ internal static class Program
         "db-host-write", "host-degraded", "host-drain", "host-registered", "host-live", "host-revoked", "http-contract", "persistent-contract"
     };
 
-    public static async Task<int> Main(string[] args)
+    public static Task<int> Main(string[] args) => args switch
+    {
+        ["--historical-supervise", HistoricalProbeProcess.Mode] => HistoricalProbeProcess.SuperviseAsync(),
+        ["--historical-leaf"] => HistoricalProbeProcess.RunLeafAsync(
+            packet => ExecuteAsync([HistoricalProbeProcess.Mode], packet)),
+        _ => ExecuteAsync(args)
+    };
+
+    private static async Task<int> ExecuteAsync(string[] args, Stream? packet = null)
     {
         var historical = args.Length > 0 && args[0] == "audit-history-expectations";
         var expectations = historical || args.Length > 0 && args[0] == "audit-expectations";
@@ -42,7 +50,7 @@ internal static class Program
         var exit = 0;
         Console.SetOut(TextWriter.Null);
         Console.SetError(TextWriter.Null);
-        try { result = expectations ? await AuditEventExpectations.ExecuteAsync(args[1], args[2], historical) : await RunAsync(args[0]); }
+        try { result = expectations ? await AuditEventExpectations.ExecuteAsync(args[1], args[2], historical) : await RunAsync(args[0], packet); }
         catch (Exception exception)
         {
             result = new { category = "unexpected", errorType = exception.GetType().Name,
@@ -57,11 +65,11 @@ internal static class Program
         return exit;
     }
 
-    private static async Task<object> RunAsync(string mode)
+    private static async Task<object> RunAsync(string mode, Stream? packet)
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(18));
         if (mode == "observation-read") { return await AuditObservation.ExecuteAsync(deadline.Token); }
-        if (mode == "observation-history-read") { return await AuditObservation.ExecuteAsync(deadline.Token, true); }
+        if (mode == "observation-history-read") { return await AuditObservation.ExecuteAsync(deadline.Token, true, packet); }
         if (mode == "observation-history-seed") { return await HistoricalObservationFixture.SeedAsync(deadline.Token); }
         if (mode.StartsWith("observation-", StringComparison.Ordinal)) { return await AuditObservationFixture.ExecuteAsync(mode, deadline.Token); }
         if (mode.StartsWith("history-", StringComparison.Ordinal))

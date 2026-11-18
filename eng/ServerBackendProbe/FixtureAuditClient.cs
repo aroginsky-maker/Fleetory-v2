@@ -13,11 +13,11 @@ internal sealed class FixtureAuditClient : IDisposable
     internal static string Encode(string value) => Convert.ToBase64String(Encoding.UTF8.GetBytes(value));
     internal static string EventKey(Guid id) => Encode("fleetory/audit/v1/" + id.ToString("N"));
 
-    internal static async Task<JsonDocument> ReadPacketAsync(CancellationToken cancellation)
+    internal static async Task<JsonDocument> ReadPacketAsync(CancellationToken cancellation, Stream? packet = null)
     {
         var bytes = new byte[4097];
         var length = 0;
-        var input = Console.OpenStandardInput();
+        var input = packet ?? Console.OpenStandardInput();
         while (length < bytes.Length)
         {
             var read = await input.ReadAsync(bytes.AsMemory(length), cancellation);

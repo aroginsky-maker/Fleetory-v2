@@ -276,3 +276,16 @@ to remove its own container, image and payload. These checks cover the host
 comparison child. The in-container dotnet probe, the Docker daemon workload,
 loss of the original resource creator, and retention outside that creator still
 require separate evidence.
+
+The generated historical observation command runs its real .NET read operation
+in a fixed child within the target container. A Linux supervisor reads a bounded
+request, holds the child with a pidfd, checks its executable, parent and birth
+before sending the private frame, and observes actual exit before publishing the
+result. Legacy program entrypoints and the other three controller modes retain
+their previous behavior. The child uses a fixed temporary home for .NET TLS chain evaluation and the
+existing fixture CA paths. The fault cases withhold the body or terminate the held
+child before releasing it, and the original live controller verifies cleanup of
+its own target. A Docker transport failure cannot supply successful exit
+evidence. This covers one fixed leaf and its observed exit through the native
+exec reply. Process group containment and independent owner or daemon loss still
+require separate evidence.

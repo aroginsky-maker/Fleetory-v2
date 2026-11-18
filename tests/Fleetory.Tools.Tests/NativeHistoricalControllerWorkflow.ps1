@@ -177,6 +177,20 @@ function Invoke-GeneratedController($Plan,$Packet,[string]$ExpectedRefusal='',[i
         Assert-ImmuData ($r.ExitCode -eq 1 -and $r.Stderr.Trim() -ceq 'Historical native controller refused; no input contents or credentials logged.' -and
             $value.schema -ceq 'fleetory.historical-audit-controller-cleanup.v1' -and $value.refusal -ceq $ExpectedRefusal -and $value.cleanupVerified -eq $true) 'controller-typed-refusal'
     }else{
+        if($r.ExitCode -ne 0){
+            foreach($name in @('stage','refusal')){
+                if($value.ContainsKey($name) -and $value[$name] -cmatch '^[a-z0-9-]{1,64}\z'){
+                    [Console]::Error.WriteLine('Controller positive '+$name+'='+$value[$name])
+                }
+            }
+            if($value.dotnetApplicationRefusal -is [System.Collections.IDictionary]){
+                foreach($field in @('errorType','causeType','location')){
+                    if($value.dotnetApplicationRefusal[$field] -cmatch '^[A-Za-z0-9_]{1,80}\z'){
+                        [Console]::Error.WriteLine('Controller probe '+$field+'='+$value.dotnetApplicationRefusal[$field])
+                    }
+                }
+            }
+        }
         Assert-ImmuData ($r.ExitCode -eq 0 -and [string]::IsNullOrWhiteSpace($r.Stderr) -and $value.schema -ceq 'fleetory.historical-audit-owned-observation.v1' -and $value.verified -eq $true -and $value.cleanupVerified -eq $true) 'controller-positive'
     }
     Assert-ControllerResourcesAbsent $value.resources $Resources
@@ -207,6 +221,7 @@ function Invoke-NativeHistoricalControllerWorkflow($Source,$Foreign){
     Assert-ImmuData ($positive.historicalWorkerCommandsPinned -eq $true -and $positive.historicalWorkerRawRepliesRetained -eq $true -and
         $positive.historicalWorkerOsFenceVerified -eq $false -and $positive.historicalWorkerCalls -ge 7 -and $positive.historicalWorkerCalls -le 64) 'controller-closed-worker-profile'
     Assert-ImmuData ($positive.historicalComparisonWorkerFenceVerified -eq $true -and $positive.historicalComparisonWorkerCalls -eq 3) 'controller-actual-comparison-worker'
+    Assert-ImmuData ($positive.dotnetObservationLeafExitVerified -eq $true -and $positive.dotnetObservationLeafCalls -eq 3) 'controller-actual-dotnet-observation'
     foreach($name in @('sourceStateSignatureVerified','targetStateSignaturesVerified','codeAndProbePinsMatched','inputDigestsMatched','wrongPasswordRefused','readerWriteRefused','restartPreservedObservation','freshTargetCredentialsAndKeys','codeInventoryV2Matched','publishedProbeBundleMatched','containerProbeBundleMatched')){Assert-ImmuData ($positive[$name] -eq $true) 'controller-positive-evidence'}
     foreach($name in @('dataOriginAuthenticated','externalGatesAuthenticated','exclusiveUseLedgerVerified','originalPrivatePkiUsed','executionAuthorized','writerAdmissionVerified','fullSystemRecoveryVerified','phase7Complete')){Assert-ImmuData ($positive[$name] -eq $false) 'controller-no-authority-promotion'}
     Assert-ImmuData ($positive.targetLifetimeSeconds -eq 660 -and $positive.nativeDeadlineSeconds -eq 600 -and $positive.nativeRestores -eq 1 -and
@@ -225,6 +240,15 @@ function Invoke-NativeHistoricalControllerWorkflow($Source,$Foreign){
         Assert-ImmuData ($observed.fault -ceq $fault -and $observed.childImageAndBirthVerified -eq $true -and
             $observed.childMembersAbsent -eq $true -and $observed.requestBytes -eq $bytes -and
             $observed.childExitCode -ne 0 -and $null -eq $observed.result) 'controller-native-comparison-fault'
+    }
+    $script:stage='controller-dotnet-leaf-faults'
+    foreach($point in @('dotnet-early-eof','dotnet-abrupt-exit')){
+        $proof=Invoke-GeneratedController $plan $packet ('controller-'+$point) 1 $point
+        $leaf=$proof.dotnetFault
+        $expectedExit=if($point -ceq 'dotnet-early-eof'){65}else{137}
+        Assert-ImmuData ($leaf.mode -ceq 'observation-history-read' -and $leaf.heldBirthVerified -eq $true -and
+            $leaf.heldExitVerified -eq $true -and $leaf.childExitCode -eq $expectedExit -and
+            $leaf.payloadBytesReleased -eq 0 -and $leaf.stdout -ceq '') 'controller-native-dotnet-leaf-fault'
     }
     $script:stage='controller-code-probe-refusals'
     foreach($name in @('codeSha256','probeSha256')){
@@ -269,13 +293,13 @@ function Invoke-NativeHistoricalControllerWorkflow($Source,$Foreign){
     Assert-ImmuData $denied 'controller-foreign-lifetime-refused';Read-AuditDataStore $context $Foreign
     $after=Read-HistoricalObservation $Source $expected
     Assert-ImmuData ($after.Parsed.observationSha256 -ceq $before.Parsed.observationSha256) 'controller-source-unchanged'
-    Assert-ImmuData ($script:controllerCaseNonces.Count -eq 12 -and -not $script:controllerCaseNonces.Contains($fixture) -and
+    Assert-ImmuData ($script:controllerCaseNonces.Count -eq 14 -and -not $script:controllerCaseNonces.Contains($fixture) -and
         (ConvertTo-Json $plan -Depth 8 -Compress) -ceq $parentPlan -and
         (ConvertTo-Json $packet -Depth 8 -Compress) -ceq $parentPacket) 'controller-distinct-cases'
     return @{schema='fleetory.generated-historical-audit-controller.v1';verified=$true;scope='generated-only';privateOwnerPipeVerified=$true;
-        knownEvents=4;nullMembersPreserved=1;nativeTransactions=5;controllerCases=12;faultCleanupCases=4;comparisonWorkerFaultCases=2;typedRefusals=7;nativeArchiveCorruptionRefused=$true;
-        distinctOperationNonces=12;operationNoncesDifferFromSource=$true;sourceIdentityPreserved=$true;parentInputsUnchanged=$true;
-        historicalWorkerCommandsPinned=$true;historicalWorkerRawRepliesRetained=$true;historicalWorkerOsFenceVerified=$false;historicalComparisonWorkerFenceVerified=$true;comparisonWorkerAbruptExitVerified=$true;comparisonWorkerPrematureEofVerified=$true;codeInventoryV2Matched=$true;publishedProbeBundleMatched=$true;containerProbeBundleMatched=$true;revisionMismatchRefused=$true;probeBundleMismatchRefused=$true;
+        knownEvents=4;nullMembersPreserved=1;nativeTransactions=5;controllerCases=14;faultCleanupCases=6;comparisonWorkerFaultCases=2;dotnetObservationLeafFaultCases=2;typedRefusals=7;nativeArchiveCorruptionRefused=$true;
+        distinctOperationNonces=14;operationNoncesDifferFromSource=$true;sourceIdentityPreserved=$true;parentInputsUnchanged=$true;
+        historicalWorkerCommandsPinned=$true;historicalWorkerRawRepliesRetained=$true;historicalWorkerOsFenceVerified=$false;historicalComparisonWorkerFenceVerified=$true;comparisonWorkerAbruptExitVerified=$true;comparisonWorkerPrematureEofVerified=$true;dotnetObservationLeafExitVerified=$true;dotnetObservationLeafEarlyEofVerified=$true;dotnetObservationLeafAbruptExitVerified=$true;codeInventoryV2Matched=$true;publishedProbeBundleMatched=$true;containerProbeBundleMatched=$true;revisionMismatchRefused=$true;probeBundleMismatchRefused=$true;
         foreignLifetimeRefused=$true;copiedContextRefusedBeforeLookup=$true;sourceUnchanged=$true;nativeOwnerCleanupVerified=$true;nativePartialBuildReplyRefused=$true;nativeImageIdAdoptionRefused=$true;nativeForeignImageReadbackRefused=$true;nativeUntaggedImageWitnessDisposed=$true;nativeImageNoPruneVerified=$true;nativeImageRemovalReplayRefused=$true;partialNativeCreateReplyRefused=$true;unknownCreateNameAdoptionRefused=$true;liveCompleteReplyWitnessDisposed=$true;containerRemovalReplayRefused=$true;nativeAutoRemovedAbsenceVerified=$true;alreadyAbsentCleanupPerformedNoRm=$true;targetLifetimeSeconds=660;nativeDeadlineSeconds=600;
         originalInputsRead=$false;originalPrivatePkiUsed=$false;sourceVpsAccessed=$false;externalGatesAuthenticated=$false;exclusiveUseLedgerVerified=$false;
         historicalComparisonOnly=$true;writerAdmissionVerified=$false;executionAuthorized=$false;fullSystemRecoveryVerified=$false;phase7Complete=$false}

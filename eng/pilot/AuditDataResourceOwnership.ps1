@@ -235,6 +235,8 @@ namespace Fleetory.Pilot {
                 string id=OwnedId(p,store);
                 if(p.Calls>=64) throw Refused();
                 var args=new[]{"exec","-i","-e","SSL_CERT_FILE=/tmp/ca.pem","-e","SSL_CERT_DIR=/tmp/empty-ca-dir",id,"dotnet","/tool/ServerBackendProbe.dll",mode};
+                if(mode=="observation-history-read")
+                    args=new[]{args[0],args[1],args[2],args[3],args[4],args[5],args[6],args[7],args[8],"--historical-supervise",mode};
                 var sent=(string[])args.Clone();delivery=(byte[])frozen.Clone();
                 p.Calls++;p.Unknown=true; // Consume before the actual fixed native operation.
                 var reply=AuditNativeReply.Hold(operation(sent,delivery));

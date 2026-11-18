@@ -15,9 +15,9 @@ internal static class AuditObservation
     internal static JsonElement[] Array(JsonElement value, string name) => value.TryGetProperty(name, out var found)
         ? found.EnumerateArray().ToArray() : [];
 
-    internal static async Task<object> ExecuteAsync(CancellationToken cancellation, bool historical = false)
+    internal static async Task<object> ExecuteAsync(CancellationToken cancellation, bool historical = false, Stream? packetSource = null)
     {
-        using var input = await ReadPacketAsync(cancellation);
+        using var input = await ReadPacketAsync(cancellation, packetSource);
         var packet = input.RootElement;
         var expected = packet.GetProperty("observation");
         HistoricalObservationBinding.Validate(expected, historical);
