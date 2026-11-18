@@ -33,6 +33,8 @@ internal static class Program
 
     public static Task<int> Main(string[] args) => args switch
     {
+        ["--historical-restart-observe"] => HistoricalProbeProcess.ObserveRestartAsync(),
+        ["--historical-restart-stop", var claim] => Task.FromResult(HistoricalProbeProcess.StopHistoricalDaemon(claim)),
         ["--historical-transport-hold", var nonce] when HistoricalProbeProcess.IsTransportNonce(nonce) =>
             HistoricalProbeProcess.HoldTransportAsync(nonce),
         ["--historical-transport-observe", var nonce] when HistoricalProbeProcess.IsTransportNonce(nonce) =>

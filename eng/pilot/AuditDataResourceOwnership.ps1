@@ -197,13 +197,14 @@ namespace Fleetory.Pilot {
             internal readonly long Started=System.Diagnostics.Stopwatch.GetTimestamp();
             internal readonly System.Collections.Generic.List<Tuple<string,byte[],Tuple<int,byte[],byte[]>>> Replies=new();
             internal int Busy, Calls;
-            internal bool Unknown, TransportStarted;
+            internal bool Unknown, TransportStarted, RestartStarted;
             internal Profile(System.Collections.IDictionary context,object client) {
                 Context=context;Client=client;Values=AuditNativeReply.Values(context,Keys);
             }
         }
         private static readonly string[] Keys={"Fixture","Root","ImageName"};
         private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<object,Profile> Profiles=new();
+        private static readonly byte[] RestartAcknowledgement=System.Text.Encoding.ASCII.GetBytes("fleetory historical restart stop dispatched\n");
         private static InvalidOperationException Refused() => new("Historical probe profile refused.");
         private static Profile Get(System.Collections.IDictionary context,object client) {
             if(!Profiles.TryGetValue(context,out var p) || !ReferenceEquals(p.Context,context) || !ReferenceEquals(p.Client,client) ||
@@ -241,6 +242,32 @@ namespace Fleetory.Pilot {
                 return proof;
             } finally {System.Threading.Volatile.Write(ref p.Busy,0);}
         }
+        public static bool StopForRestart(System.Collections.IDictionary context,System.Collections.IDictionary store,object client,
+            string dockerPath,Func<string[],Tuple<int,byte[],byte[]>> operation) {
+            if(operation==null) throw Refused();
+            var p=Get(context,client);
+            if(System.Threading.Interlocked.CompareExchange(ref p.Busy,1,0)!=0) throw Refused();
+            try {
+                string target=OwnedId(p,store);
+                if(p.RestartStarted || p.Calls>=64) throw Refused();
+                p.RestartStarted=true;
+                p.Unknown=true;
+                p.Calls++;
+                string config=Path.Combine(p.Context["Root"].ToString(),"restart-docker-config");
+                ExclusiveAuditDirectory.Create(config);
+                var result=HistoricalDockerTransport.StopForRestart(dockerPath,config,target,operation);
+                if(OwnedId(p,store)!=target) throw Refused();
+                var raw=result.Item2;
+                if(raw==null) return false;
+                p.Replies.Add(Tuple.Create("restart-stop",System.Security.Cryptography.SHA256.HashData(result.Item1),raw));
+                if(raw.Item1!=0 || raw.Item3.Length!=0 || !raw.Item2.AsSpan().SequenceEqual(RestartAcknowledgement)) return false;
+                p.Unknown=false;
+                Get(context,client);
+                return true;
+            } catch {p.Unknown=true;throw;}
+            finally {System.Threading.Volatile.Write(ref p.Busy,0);}
+        }
+
         public static int Calls(System.Collections.IDictionary context,object client) => Get(context,client).Calls;
         public static Tuple<int,byte[],byte[]> Invoke(System.Collections.IDictionary context,System.Collections.IDictionary store,object client,
             string mode,byte[] input,Func<string[],byte[],Tuple<int,byte[],byte[]>> operation) {
@@ -279,9 +306,12 @@ namespace Fleetory.Pilot {
             new InvalidOperationException("Audit data fixture refused: controller-transport-"+stage);
         private static void Require(bool condition,string stage) {if(!condition) throw Failed(stage);}
 
+        private static string Endpoint => OperatingSystem.IsWindows() ?
+            "npipe:////./pipe/dockerDesktopLinuxEngine" : "unix:///var/run/docker.sock";
+
         internal static object Verify(string path,string config,string target,string nonce) {
             using(var time=new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(25))) {
-                var endpoint=OperatingSystem.IsWindows() ? "npipe:////./pipe/dockerDesktopLinuxEngine" : "unix:///var/run/docker.sock";
+                var endpoint=Endpoint;
                 using(var original=new Client(path,config,endpoint,target,"--historical-transport-hold",nonce)) {
                     byte[] claim=original.Read(24,time.Token);
                     byte[] wrongBirth=(byte[])claim.Clone();
@@ -316,13 +346,32 @@ namespace Fleetory.Pilot {
             }
         }
 
+        internal static Tuple<byte[],Tuple<int,byte[],byte[]>> StopForRestart(string path,string config,string target,
+            Func<string[],Tuple<int,byte[],byte[]>> operation) {
+            using(var time=new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(16))) {
+                using(var observer=new Client(path,config,Endpoint,target,"--historical-restart-observe")) {
+                    var claim=observer.Read(12,time.Token);
+                    var arguments=new[]{"exec",target,"dotnet",Assembly,"--historical-restart-stop",Convert.ToHexString(claim).ToLowerInvariant()};
+                    var sent=(string[])arguments.Clone();
+                    var result=operation(sent);
+                    var frozen=result==null?null:AuditNativeReply.Hold(result);
+                    Require(sent.AsSpan().SequenceEqual(arguments),"restart-command");
+                    observer.CloseInput();
+                    Require(observer.Read(1,time.Token)[0]==Exited,"restart-held-exit");
+                    observer.ExpectEnd(time.Token);
+                    Require(observer.Exit(time.Token)==0,"restart-observer-exit");
+                    return Tuple.Create(claim,frozen);
+                }
+            }
+        }
+
         private sealed class Client : IDisposable {
             private readonly System.Diagnostics.Process process;
             private readonly Microsoft.Win32.SafeHandles.SafeProcessHandle windowsHandle;
             private readonly Microsoft.Win32.SafeHandles.SafeFileHandle linuxHandle;
             private readonly Stream input,output,error;
 
-            internal Client(string executable,string config,string endpoint,string target,string mode,string nonce) {
+            internal Client(string executable,string config,string endpoint,string target,params string[] command) {
                 string full=Resolve(executable);
                 Require(String.Equals(Path.GetFileName(full),OperatingSystem.IsWindows()?"docker.exe":"docker",
                     OperatingSystem.IsWindows()?StringComparison.OrdinalIgnoreCase:StringComparison.Ordinal),"executable");
@@ -333,7 +382,8 @@ namespace Fleetory.Pilot {
                 if(OperatingSystem.IsWindows())
                     options.Environment["SystemRoot"]=Environment.GetEnvironmentVariable("SystemRoot");
                 foreach(string word in new[]{"--config",config,"--host",endpoint,"exec","-i","-e","SSL_CERT_FILE=/tmp/ca.pem",
-                    "-e","SSL_CERT_DIR=/tmp/empty-ca-dir",target,"dotnet",Assembly,mode,nonce}) options.ArgumentList.Add(word);
+                    "-e","SSL_CERT_DIR=/tmp/empty-ca-dir",target,"dotnet",Assembly}) options.ArgumentList.Add(word);
+                foreach(string word in command) options.ArgumentList.Add(word);
                 process=System.Diagnostics.Process.Start(options);
                 Require(process!=null,"start");
                 try {

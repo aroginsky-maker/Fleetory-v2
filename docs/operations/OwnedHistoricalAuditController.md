@@ -337,7 +337,18 @@ Job members before returning terminal evidence. On Linux it observes the
 controller exit without reaping until the group check. The creator closes its
 own Docker resources after the controller dies or while that controller still
 waits on expiry. A late replay after expiry is refused without a native read.
-The native tests verify the same source and the foreign fixture. The original
+The native tests verify the same source and the foreign fixture.
+
+For a restart, a read-only observer holds the target immudb process with a
+pidfd before dispatch. The stop command validates the same executable and
+process birth and sends one SIGTERM through its own descriptor. The owner
+requires both the complete native acknowledgement and exit on the observer's
+original descriptor before starting immudb again. Two generated cases keep the
+complete actual Docker reply in the test witness and withhold or truncate it at
+owner admission. Both observe the daemon exit but refuse a late reply and a
+second dispatch. The held application controller receives no restart result
+and requests no post-restart read. The live creator verifies cleanup of the
+owned resources and confirms that the source and foreign fixture remain. The original
 creator's live Docker custody remains required, including complete native
 replies at creation. Creator loss, daemon loss and host loss require separate
 work.

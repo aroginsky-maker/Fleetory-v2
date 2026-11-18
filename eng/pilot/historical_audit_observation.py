@@ -260,7 +260,8 @@ def _run_worker(engine, operation, fault, request, executable_pin, source_pins):
 # These private frames convey data and a fixed observation request only.
 CREATOR_LIMIT_SECONDS = 55
 HANDOFF_EXIT = 'between-operations-exit'
-CREATOR_FLOWS = ('complete', 'controller-exit', 'lease-expired', HANDOFF_EXIT)
+RESTART_UNCONFIRMED = 'restart-unconfirmed'
+CREATOR_FLOWS = ('complete', 'controller-exit', 'lease-expired', HANDOFF_EXIT, RESTART_UNCONFIRMED)
 OBSERVE_REQUEST = b'observe'
 AUTH_REQUEST = b'authenticate'
 READER_REQUEST = b'check-reader'
@@ -476,6 +477,10 @@ def _relay_history_sequence(link, flow, nonce, first_reply):
         link.live()
         _creator_write(sys.stdout.buffer, stage)
         reply = link.receive_owner()
+        if flow == RESTART_UNCONFIRMED and stage == RESTART_REQUEST:
+            packet.require(reply == b'no-native-restart')
+            link.live()
+            return None
         _native_payload(reply, stage, nonce)
         if flow == HANDOFF_EXIT and stage == AUTH_REQUEST:
             # The checked controller still awaits the reply. Consume this attempt without delivery or retry.
@@ -488,7 +493,8 @@ def _relay_history_sequence(link, flow, nonce, first_reply):
 
 def _run_creator_controller(engine, flow, nonce, executable_pin, source_pins):
     packet.require(flow in CREATOR_FLOWS)
-    stops_controller = flow in ('controller-exit', HANDOFF_EXIT)
+    interrupted_stage = {HANDOFF_EXIT: AUTH_REQUEST, RESTART_UNCONFIRMED: RESTART_REQUEST}.get(flow)
+    stops_controller = flow == 'controller-exit' or interrupted_stage is not None
     packet.identity(nonce)
     child = fence = link = end = None
     with ExitStack() as held:
@@ -523,7 +529,7 @@ def _run_creator_controller(engine, flow, nonce, executable_pin, source_pins):
             controllerPid=child.pid, supervisorPid=os.getpid(), childIdentityVerified=True,
             controllerMembersAbsent=True, controllerExitObservedHeld=True, fence=end['kind'], controllerExitCode=code,
             applicationResult=result, lateApplicationRequestRefused=flow == 'lease-expired',
-            interruptedNativeOperation=AUTH_REQUEST.decode('ascii') if flow == HANDOFF_EXIT else None)
+            interruptedNativeOperation=interrupted_stage.decode('ascii') if interrupted_stage is not None else None)
         _creator_write(sys.stdout.buffer, core.canonical(proof))
     return 0
 

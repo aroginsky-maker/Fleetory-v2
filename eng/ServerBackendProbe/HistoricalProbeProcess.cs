@@ -88,6 +88,94 @@ internal static partial class HistoricalProbeProcess
         }
     }
 
+    private const string DaemonPath = "/usr/sbin/immudb";
+    private const string DaemonPidFile = "/tmp/immudb.pid";
+    private const string RestartAcknowledgement = "fleetory historical restart stop dispatched";
+
+    internal static async Task<int> ObserveRestartAsync()
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(16));
+        try
+        {
+            RequireProbeRuntime();
+            using var input = Console.OpenStandardInput();
+            using var output = Console.OpenStandardOutput();
+            var daemon = ReadDaemonPid();
+            using var held = HoldDaemon(daemon, out var birth);
+            var claim = new byte[12];
+            BinaryPrimitives.WriteInt32LittleEndian(claim, daemon);
+            BinaryPrimitives.WriteUInt64LittleEndian(claim.AsSpan(4), birth);
+            await output.WriteAsync(claim, deadline.Token);
+            await output.FlushAsync(deadline.Token);
+            if (await input.ReadAsync(new byte[1], deadline.Token) != 0 || !HasExited(held.DangerousGetHandle().ToInt32(), 12000))
+                throw Refused();
+            await WriteTransportByteAsync(output, 3, deadline.Token);
+            return 0;
+        }
+        catch (Exception)
+        {
+            return 1;
+        }
+    }
+
+    internal static int StopHistoricalDaemon(string encoded)
+    {
+        try
+        {
+            RequireProbeRuntime();
+            if (encoded.Length != 24)
+                throw Refused();
+            var claim = Convert.FromHexString(encoded);
+            if (Convert.ToHexStringLower(claim) != encoded)
+                throw Refused();
+            var daemon = ReadDaemonPid();
+            using var held = HoldDaemon(daemon, out var birth);
+            if (daemon != BinaryPrimitives.ReadInt32LittleEndian(claim) ||
+                birth != BinaryPrimitives.ReadUInt64LittleEndian(claim.AsSpan(4)) ||
+                PidfdSendSignal(held, 15, IntPtr.Zero, 0) != 0)
+                throw Refused();
+            Console.WriteLine(RestartAcknowledgement);
+            return 0;
+        }
+        catch (Exception)
+        {
+            return 1;
+        }
+    }
+
+    private static int ReadDaemonPid()
+    {
+        var file = new FileInfo(DaemonPidFile);
+        if (file.Length is < 1 or > 12 ||
+            (file.Attributes & (FileAttributes.ReparsePoint | FileAttributes.Directory)) != 0)
+            throw Refused();
+        var text = File.ReadAllText(DaemonPidFile).Trim();
+        if (!int.TryParse(text, NumberStyles.None, CultureInfo.InvariantCulture, out var pid) ||
+            pid <= 1 || pid.ToString(CultureInfo.InvariantCulture) != text)
+            throw Refused();
+        return pid;
+    }
+
+    private static SafeFileHandle HoldDaemon(int pid, out ulong birth)
+    {
+        var descriptor = PidfdOpen(pid, 0);
+        if (descriptor < 0)
+            throw Refused();
+        var held = new SafeFileHandle(new IntPtr(descriptor), ownsHandle: true);
+        try
+        {
+            birth = ObserveBirth(pid, DaemonPath);
+            if (ObserveBirth(pid, DaemonPath) != birth || HasExited(descriptor, 0))
+                throw Refused();
+            return held;
+        }
+        catch
+        {
+            held.Dispose();
+            throw;
+        }
+    }
+
     private static async Task WriteTransportByteAsync(Stream output, byte value, CancellationToken cancellation)
     {
         await output.WriteAsync(new[] { value }, cancellation);
