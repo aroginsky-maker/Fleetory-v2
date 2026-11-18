@@ -294,3 +294,22 @@ leaves. Each mode has separate real early EOF and abrupt-exit cases. A lost
 Docker transport cannot supply successful exit evidence. This input and exit
 proof requires a complete native exec reply. Process group containment and independent owner or daemon loss still
 require separate evidence.
+
+The generated transport fault also uses the real managed observation child.
+The in-container supervisor pauses after verifying its executable and birth
+and before releasing a request body. A second Docker exec binds a read-only
+pidfd to that same child after checking the supervisor command, case nonce and
+parent-child relationship. The fault harness interrupts the directly held Docker
+client, then asks the surviving observer to distinguish continued life from an
+already exited child and verify terminal exit on its original descriptor.
+Wrong birth and copied case claims are refused. An interrupted observer produces
+no terminal receipt. The fault returns no application success, and the live
+creator verifies absence of its target container, image and payload. The native
+workflow also verifies the separately held source and foreign fixture.
+
+This is a generated check on the local Docker daemon. The CLI is launched
+directly as the test user through an explicit local endpoint and an empty
+configuration in the owned fixture. Linux requires the test user to have access
+to that daemon. The observation channel cannot signal a container process,
+claim a Docker resource or grant cleanup authority. Independent cleanup after
+creator loss and daemon or host loss remain open.

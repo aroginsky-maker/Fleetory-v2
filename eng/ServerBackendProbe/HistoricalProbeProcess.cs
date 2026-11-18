@@ -19,14 +19,107 @@ internal static partial class HistoricalProbeProcess
     internal static bool IsMode(string mode) => mode is
         "audit-health" or "history-users" or "observation-history-read" or "observation-reader-denial";
 
+    internal static bool IsTransportNonce(string value) =>
+        Guid.TryParseExact(value, "D", out var nonce) && nonce != Guid.Empty && nonce.ToString("D") == value;
+
+    internal static async Task<int> HoldTransportAsync(string nonce)
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        try
+        {
+            RequireProbeRuntime();
+            await RunOwnedAsync("observation-history-read", 1, ReadOnlyMemory<byte>.Empty, deadline.Token, nonce);
+            // The fault-only entrypoint never emits an application success reply.
+            return IncompleteExit;
+        }
+        catch (Exception)
+        {
+            return 1;
+        }
+    }
+
+    internal static async Task<int> ObserveTransportAsync(string nonce)
+    {
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        var cancellation = deadline.Token;
+        try
+        {
+            RequireProbeRuntime();
+            using var input = Console.OpenStandardInput();
+            using var output = Console.OpenStandardOutput();
+            var claim = new byte[24];
+            await input.ReadExactlyAsync(claim, cancellation);
+            var parent = BinaryPrimitives.ReadInt32LittleEndian(claim);
+            var parentBirth = BinaryPrimitives.ReadUInt64LittleEndian(claim.AsSpan(4));
+            var child = BinaryPrimitives.ReadInt32LittleEndian(claim.AsSpan(12));
+            var childBirth = BinaryPrimitives.ReadUInt64LittleEndian(claim.AsSpan(16));
+            if (parent <= 1 || child <= 1 || parent == child || parentBirth == 0 || childBirth == 0)
+                throw Refused();
+
+            var descriptor = PidfdOpen(child, 0);
+            if (descriptor < 0)
+                throw Refused();
+            using var held = new SafeFileHandle(new IntPtr(descriptor), ownsHandle: true);
+            var executable = Environment.ProcessPath ?? throw Refused();
+            var parentCommand = new[] { EntryAssembly, "--historical-transport-hold", nonce };
+            var childCommand = new[] { EntryAssembly, "--historical-leaf", "observation-history-read" };
+            if (ObserveBirth(parent, executable, command: parentCommand) != parentBirth ||
+                ObserveBirth(child, executable, parent, childCommand) != childBirth ||
+                ObserveBirth(parent, executable, command: parentCommand) != parentBirth ||
+                HasExited(descriptor, 0))
+                throw Refused();
+
+            await WriteTransportByteAsync(output, 1, cancellation);
+            var control = new byte[1];
+            await input.ReadExactlyAsync(control, cancellation);
+            if (control[0] != 1 || await input.ReadAsync(control, cancellation) != 0)
+                throw Refused();
+
+            // This is the same read-only descriptor held before the original client disconnected.
+            await WriteTransportByteAsync(output, HasExited(descriptor, 0) ? (byte)2 : (byte)1, cancellation);
+            if (!HasExited(descriptor, 12000))
+                throw Refused();
+            await WriteTransportByteAsync(output, 3, cancellation);
+            return 0;
+        }
+        catch (Exception)
+        {
+            return 1;
+        }
+    }
+
+    private static async Task WriteTransportByteAsync(Stream output, byte value, CancellationToken cancellation)
+    {
+        await output.WriteAsync(new[] { value }, cancellation);
+        await output.FlushAsync(cancellation);
+    }
+
+    private static async Task HoldBeforePayloadAsync(int child, ulong birth, string executable, CancellationToken cancellation)
+    {
+        var claim = new byte[24];
+        BinaryPrimitives.WriteInt32LittleEndian(claim, Environment.ProcessId);
+        BinaryPrimitives.WriteUInt64LittleEndian(claim.AsSpan(4), ObserveBirth(Environment.ProcessId, executable));
+        BinaryPrimitives.WriteInt32LittleEndian(claim.AsSpan(12), child);
+        BinaryPrimitives.WriteUInt64LittleEndian(claim.AsSpan(16), birth);
+        using var output = Console.OpenStandardOutput();
+        await output.WriteAsync(claim, cancellation);
+        await output.FlushAsync(cancellation);
+        await Task.Delay(TimeSpan.FromSeconds(10), cancellation);
+    }
+
+    private static void RequireProbeRuntime()
+    {
+        if (!OperatingSystem.IsLinux() || typeof(HistoricalProbeProcess).Assembly.Location != EntryAssembly)
+            throw Refused();
+    }
+
     internal static async Task<int> SuperviseAsync(string mode)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(35));
         var cancellation = timeout.Token;
         try
         {
-            if (!OperatingSystem.IsLinux() || typeof(HistoricalProbeProcess).Assembly.Location != EntryAssembly)
-                throw Refused();
+            RequireProbeRuntime();
             using var input = Console.OpenStandardInput();
             var request = await ReceiveAsync(input, RequestLimit + 1, cancellation);
             try
@@ -54,8 +147,7 @@ internal static partial class HistoricalProbeProcess
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(12));
         try
         {
-            if (!OperatingSystem.IsLinux() || typeof(HistoricalProbeProcess).Assembly.Location != EntryAssembly)
-                throw Refused();
+            RequireProbeRuntime();
             var output = Console.OpenStandardOutput();
             await output.WriteAsync(Ready, deadline.Token);
             await output.FlushAsync(deadline.Token);
@@ -90,7 +182,7 @@ internal static partial class HistoricalProbeProcess
         }
     }
 
-    private static async Task<object> RunOwnedAsync(string mode, byte fault, ReadOnlyMemory<byte> request, CancellationToken cancellation)
+    private static async Task<object> RunOwnedAsync(string mode, byte fault, ReadOnlyMemory<byte> request, CancellationToken cancellation, string? transportNonce = null)
     {
         var executable = Environment.ProcessPath ?? throw Refused();
         var command = new ProcessStartInfo(executable)
@@ -122,12 +214,14 @@ internal static partial class HistoricalProbeProcess
             await stdout.ReadExactlyAsync(ready, cancellation);
             if (!ready.AsSpan().SequenceEqual(Ready) || HasExited(descriptor, 0) || process.HasExited)
                 throw Refused();
-            var birth = ObserveOwnedBirth(process.Id, executable);
-            if (ObserveOwnedBirth(process.Id, executable) != birth || HasExited(descriptor, 0) || process.HasExited)
+            var birth = ObserveBirth(process.Id, executable, Environment.ProcessId);
+            if (ObserveBirth(process.Id, executable, Environment.ProcessId) != birth || HasExited(descriptor, 0) || process.HasExited)
                 throw Refused();
             bound = true;
 
-            if (fault == 2)
+            if (transportNonce is not null)
+                await HoldBeforePayloadAsync(process.Id, birth, executable, cancellation);
+            else if (fault == 2)
                 Signal(held, descriptor);
             else
                 await SendAsync(input, request, fault == 1, cancellation);
@@ -250,7 +344,7 @@ internal static partial class HistoricalProbeProcess
         }
     }
 
-    private static ulong ObserveOwnedBirth(int pid, string executable)
+    private static ulong ObserveBirth(int pid, string executable, int? parent = null, string[]? command = null)
     {
         var path = "/proc/" + pid.ToString(CultureInfo.InvariantCulture);
         var stat = File.ReadAllText(path + "/stat");
@@ -260,10 +354,16 @@ internal static partial class HistoricalProbeProcess
         var fields = stat[(end + 2)..].Split(' ', StringSplitOptions.RemoveEmptyEntries);
         var expected = new FileInfo(executable).ResolveLinkTarget(true)?.FullName ?? executable;
         if (fields.Length < 20 || fields[0] is "Z" or "X" ||
-            fields[1] != Environment.ProcessId.ToString(CultureInfo.InvariantCulture) ||
+            (parent is not null && fields[1] != parent.Value.ToString(CultureInfo.InvariantCulture)) ||
             new FileInfo(path + "/exe").ResolveLinkTarget(true)?.FullName != expected ||
             !ulong.TryParse(fields[19], NumberStyles.None, CultureInfo.InvariantCulture, out var birth) || birth == 0)
             throw Refused();
+        if (command is not null)
+        {
+            var actual = File.ReadAllText(path + "/cmdline").Split('\0');
+            if (actual.Length != command.Length + 2 || actual[^1] != "" || !actual.AsSpan(1, command.Length).SequenceEqual(command))
+                throw Refused();
+        }
         return birth;
     }
 

@@ -197,7 +197,7 @@ namespace Fleetory.Pilot {
             internal readonly long Started=System.Diagnostics.Stopwatch.GetTimestamp();
             internal readonly System.Collections.Generic.List<Tuple<string,byte[],Tuple<int,byte[],byte[]>>> Replies=new();
             internal int Busy, Calls;
-            internal bool Unknown;
+            internal bool Unknown, TransportStarted;
             internal Profile(System.Collections.IDictionary context,object client) {
                 Context=context;Client=client;Values=AuditNativeReply.Values(context,Keys);
             }
@@ -222,6 +222,24 @@ namespace Fleetory.Pilot {
             string id=AuditContainerCustody.Id(p.Context,store,p.Client);
             if(!Equals(p.Context["ImageId"],image)) throw Refused();
             return id;
+        }
+        public static object VerifyTransportLoss(System.Collections.IDictionary context,System.Collections.IDictionary store,object client,
+            string nonce,string dockerPath) {
+            if(!Guid.TryParseExact(nonce,"D",out var id) || id==Guid.Empty || id.ToString("D")!=nonce) throw Refused();
+            var p=Get(context,client);
+            if(System.Threading.Interlocked.CompareExchange(ref p.Busy,1,0)!=0) throw Refused();
+            try {
+                string target=OwnedId(p,store);
+                if(p.TransportStarted || p.Calls>=64) throw Refused();
+                p.TransportStarted=true;
+                p.Calls++;
+                p.Unknown=true; // Transport loss never becomes an application reply or permits retry.
+                string config=Path.Combine(p.Context["Root"].ToString(),"transport-docker-config");
+                ExclusiveAuditDirectory.Create(config);
+                var proof=HistoricalDockerTransport.Verify(dockerPath,config,target,nonce);
+                if(OwnedId(p,store)!=target) throw Refused();
+                return proof;
+            } finally {System.Threading.Volatile.Write(ref p.Busy,0);}
         }
         public static int Calls(System.Collections.IDictionary context,object client) => Get(context,client).Calls;
         public static Tuple<int,byte[],byte[]> Invoke(System.Collections.IDictionary context,System.Collections.IDictionary store,object client,
@@ -252,6 +270,170 @@ namespace Fleetory.Pilot {
             }
         }
     }
+    // Only the live native controller can obtain the target through its in-process custody.
+    internal static class HistoricalDockerTransport {
+        private const string Assembly = "/tool/ServerBackendProbe.dll";
+        private const byte Bound = 1;
+        private const byte Exited = 3;
+        private static InvalidOperationException Failed(string stage) =>
+            new InvalidOperationException("Audit data fixture refused: controller-transport-"+stage);
+        private static void Require(bool condition,string stage) {if(!condition) throw Failed(stage);}
+
+        internal static object Verify(string path,string config,string target,string nonce) {
+            using(var time=new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(25))) {
+                var endpoint=OperatingSystem.IsWindows() ? "npipe:////./pipe/dockerDesktopLinuxEngine" : "unix:///var/run/docker.sock";
+                using(var original=new Client(path,config,endpoint,target,"--historical-transport-hold",nonce)) {
+                    byte[] claim=original.Read(24,time.Token);
+                    byte[] wrongBirth=(byte[])claim.Clone();
+                    wrongBirth[16]^=1;
+                    using(var wrong=new Client(path,config,endpoint,target,"--historical-transport-observe",nonce))
+                        wrong.ExpectRefusal(wrongBirth,time.Token);
+                    using(var copied=new Client(path,config,endpoint,target,"--historical-transport-observe",Guid.NewGuid().ToString("D")))
+                        copied.ExpectRefusal(claim,time.Token);
+                    using(var lost=new Client(path,config,endpoint,target,"--historical-transport-observe",nonce)) {
+                        lost.Bind(claim,time.Token);
+                        lost.Interrupt();
+                        lost.ExpectEnd(time.Token);
+                    }
+                    using(var observer=new Client(path,config,endpoint,target,"--historical-transport-observe",nonce)) {
+                        observer.Bind(claim,time.Token);
+                        original.Interrupt();
+                        original.ExpectEnd(time.Token);
+                        observer.Send(new byte[]{Bound},time.Token);
+                        observer.CloseInput();
+                        byte[] outcome=observer.Read(2,time.Token);
+                        Require((outcome[0]==1 || outcome[0]==2) && outcome[1]==Exited,"outcome");
+                        observer.ExpectEnd(time.Token);
+                        Require(observer.Exit(time.Token)==0,"observer-exit");
+                        return new {
+                            hostDockerClientIdentityVerified=true, originalHostClientTerminated=true,
+                            observerBoundBeforeLoss=true, daemonChildAfterLoss=outcome[0]==1?"same-live":"held-exit",
+                            heldDaemonChildExitVerified=true, wrongBirthRefused=true, copiedClaimRefused=true,
+                            interruptedObserverNoTerminalReceipt=true, releasedApplicationBytes=0, applicationReplyAccepted=false
+                        };
+                    }
+                }
+            }
+        }
+
+        private sealed class Client : IDisposable {
+            private readonly System.Diagnostics.Process process;
+            private readonly Microsoft.Win32.SafeHandles.SafeProcessHandle windowsHandle;
+            private readonly Microsoft.Win32.SafeHandles.SafeFileHandle linuxHandle;
+            private readonly Stream input,output,error;
+
+            internal Client(string executable,string config,string endpoint,string target,string mode,string nonce) {
+                string full=Resolve(executable);
+                Require(String.Equals(Path.GetFileName(full),OperatingSystem.IsWindows()?"docker.exe":"docker",
+                    OperatingSystem.IsWindows()?StringComparison.OrdinalIgnoreCase:StringComparison.Ordinal),"executable");
+                var options=new System.Diagnostics.ProcessStartInfo(full) {
+                    UseShellExecute=false,CreateNoWindow=true,RedirectStandardInput=true,RedirectStandardOutput=true,RedirectStandardError=true
+                };
+                options.Environment.Clear();
+                if(OperatingSystem.IsWindows())
+                    options.Environment["SystemRoot"]=Environment.GetEnvironmentVariable("SystemRoot");
+                foreach(string word in new[]{"--config",config,"--host",endpoint,"exec","-i","-e","SSL_CERT_FILE=/tmp/ca.pem",
+                    "-e","SSL_CERT_DIR=/tmp/empty-ca-dir",target,"dotnet",Assembly,mode,nonce}) options.ArgumentList.Add(word);
+                process=System.Diagnostics.Process.Start(options);
+                Require(process!=null,"start");
+                try {
+                    if(OperatingSystem.IsWindows()) windowsHandle=process.SafeHandle;
+                    else {
+                        int descriptor=OpenPidfd(process.Id,0);
+                        Require(descriptor>=0,"host-pidfd");
+                        linuxHandle=new Microsoft.Win32.SafeHandles.SafeFileHandle(new IntPtr(descriptor),ownsHandle:true);
+                    }
+                    Require(!process.HasExited && String.Equals(ActualImage(),full,
+                        OperatingSystem.IsWindows()?StringComparison.OrdinalIgnoreCase:StringComparison.Ordinal) && !process.HasExited,"host-image");
+                    input=process.StandardInput.BaseStream;
+                    output=process.StandardOutput.BaseStream;
+                    error=process.StandardError.BaseStream;
+                } catch {
+                    Dispose();
+                    throw;
+                }
+            }
+
+            private string ActualImage() {
+                if(windowsHandle==null) return Resolve("/proc/"+process.Id+"/exe");
+                var path=new System.Text.StringBuilder(32768);
+                int length=path.Capacity;
+                Require(QueryFullProcessImageName(windowsHandle,0,path,ref length) && length>0,"windows-image");
+                return Resolve(path.ToString());
+            }
+
+            private static string Resolve(string path) {
+                var file=new FileInfo(path);
+                return file.ResolveLinkTarget(true)?.FullName ?? file.FullName;
+            }
+
+            internal byte[] Read(int length,System.Threading.CancellationToken token) {
+                var bytes=new byte[length];
+                output.ReadExactlyAsync(bytes.AsMemory(),token).AsTask().WaitAsync(token).GetAwaiter().GetResult();
+                return bytes;
+            }
+
+            internal void Send(byte[] bytes,System.Threading.CancellationToken token) {
+                input.WriteAsync(bytes.AsMemory(),token).AsTask().WaitAsync(token).GetAwaiter().GetResult();
+                input.FlushAsync(token).WaitAsync(token).GetAwaiter().GetResult();
+            }
+
+            internal void CloseInput() => input.Dispose();
+
+            internal void Bind(byte[] claim,System.Threading.CancellationToken token) {
+                Send(claim,token);
+                Require(Read(1,token)[0]==Bound,"observer-bind");
+            }
+
+            private static bool Empty(Stream stream,System.Threading.CancellationToken token) =>
+                stream.ReadAsync(new byte[1].AsMemory(),token).AsTask().WaitAsync(token).GetAwaiter().GetResult()==0;
+
+            internal void ExpectEnd(System.Threading.CancellationToken token) =>
+                Require(Empty(output,token) && Empty(error,token),"trailing-bytes");
+
+            internal int Exit(System.Threading.CancellationToken token) {
+                process.WaitForExitAsync(token).GetAwaiter().GetResult();
+                return process.ExitCode;
+            }
+
+            internal void ExpectRefusal(byte[] claim,System.Threading.CancellationToken token) {
+                Send(claim,token);
+                CloseInput();
+                ExpectEnd(token);
+                Require(Exit(token)==1,"negative-claim");
+            }
+
+            private bool Stop() {
+                if(windowsHandle!=null) return TerminateProcess(windowsHandle,1);
+                return linuxHandle!=null && SignalPidfd(linuxHandle,9,IntPtr.Zero,0)==0;
+            }
+
+            internal void Interrupt() =>
+                Require(!process.HasExited && Stop() && process.WaitForExit(3000) && process.ExitCode!=0,"host-interruption");
+
+            public void Dispose() {
+                try {
+                    if(!process.HasExited && Stop()) process.WaitForExit(3000);
+                } finally {
+                    linuxHandle?.Dispose();
+                    process.Dispose();
+                }
+            }
+        }
+
+        [DllImport("kernel32",EntryPoint="QueryFullProcessImageNameW",CharSet=CharSet.Unicode,ExactSpelling=true,SetLastError=true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool QueryFullProcessImageName(Microsoft.Win32.SafeHandles.SafeProcessHandle handle,uint flags,
+            System.Text.StringBuilder path,ref int length);
+        [DllImport("kernel32",SetLastError=true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool TerminateProcess(Microsoft.Win32.SafeHandles.SafeProcessHandle handle,uint code);
+        [DllImport("libc",EntryPoint="pidfd_open",SetLastError=true)]
+        private static extern int OpenPidfd(int pid,uint flags);
+        [DllImport("libc",EntryPoint="pidfd_send_signal",SetLastError=true)]
+        private static extern int SignalPidfd(Microsoft.Win32.SafeHandles.SafeFileHandle handle,int signal,IntPtr info,uint flags);
+    }
+
     public static class ExclusiveAuditDirectory {
         [DllImport("kernel32.dll", EntryPoint="CreateDirectoryW", CharSet=CharSet.Unicode, SetLastError=true)]
         [return: MarshalAs(UnmanagedType.Bool)]

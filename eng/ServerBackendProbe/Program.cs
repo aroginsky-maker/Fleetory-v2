@@ -33,6 +33,10 @@ internal static class Program
 
     public static Task<int> Main(string[] args) => args switch
     {
+        ["--historical-transport-hold", var nonce] when HistoricalProbeProcess.IsTransportNonce(nonce) =>
+            HistoricalProbeProcess.HoldTransportAsync(nonce),
+        ["--historical-transport-observe", var nonce] when HistoricalProbeProcess.IsTransportNonce(nonce) =>
+            HistoricalProbeProcess.ObserveTransportAsync(nonce),
         ["--historical-supervise", var mode] when HistoricalProbeProcess.IsMode(mode) => HistoricalProbeProcess.SuperviseAsync(mode),
         ["--historical-leaf", var mode] when HistoricalProbeProcess.IsMode(mode) =>
             HistoricalProbeProcess.RunLeafAsync(packet => ExecuteAsync([mode], packet)),

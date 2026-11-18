@@ -3,7 +3,7 @@
 param([Parameter(Mandatory)][string]$ExpectedPlanSha256,[string]$Python='',
     [ValidateSet('none','after-container','after-restore','worker-early-eof','worker-abrupt-exit','dotnet-early-eof','dotnet-abrupt-exit',
         'dotnet-health-early-eof','dotnet-health-abrupt-exit','dotnet-users-early-eof','dotnet-users-abrupt-exit',
-        'dotnet-denial-early-eof','dotnet-denial-abrupt-exit')][string]$FailurePoint='none',[switch]$PreparationOnly,[string]$PreparationGitPath='',
+        'dotnet-denial-early-eof','dotnet-denial-abrupt-exit','dotnet-transport-loss')][string]$FailurePoint='none',[switch]$PreparationOnly,[string]$PreparationGitPath='',
     [switch]$PayloadReservationOnly,[switch]$ResourceAcknowledgementOnly,[switch]$ProbeRuntimeAcknowledgementOnly,[switch]$ProbeRuntimeCreationOnly,[switch]$PublicProbePublicationOnly,[string]$PublicationDotnetPath='')
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
@@ -35,7 +35,7 @@ $context=@{Fixture=$fixture;Root=$root;ImageName=(Get-ImmuDataImageName $fixture
     PayloadClaimed=$false;PayloadRemoved=$false;LifetimeSeconds=660;Stores=[Collections.Generic.List[object]]::new();Tls=$null;SigningPems=@{};Secrets=@{}}
 $canaries=[Collections.Generic.List[string]]::new();$watch=[Diagnostics.Stopwatch]::StartNew();$cleaning=$false
 $stage='input';$refusal='operational';$failure=$false;$cleanup=$false;$proof=$null;$store=$null;$body=$null;$archive=$null;$raw=$null
-$comparisonCalls=0;$comparisonFault=$null;$managedCalls=[hashtable]::new([StringComparer]::Ordinal);$managedFault=$null;$managedApplicationRefusal=@{}
+$comparisonCalls=0;$comparisonFault=$null;$managedCalls=[hashtable]::new([StringComparer]::Ordinal);$managedFault=$null;$transportFault=$null;$managedApplicationRefusal=@{}
 $oldBuildKit=$env:DOCKER_BUILDKIT;$env:DOCKER_BUILDKIT='0'
 function Invoke-Docker([string[]]$Arguments,[byte[]]$InputBytes=$null,[int]$TimeoutSeconds=60,[switch]$AllowFailure){
     Assert-ImmuData ($cleaning -or $watch.Elapsed.TotalSeconds -lt 600) 'controller-deadline'
@@ -205,6 +205,12 @@ try{
     $script:expected=Invoke-HistoricalComparison 'build' $request
     $comparisonCalls++
     $stage='observe'
+    if($FailurePoint -ceq 'dotnet-transport-loss'){
+        Read-AuditDataStore $context $store
+        $docker=(Get-Command $(if($IsWindows){'docker.exe'}else{'/usr/bin/docker'}) -CommandType Application).Source
+        $transportFault=[Fleetory.Pilot.AuditHistoricalProbeProfile]::VerifyTransportLoss($context,$store,${function:Invoke-Docker},$plan.nonce,$docker)
+        Assert-ImmuData $false 'controller-dotnet-transport-loss'
+    }
     Invoke-SelectedDotnetFault $store 'observation-history-read' 'dotnet-'
     Invoke-SelectedDotnetFault $store 'observation-reader-denial' 'dotnet-denial-'
     $first=Read-ControllerObservation
@@ -233,7 +239,8 @@ try{
         writerAdmissionVerified=$false;productionTokensIssued=$false;executionAuthorized=$false;fullSystemRecoveryVerified=$false;phase7Complete=$false}
 }catch{
     $failure=$true
-    if($_.Exception.Message -cmatch '^Audit data fixture refused: ([a-z0-9-]{1,64})\z'){$refusal=$Matches[1]}
+    $message=$_.Exception.GetBaseException().Message
+    if($message -cmatch '^Audit data fixture refused: ([a-z0-9-]{1,64})\z'){$refusal=$Matches[1]}
     elseif($_.Exception.Message -ceq 'immudb state public key does not match the pinned key.'){$refusal='controller-source-public-pin'}
     elseif($_.Exception.Message -ceq 'The immudb state signature is invalid.'){$refusal='controller-source-signature'}
     elseif($_.Exception.Message -ceq 'Injected controller refusal.'){$refusal='controller-injected-failure'}
@@ -249,7 +256,7 @@ try{
     $watch.Stop();$env:DOCKER_BUILDKIT=$oldBuildKit
 }
 if($failure -or -not $cleanup){
-    @{schema='fleetory.historical-audit-controller-cleanup.v1';stage=$stage;refusal=$refusal;cleanupVerified=$cleanup;resources=$resources;comparisonFault=$comparisonFault;dotnetFault=$managedFault;dotnetApplicationRefusal=$managedApplicationRefusal}|ConvertTo-Json -Compress -Depth 5
+    @{schema='fleetory.historical-audit-controller-cleanup.v1';stage=$stage;refusal=$refusal;cleanupVerified=$cleanup;resources=$resources;comparisonFault=$comparisonFault;dotnetFault=$managedFault;dotnetTransportFault=$transportFault;dotnetApplicationRefusal=$managedApplicationRefusal}|ConvertTo-Json -Compress -Depth 5
     [Console]::Error.WriteLine('Historical native controller refused; no input contents or credentials logged.')
     exit 1
 }
