@@ -555,15 +555,16 @@ def _coordinator_child(nonce):
     receipt = _creator_read(source, 96)
     if receipt == b'unavailable:' + bound:
         _creator_write(sink, b'retry:' + bound)
-        packet.require(_creator_read(source, 96) == ALLOCATION_REFUSED and not source.read(1))
-        _creator_write(sink, ALLOCATION_REFUSED)
-        return 0
-    commitment = _recovery_projection(receipt)
-    _creator_write(sink, b'received:' + commitment)
-    packet.require(_creator_read(source, 96) == b'work:' + commitment)
-    _creator_write(sink, b'run:' + commitment)
-    outcome = _creator_read(source, 96)
-    packet.require(outcome in (b'completed', b'refused') and not source.read(1))
+        outcome = _creator_read(source, 96)
+        packet.require(outcome == ALLOCATION_REFUSED)
+    else:
+        commitment = _recovery_projection(receipt)
+        _creator_write(sink, b'received:' + commitment)
+        packet.require(_creator_read(source, 96) == b'work:' + commitment)
+        _creator_write(sink, b'run:' + commitment)
+        outcome = _creator_read(source, 96)
+        packet.require(outcome in (b'completed', b'refused'))
+    packet.require(not source.read(1))
     _creator_write(sink, outcome)
     return 0
 
