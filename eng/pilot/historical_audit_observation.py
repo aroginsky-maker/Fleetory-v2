@@ -304,11 +304,12 @@ def _application_controller(nonce):
     if reply == b'replay':
         _creator_write(sink, OBSERVE_REQUEST)
         packet.require(_creator_read(source) == b'refuse' and not source.read(1))
-        _creator_write(sink, b'refused')
-        return 0
-    packet.require(reply.startswith(b'R') and not source.read(1))
-    result = observe(expected_bytes, packet.digest(expected_bytes), reply[1:])
-    _creator_write(sink, core.canonical(result))
+        response = b'refused'
+    else:
+        packet.require(reply.startswith(b'R') and not source.read(1))
+        result = observe(expected_bytes, packet.digest(expected_bytes), reply[1:])
+        response = core.canonical(result)
+    _creator_write(sink, response)
     return 0
 
 
