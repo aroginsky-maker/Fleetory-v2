@@ -255,11 +255,240 @@ def _run_worker(engine, operation, fault, request, executable_pin, source_pins):
                     fence=end['kind'], requestBytes=pumps.input_written, result=result)
 
 
+
+# A separate application controller for one generated historical observation.
+# These private frames convey data and a fixed observation request only.
+CREATOR_LIMIT_SECONDS = 55
+CREATOR_FLOWS = ('complete', 'controller-exit', 'lease-expired')
+OBSERVE_REQUEST = b'observe'
+LIVE_STATUS = b'alive'
+
+
+def _creator_frame(data):
+    packet.require(0 < len(data) <= core.MAX_BODY)
+    return len(data).to_bytes(4, 'big') + data
+
+
+def _creator_exact(stream, count):
+    result = bytearray()
+    while len(result) < count:
+        chunk = stream.read(count - len(result))
+        packet.require(bool(chunk))
+        result.extend(chunk)
+    return bytes(result)
+
+
+def _creator_read(stream):
+    header = _creator_exact(stream, 4)
+    packet.require(len(header) == 4)
+    size = int.from_bytes(header, 'big')
+    packet.require(0 < size <= core.MAX_BODY)
+    return _creator_exact(stream, size)
+
+
+def _creator_write(stream, data):
+    stream.write(_creator_frame(data))
+    stream.flush()
+
+
+def _application_controller(nonce):
+    packet.identity(nonce)
+    source, sink = sys.stdin.buffer, sys.stdout.buffer
+    _creator_write(sink, READY)
+    expected_bytes = _creator_read(source)
+    expected = packet.strict_json(expected_bytes, core.MAX_EXPECTED)
+    expectation(expected)
+    packet.require(expected['nonce'] == nonce)
+    _creator_write(sink, OBSERVE_REQUEST)
+    reply = _creator_read(source)
+    if reply == b'replay':
+        _creator_write(sink, OBSERVE_REQUEST)
+        packet.require(_creator_read(source) == b'refuse' and not source.read(1))
+        _creator_write(sink, b'refused')
+        return 0
+    packet.require(reply.startswith(b'R') and not source.read(1))
+    result = observe(expected_bytes, packet.digest(expected_bytes), reply[1:])
+    _creator_write(sink, core.canonical(result))
+    return 0
+
+
+class _CreatorControllerLink:
+    """Owns the measured application's private streams and process-fence handle."""
+
+    def __init__(self, engine, child, fence, tool):
+        self.child, self.fence, self.tool = child, fence, tool
+        self.identity = fence.identity(child, tool)
+        self.started = time.monotonic()
+        self.offset = 0
+        self.pumps = engine._Pumps(child, b'')
+
+    def start(self):
+        for stream, target, limit in (
+            (self.child.stdout, self.pumps.stdout, core.MAX_BODY + 1024),
+            (self.child.stderr, self.pumps.stderr, 512),
+        ):
+            thread = threading.Thread(target=self.pumps._read,
+                args=(stream, target, limit, 'creator-output-bound'), daemon=True)
+            self.pumps.threads.append(thread)
+            thread.start()
+
+    def _remaining(self):
+        remaining = CREATOR_LIMIT_SECONDS - (time.monotonic() - self.started)
+        packet.require(remaining > 0 and not self.pumps.errors and not self.pumps.stderr)
+        return remaining
+
+    def _exited(self):
+        return self.child.poll() is not None if os.name == 'nt' else self.fence.exited()
+
+    def live(self):
+        self._remaining()
+        packet.require(not self._exited() and self.fence.identity(self.child, self.tool) == self.identity)
+
+    def _thread(self, operation):
+        thread = threading.Thread(target=operation, daemon=True)
+        thread.start()
+        thread.join(self._remaining())
+        packet.require(not thread.is_alive())
+
+    def receive_owner(self):
+        values = []
+
+        def read():
+            try:
+                values.append(_creator_read(sys.stdin.buffer.raw))
+            except (ValueError, OSError):
+                pass
+
+        self._thread(read)
+        packet.require(len(values) == 1)
+        return values[0]
+
+    def send_application(self, data):
+        def write():
+            try:
+                self.pumps._send(_creator_frame(data))
+            except (OSError, ValueError):
+                self.pumps.errors.append('creator-input-io')
+
+        self._thread(write)
+        self._remaining()
+
+    def _wait_bytes(self, count):
+        while len(self.pumps.stdout) < count:
+            self._remaining()
+            if self._exited():
+                self.pumps.finish()
+                packet.require(len(self.pumps.stdout) >= count)
+                break
+            time.sleep(0.01)
+
+    def receive_application(self):
+        self._wait_bytes(self.offset + 4)
+        start = self.offset + 4
+        size = int.from_bytes(self.pumps.stdout[self.offset:start], 'big')
+        packet.require(0 < size <= core.MAX_BODY)
+        self._wait_bytes(start + size)
+        self.offset = start + size
+        return bytes(self.pumps.stdout[start:self.offset])
+
+    def terminal_code(self):
+        while not self._exited():
+            self._remaining()
+            time.sleep(0.01)
+        code = self.child.returncode if os.name == 'nt' else self.fence.exit_code()
+        self.pumps.finish()
+        packet.require(len(self.pumps.stdout) == self.offset)
+        self._remaining()
+        return code
+
+
+def _creator_dialog(link, flow, nonce):
+    output = sys.stdout.buffer
+    packet.require(link.receive_application() == READY)
+    link.live()
+    _creator_write(output, b'ready:' + nonce.encode('ascii'))
+    expected = link.receive_owner()
+    packet.require(len(expected) <= core.MAX_EXPECTED)
+    link.send_application(expected)
+    packet.require(link.receive_application() == OBSERVE_REQUEST)
+    link.live()
+    _creator_write(output, OBSERVE_REQUEST)
+    decision = link.receive_owner()
+    if flow == 'controller-exit':
+        packet.require(decision == b'terminate')
+        link.live()
+        return None
+    if flow == 'lease-expired':
+        packet.require(decision == b'status')
+        link.live()
+        _creator_write(output, LIVE_STATUS)
+        packet.require(link.receive_owner() == b'replay')
+        link.live()
+        link.send_application(b'replay')
+        packet.require(link.receive_application() == OBSERVE_REQUEST)
+        _creator_write(output, b'late-observe')
+        packet.require(link.receive_owner() == b'refuse')
+        link.send_application(b'refuse')
+        link.child.stdin.close()
+        packet.require(link.receive_application() == b'refused')
+        return None
+    packet.require(decision.startswith(b'R'))
+    link.send_application(decision)
+    link.child.stdin.close()
+    result = packet.strict_json(link.receive_application(), core.MAX_BODY)
+    return result
+
+
+def _run_creator_controller(engine, flow, nonce, executable_pin, source_pins):
+    packet.require(flow in CREATOR_FLOWS)
+    packet.identity(nonce)
+    child = fence = link = end = None
+    with ExitStack() as held:
+        tool, pins = _hold(held, engine, executable_pin, source_pins)
+        command = SimpleNamespace(executable=tool,
+            arguments=('-I', '-S', '-B', str(pins[0].path), '--independent-controller', nonce),
+            directory=DIRECTORY, env=engine.environment(tool))
+        try:
+            child = engine._spawn(command)
+            fence = engine._create_fence(child)
+            link = _CreatorControllerLink(engine, child, fence, tool)
+            link.start()
+            result = _creator_dialog(link, flow, nonce)
+            if flow == 'controller-exit':
+                end = fence.terminate()
+            code = link.terminal_code()
+        finally:
+            if end is None:
+                end, failure = engine._finish_owned(child, fence, link.pumps if link is not None else None)
+            else:
+                # The group is already checked, and terminal_code observed Linux exit with WNOWAIT.
+                try:
+                    child.wait(timeout=3)
+                    link.pumps.finish()
+                finally:
+                    failure = engine._close_transport(child, fence)
+            packet.require(failure is None and (child is None or end is not None and end['noRunningMembersVerified']))
+        for pin in (tool, *pins):
+            pin.check()
+        packet.require(child.returncode == code and (code != 0) == (flow == 'controller-exit'))
+        proof = dict(schema='fleetory.historical-independent-controller.v1', nonce=nonce, flow=flow,
+            controllerPid=child.pid, supervisorPid=os.getpid(), childIdentityVerified=True,
+            controllerMembersAbsent=True, controllerExitObservedHeld=True, fence=end['kind'], controllerExitCode=code,
+            applicationResult=result, lateApplicationRequestRefused=flow == 'lease-expired')
+        _creator_write(sys.stdout.buffer, core.canonical(proof))
+    return 0
+
+
 def _fenced_cli():
     packet.require(sys.flags.isolated and sys.flags.no_site)
     if len(sys.argv) == 3 and sys.argv[1] == '--child' and sys.argv[2] in OPERATIONS:
         return _serve_worker(sys.argv[2])
+    if len(sys.argv) == 3 and sys.argv[1] == '--independent-controller':
+        return _application_controller(sys.argv[2])
     import audit_process_fence as engine
+    if len(sys.argv) == 6 and sys.argv[1] == '--independent-owner':
+        flow, nonce, executable_pin, source_pins = sys.argv[2:]
+        return _run_creator_controller(engine, flow, nonce, executable_pin, source_pins.split(','))
     packet.require(len(sys.argv) == 6 and sys.argv[1] == '--fenced')
     operation, fault, executable_pin, source_pins = sys.argv[2:]
     packet.require(operation in OPERATIONS and fault in FAULTS and (fault == 'none' or operation == 'build'))
@@ -272,7 +501,7 @@ def _fenced_cli():
 
 if __name__ == '__main__':
     try:
-        if len(sys.argv) > 1 and sys.argv[1] in ('--fenced', '--child'):
+        if len(sys.argv) > 1 and sys.argv[1] in ('--fenced', '--child', '--independent-owner', '--independent-controller'):
             sys.exit(_fenced_cli())
         result = run()
     except Exception:

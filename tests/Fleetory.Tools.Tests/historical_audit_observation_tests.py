@@ -79,6 +79,29 @@ class HistoricalObservationTests(unittest.TestCase):
         self.observed['nonce'] = NONCE
         self.refused()
 
+    def test_independent_controller_refuses_unexpected_or_incomplete_frames(self):
+        def frame(value):
+            return len(value).to_bytes(4, 'big') + value
+
+        expected = frame(policy.core.canonical(self.expected))
+        other_nonce = 'abcdefab-1234-4123-8123-000000000001'
+        cases = (
+            (NONCE, expected + frame(b'unknown-operation')),
+            (NONCE, expected + frame(b'replay') + frame(b'observation-without-refusal')),
+            (NONCE, expected + (policy.core.MAX_BODY + 1).to_bytes(4, 'big')),
+            (NONCE, expected + (6).to_bytes(4, 'big') + b'R{}'),
+            (other_nonce, expected),
+        )
+        for nonce, wire in cases:
+            with self.subTest(nonce=nonce, length=len(wire)):
+                outcome = subprocess.run(
+                    (sys.executable, '-I', '-S', '-B', policy.__file__, '--independent-controller', nonce),
+                    input=wire, capture_output=True, timeout=8, check=False)
+                self.assertEqual(outcome.returncode, 1)
+                self.assertNotIn(b'observationSha256', outcome.stdout)
+                self.assertEqual(outcome.stderr.strip(),
+                    b'Historical observation refused; no paths, values or credentials logged.')
+
     def test_strict_and_historical_protocols_do_not_accept_each_other(self):
         with self.assertRaises(ValueError):
             policy.core.expectation(self.expected)

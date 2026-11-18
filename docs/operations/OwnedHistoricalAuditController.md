@@ -313,3 +313,24 @@ configuration in the owned fixture. Linux requires the test user to have access
 to that daemon. The observation channel cannot signal a container process,
 claim a Docker resource or grant cleanup authority. Independent cleanup after
 creator loss and daemon or host loss remain open.
+
+The independent creator profile keeps the real container, image and payload
+creation and cleanup in the original PowerShell process. A distinct, measured
+Python application controller validates the expectation, requests one fixed
+historical read, and decides whether its native result matches. The creator
+verifies the target signatures and sends a projected producer identity instead
+of passing on Docker identifiers, credentials or cleanup authority. The
+private channel permits a bounded request, its reply and terminal evidence.
+The controller has no Docker command interface in this profile.
+
+The generated profile exercises normal completion, verified application
+controller death and a five-second creator-owned lease expiry. The wrapper
+holds the actual controller process and verifies absence of its owned group or
+Job members before returning terminal evidence. On Linux it observes the
+controller exit without reaping until the group check. The creator closes its
+own Docker resources after the controller dies or while that controller still
+waits on expiry. A late replay after expiry is refused without a native read.
+The native tests verify the same source and the foreign fixture. The original
+creator's live Docker custody remains required, including complete native
+replies at creation. Creator loss, daemon loss and host loss require separate
+work.

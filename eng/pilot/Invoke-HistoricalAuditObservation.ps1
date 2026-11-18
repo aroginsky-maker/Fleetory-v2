@@ -3,7 +3,8 @@
 param([Parameter(Mandatory)][string]$ExpectedPlanSha256,[string]$Python='',
     [ValidateSet('none','after-container','after-restore','worker-early-eof','worker-abrupt-exit','dotnet-early-eof','dotnet-abrupt-exit',
         'dotnet-health-early-eof','dotnet-health-abrupt-exit','dotnet-users-early-eof','dotnet-users-abrupt-exit',
-        'dotnet-denial-early-eof','dotnet-denial-abrupt-exit','dotnet-transport-loss')][string]$FailurePoint='none',[switch]$PreparationOnly,[string]$PreparationGitPath='',
+        'dotnet-denial-early-eof','dotnet-denial-abrupt-exit','dotnet-transport-loss',
+        'independent-complete','independent-controller-exit','independent-lease-expired')][string]$FailurePoint='none',[switch]$PreparationOnly,[string]$PreparationGitPath='',
     [switch]$PayloadReservationOnly,[switch]$ResourceAcknowledgementOnly,[switch]$ProbeRuntimeAcknowledgementOnly,[switch]$ProbeRuntimeCreationOnly,[switch]$PublicProbePublicationOnly,[string]$PublicationDotnetPath='')
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
@@ -35,6 +36,7 @@ $context=@{Fixture=$fixture;Root=$root;ImageName=(Get-ImmuDataImageName $fixture
     PayloadClaimed=$false;PayloadRemoved=$false;LifetimeSeconds=660;Stores=[Collections.Generic.List[object]]::new();Tls=$null;SigningPems=@{};Secrets=@{}}
 $canaries=[Collections.Generic.List[string]]::new();$watch=[Diagnostics.Stopwatch]::StartNew();$cleaning=$false
 $stage='input';$refusal='operational';$failure=$false;$cleanup=$false;$proof=$null;$store=$null;$body=$null;$archive=$null;$raw=$null
+$cleanupAttempted=$false;$independentAttempted=$false;$independentProof=$null
 $comparisonCalls=0;$comparisonFault=$null;$managedCalls=[hashtable]::new([StringComparer]::Ordinal);$managedFault=$null;$transportFault=$null;$managedApplicationRefusal=@{}
 $oldBuildKit=$env:DOCKER_BUILDKIT;$env:DOCKER_BUILDKIT='0'
 function Invoke-Docker([string[]]$Arguments,[byte[]]$InputBytes=$null,[int]$TimeoutSeconds=60,[switch]$AllowFailure){
@@ -138,18 +140,160 @@ function Invoke-HistoricalComparison([ValidateSet('build','observe')][string]$Op
     Assert-ImmuData ($null -eq $value.result -and $value.childExitCode -ne 0 -and $value.requestBytes -eq $expectedBytes) 'controller-comparison-fault'
     return $value
 }
-function Read-ControllerObservation {
+function Read-ControllerNativeObservation {
     $native=Invoke-ControllerProbe $store 'observation-history-read'
     foreach($side in @('stateBefore','stateAfter')){
         $signed=New-ImmudbStateReceipt $native[$side] 'fleetoryaudit' (Join-Path $root 'target-public.pem')
         Assert-ImmuData ([int]$signed.txId -eq 5 -and $signed.txHash -ceq $source.txHash) 'controller-target-signed-point'
     }
     Read-AuditDataStore $context $store
+    return $native
+}
+function Read-ControllerObservation {
+    $native=Read-ControllerNativeObservation
     $native.producer=@{containerId=$store.Id;imageId=$context.ImageId;probeSha256=$context.ProbeHash}
     $expectedBytes=[Text.Encoding]::UTF8.GetBytes(($script:expected|ConvertTo-Json -Depth 8 -Compress))
     $request=@{expectedBase64=[Convert]::ToBase64String($expectedBytes);expectedSha256=(Get-ImmuDataHash $expectedBytes);
         observedBase64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($native|ConvertTo-Json -Depth 16 -Compress)))}
     return Invoke-HistoricalComparison 'observe' $request
+}
+function Remove-OwnedHistoricalResources {
+    Assert-ImmuData (-not $script:cleanupAttempted) 'controller-cleanup-replay'
+    $script:cleanupAttempted=$true
+    $script:cleaning=$true;$failures=@()
+    foreach($item in $context.Stores){try{Remove-AuditDataStore $context $item}catch{$failures+='store'}}
+    if(-not $failures.Count){try{Remove-AuditDataImage $context}catch{$failures+='image'}}
+    if(-not $failures.Count){try{Remove-AuditDataPublicPayload $repo $context}catch{$failures+='payload'}}
+    $script:cleanup=$failures.Count -eq 0
+}
+function Send-IndependentFrame([IO.Stream]$Stream,[byte[]]$Bytes,[Threading.CancellationToken]$Token){
+    Assert-ImmuData ($Bytes.Length -gt 0 -and $Bytes.Length -le 184320) 'independent-input-bound'
+    $header=[BitConverter]::GetBytes([Net.IPAddress]::HostToNetworkOrder([int]$Bytes.Length))
+    foreach($part in @($header,$Bytes)){
+        $null=$Stream.WriteAsync($part,0,$part.Length,$Token).WaitAsync($Token).GetAwaiter().GetResult()
+    }
+    $null=$Stream.FlushAsync($Token).WaitAsync($Token).GetAwaiter().GetResult()
+}
+function Read-IndependentFrame([IO.Stream]$Stream,[Threading.CancellationToken]$Token){
+    $header=[byte[]]::new(4)
+    $null=$Stream.ReadExactlyAsync([Memory[byte]]::new($header),$Token).AsTask().WaitAsync($Token).GetAwaiter().GetResult()
+    $size=[Net.IPAddress]::NetworkToHostOrder([BitConverter]::ToInt32($header,0))
+    Assert-ImmuData ($size -gt 0 -and $size -le 184320) 'independent-output-bound'
+    $bytes=[byte[]]::new($size)
+    $null=$Stream.ReadExactlyAsync([Memory[byte]]::new($bytes),$Token).AsTask().WaitAsync($Token).GetAwaiter().GetResult()
+    return [Text.UTF8Encoding]::new($false,$true).GetString($bytes)
+}
+function New-IndependentControllerStart([string]$Flow){
+    $start=[Diagnostics.ProcessStartInfo]::new($comparisonPython)
+    $start.UseShellExecute=$false;$start.CreateNoWindow=$true
+    $start.RedirectStandardInput=$true;$start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true
+    $start.Environment.Clear()
+    foreach($name in @('SystemRoot','WINDIR','TEMP','TMP','USERPROFILE','APPDATA','LOCALAPPDATA',
+        'ProgramFiles','ProgramFiles(x86)','ProgramData','HOME')){
+        $value=[Environment]::GetEnvironmentVariable($name)
+        if($null -ne $value){$start.Environment[$name]=$value}
+    }
+    $start.WorkingDirectory=$PSScriptRoot
+    foreach($part in @('-I','-S','-B',(Join-Path $PSScriptRoot 'historical_audit_observation.py'),'--independent-owner',
+        $Flow,$plan.nonce,$comparisonPythonHash,$codeSnapshot.comparisonSourcePins)){
+        $start.ArgumentList.Add($part)
+    }
+    return $start
+}
+function Invoke-IndependentHistoricalObservation([ValidateSet('complete','controller-exit','lease-expired')][string]$Flow){
+    Assert-ImmuData ($watch.Elapsed.TotalSeconds -lt 540 -and -not $script:independentAttempted) 'independent-window'
+    $script:independentAttempted=$true
+    $beforeNativeCalls=[int]$managedCalls['observation-history-read']
+    $encoder=[Text.UTF8Encoding]::new($false,$true)
+    $projection=@{
+        containerId=Get-ImmuDataHash $encoder.GetBytes($plan.nonce+'|target|'+$store.Id)
+        imageId='sha256:'+(Get-ImmuDataHash $encoder.GetBytes($plan.nonce+'|image|'+$context.ImageId))
+        probeSha256=$context.ProbeHash
+    }
+    $expectedForController=$script:expected.Clone();$expectedForController.producer=$projection
+    $expectedBytes=$encoder.GetBytes(($expectedForController|ConvertTo-Json -Compress -Depth 8))
+    Assert-ImmuData ($expectedBytes.Length -le 4096) 'independent-expected-bound'
+    $cancel=[Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds(55))
+    $holder=$null
+    try{
+        $holder=[Diagnostics.Process]::Start((New-IndependentControllerStart $Flow))
+        Assert-ImmuData ($null -ne $holder -and $holder.Id -ne $PID) 'independent-supervisor'
+        $toController=$holder.StandardInput.BaseStream;$output=$holder.StandardOutput.BaseStream
+        $token=$cancel.Token;$errorStream=$holder.StandardError.BaseStream
+        Assert-ImmuData ((Read-IndependentFrame $output $token) -ceq ('ready:'+$plan.nonce)) 'independent-ready'
+        # This is the original creator's live custody. A peer frame never grants access to Docker.
+        Read-AuditDataStore $context $store
+        $lease=[Diagnostics.Stopwatch]::StartNew()
+        Send-IndependentFrame $toController $expectedBytes $token
+        Assert-ImmuData ((Read-IndependentFrame $output $token) -ceq 'observe') 'independent-observe-request'
+        $controllerAliveAfterCleanup=$false
+        switch -CaseSensitive ($Flow){
+            'complete' {
+                Assert-ImmuData ($lease.Elapsed.TotalSeconds -lt 20) 'independent-lease'
+                $native=Read-ControllerNativeObservation
+                $native.producer=$projection
+                $bytes=$encoder.GetBytes('R'+($native|ConvertTo-Json -Compress -Depth 16))
+                Assert-ImmuData ($lease.Elapsed.TotalSeconds -lt 20) 'independent-lease'
+                Send-IndependentFrame $toController $bytes $token
+            }
+            'controller-exit' {
+                Send-IndependentFrame $toController ($encoder.GetBytes('terminate')) $token
+            }
+            'lease-expired' {
+                while($lease.Elapsed.TotalSeconds -lt 5){
+                    $token.ThrowIfCancellationRequested()
+                    Assert-ImmuData (-not $holder.HasExited) 'independent-live-lease'
+                    Start-Sleep -Milliseconds 50
+                }
+                Send-IndependentFrame $toController ($encoder.GetBytes('status')) $token
+                Assert-ImmuData ((Read-IndependentFrame $output $token) -ceq 'alive') 'independent-expiry-live'
+                Remove-OwnedHistoricalResources
+                Assert-ImmuData $script:cleanup 'independent-expiry-cleanup'
+                Send-IndependentFrame $toController ($encoder.GetBytes('replay')) $token
+                Assert-ImmuData ((Read-IndependentFrame $output $token) -ceq 'late-observe') 'independent-late-request'
+                $controllerAliveAfterCleanup=$true
+                Send-IndependentFrame $toController ($encoder.GetBytes('refuse')) $token
+            }
+        }
+        $toController.Dispose()
+        $proof=(Read-IndependentFrame $output $token)|ConvertFrom-Json -AsHashtable -Depth 20
+        $null=$holder.WaitForExitAsync($token).GetAwaiter().GetResult()
+        Assert-ImmuData ($holder.ExitCode -eq 0 -and $output.ReadByte() -eq -1 -and $errorStream.ReadByte() -eq -1) 'independent-supervisor-exit'
+        $fence=if($IsLinux){'linux-process-group'}else{'windows-job-object'}
+        Assert-ImmuData ($proof.Count -eq 12 -and $proof.schema -ceq 'fleetory.historical-independent-controller.v1' -and
+            $proof.flow -ceq $Flow -and $proof.nonce -ceq $plan.nonce -and $proof.supervisorPid -eq $holder.Id -and
+            $proof.controllerPid -is [long] -and $proof.controllerPid -gt 0 -and $proof.controllerPid -notin @($PID,$holder.Id) -and
+            $proof.childIdentityVerified -eq $true -and $proof.controllerMembersAbsent -eq $true -and
+            $proof.controllerExitObservedHeld -eq $true -and $proof.fence -ceq $fence) 'independent-controller-evidence'
+        switch -CaseSensitive ($Flow){
+            'complete' {
+                Assert-ImmuData ($proof.controllerExitCode -eq 0 -and -not $proof.lateApplicationRequestRefused -and
+                    $proof.applicationResult.schema -ceq 'fleetory.historical-audit-native-observation.v1' -and
+                    $proof.applicationResult.expectedSha256 -ceq (Get-ImmuDataHash $expectedBytes) -and
+                    $proof.applicationResult.pointMatched -eq $true -and $proof.applicationResult.knownEventBindingsMatched -eq $true) 'independent-application-result'
+            }
+            'controller-exit' {
+                Assert-ImmuData ($proof.controllerExitCode -ne 0 -and -not $proof.lateApplicationRequestRefused -and
+                    $null -eq $proof.applicationResult) 'independent-controller-exit'
+            }
+            'lease-expired' {
+                Assert-ImmuData ($proof.controllerExitCode -eq 0 -and $proof.lateApplicationRequestRefused -eq $true -and
+                    $controllerAliveAfterCleanup -and $null -eq $proof.applicationResult) 'independent-late-refusal'
+            }
+        }
+        $proof.creatorPid=$PID
+        $proof.controllerAliveAfterCleanup=$controllerAliveAfterCleanup
+        $proof.nativeObservationCalls=[int]$managedCalls['observation-history-read']-$beforeNativeCalls
+        return $proof
+    }finally{
+        if($null -ne $holder){
+            # Close only this private transport. The matched controller is fenced by its supervisor.
+            try{$holder.StandardInput.Close()}catch{}
+            if(-not $holder.HasExited){$null=$holder.WaitForExit(3500)}
+            $holder.Dispose()
+        }
+        $cancel.Dispose()
+    }
 }
 [Fleetory.Pilot.AuditHistoricalProbeProfile]::Begin($context,${function:Invoke-Docker})
 try{
@@ -213,7 +357,12 @@ try{
     }
     Invoke-SelectedDotnetFault $store 'observation-history-read' 'dotnet-'
     Invoke-SelectedDotnetFault $store 'observation-reader-denial' 'dotnet-denial-'
-    $first=Read-ControllerObservation
+    if($FailurePoint.StartsWith('independent-',[StringComparison]::Ordinal)){
+        $flow=$FailurePoint.Substring(12)
+        $independentProof=Invoke-IndependentHistoricalObservation $flow
+        if($flow -cne 'complete'){Assert-ImmuData $false ('controller-'+$FailurePoint)}
+        $first=$independentProof.applicationResult
+    }else{$first=Read-ControllerObservation}
     $comparisonCalls++
     $null=Invoke-ControllerProbe $store 'observation-history-read' 'authentication' -WrongPassword
     $null=Invoke-ControllerProbe $store 'observation-reader-denial'
@@ -245,20 +394,20 @@ try{
     elseif($_.Exception.Message -ceq 'The immudb state signature is invalid.'){$refusal='controller-source-signature'}
     elseif($_.Exception.Message -ceq 'Injected controller refusal.'){$refusal='controller-injected-failure'}
 }finally{
-    $cleaning=$true;$failures=@()
-    foreach($item in $context.Stores){try{Remove-AuditDataStore $context $item}catch{$failures+='store'}}
-    if(-not $failures.Count){try{Remove-AuditDataImage $context}catch{$failures+='image'}}
-    if(-not $failures.Count){try{Remove-AuditDataPublicPayload $repo $context}catch{$failures+='payload'}}
-    $cleanup=$failures.Count -eq 0
+    if(-not $script:cleanupAttempted){Remove-OwnedHistoricalResources}
+    if($null -ne $independentProof){
+        $independentProof.creatorAliveDuringCleanup=$cleanup -and $independentProof.creatorPid -eq $PID
+    }
     $resources=@{fixture=$fixture;ids=@($context.Stores|ForEach-Object {$_.Id});image=$context.ImageName;payloadClaimed=($context.PayloadClaimed -or $context.PayloadRemoved);payloadRemoved=$context.PayloadRemoved;
         payloadAbsent=(-not (Test-Path -LiteralPath $root))}
     $context.Secrets.Clear();$context.SigningPems.Clear();$context.Tls=$null;$canaries.Clear();$archive=$body=$raw=$sourceState=$null
     $watch.Stop();$env:DOCKER_BUILDKIT=$oldBuildKit
 }
 if($failure -or -not $cleanup){
-    @{schema='fleetory.historical-audit-controller-cleanup.v1';stage=$stage;refusal=$refusal;cleanupVerified=$cleanup;resources=$resources;comparisonFault=$comparisonFault;dotnetFault=$managedFault;dotnetTransportFault=$transportFault;dotnetApplicationRefusal=$managedApplicationRefusal}|ConvertTo-Json -Compress -Depth 5
+    @{schema='fleetory.historical-audit-controller-cleanup.v1';stage=$stage;refusal=$refusal;cleanupVerified=$cleanup;resources=$resources;comparisonFault=$comparisonFault;dotnetFault=$managedFault;dotnetTransportFault=$transportFault;independentController=$independentProof;dotnetApplicationRefusal=$managedApplicationRefusal}|ConvertTo-Json -Compress -Depth 5
     [Console]::Error.WriteLine('Historical native controller refused; no input contents or credentials logged.')
     exit 1
 }
 $proof.cleanupVerified=$true;$proof.resources=$resources
+if($null -ne $independentProof){$proof.independentController=$independentProof}
 $proof|ConvertTo-Json -Compress -Depth 16
