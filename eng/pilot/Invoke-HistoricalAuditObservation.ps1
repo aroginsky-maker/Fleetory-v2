@@ -178,23 +178,6 @@ function Remove-OwnedHistoricalResources {
     if(-not $failures.Count){try{Remove-AuditDataPublicPayload $repo $context}catch{$failures+='payload'}}
     $script:cleanup=$failures.Count -eq 0
 }
-function Send-IndependentFrame([IO.Stream]$Stream,[byte[]]$Bytes,[Threading.CancellationToken]$Token){
-    Assert-ImmuData ($Bytes.Length -gt 0 -and $Bytes.Length -le 184320) 'independent-input-bound'
-    $header=[BitConverter]::GetBytes([Net.IPAddress]::HostToNetworkOrder([int]$Bytes.Length))
-    foreach($part in @($header,$Bytes)){
-        $null=$Stream.WriteAsync($part,0,$part.Length,$Token).WaitAsync($Token).GetAwaiter().GetResult()
-    }
-    $null=$Stream.FlushAsync($Token).WaitAsync($Token).GetAwaiter().GetResult()
-}
-function Read-IndependentFrame([IO.Stream]$Stream,[Threading.CancellationToken]$Token,[int]$Maximum=184320){
-    $header=[byte[]]::new(4)
-    $null=$Stream.ReadExactlyAsync([Memory[byte]]::new($header),$Token).AsTask().WaitAsync($Token).GetAwaiter().GetResult()
-    $size=[Net.IPAddress]::NetworkToHostOrder([BitConverter]::ToInt32($header,0))
-    Assert-ImmuData ($size -gt 0 -and $size -le $Maximum) 'independent-output-bound'
-    $bytes=[byte[]]::new($size)
-    $null=$Stream.ReadExactlyAsync([Memory[byte]]::new($bytes),$Token).AsTask().WaitAsync($Token).GetAwaiter().GetResult()
-    return [Text.UTF8Encoding]::new($false,$true).GetString($bytes)
-}
 function New-IndependentControllerStart([string]$Flow,[ValidateSet('--independent-owner','--recovery-owner')][string]$Mode='--independent-owner'){
     $start=[Diagnostics.ProcessStartInfo]::new($comparisonPython)
     $start.UseShellExecute=$false;$start.CreateNoWindow=$true

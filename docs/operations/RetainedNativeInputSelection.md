@@ -66,7 +66,11 @@ datasets, retaining extra raw entry kinds as unreviewed state. It has not read t
 selected original archive. The [PostgreSQL pair byte adapter](PostgreSqlPairCapture.md)
 opens only the two selected coherent database references and keeps both frozen
 in memory. It shares exact report decoding with the audit-only adapter; the
-selector itself still performs no file access. This closes their byte-admission
+selector itself still performs no file access. The [four-input reader](RetainedServiceInputs.md)
+and [generated PostgreSQL data stage](RetainedPostgresDataStage.md) extend this
+selection into frozen native-owner input and a scoped two-database restore with
+coordinator exit/expiry cleanup; native audit and Server admission remain open.
+This closes their byte-admission
 boundary on synthetic inputs, not original service execution or native restore. The [audit-only byte adapter](AuditArchiveInput.md)
 now exercises the exact-open file boundary on synthetic files, opening only the
 selected audit reference and keeping frozen bytes in memory. Original execution

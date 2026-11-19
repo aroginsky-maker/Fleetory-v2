@@ -59,6 +59,7 @@ function Invoke-V2PairWorkflow{
     Read-PairStore $state $source.Audit 'audit';$artifacts.audit=(Invoke-Docker (Get-ImmuDataCliArguments $source.Audit.Id 'backup')).StdoutBytes
     $after=Get-V2CompositionPoint $source;Same-V2Source $after $v2Expected
     $artifactMeta=@{};foreach($name in $artifacts.Keys){$artifactMeta[$name]=@{bytes=$artifacts[$name].Length;sha256=(Get-PgDataHash $artifacts[$name])}}
+    if($Profile -ceq 'v2-retained'){return Invoke-NativeRetainedPostgresWorkflow $artifacts $v2Expected.postgres}
     $manifest=@{schema='fleetory.generated-v2-server-composition.v1';scope='generated-only-no-original-approval';fixture=$fixture;probeSha256=$state.ProbeHash;images=@{postgres=$state.PgImageId;audit=$state.ImageId};sourceContainers=@{postgres=$source.Id;audit=$source.Audit.Id};point=$v2Expected;capture=@{before=$v2Expected;after=$after};artifacts=$artifactMeta}
     $manifestBytes=[Text.Encoding]::UTF8.GetBytes(($manifest|ConvertTo-Json -Depth 25 -Compress));$manifestPin=Get-PgDataHash $manifestBytes
     $body=@{manifestBase64=[Convert]::ToBase64String($manifestBytes)};foreach($name in $artifacts.Keys){$body[$name+'Base64']=[Convert]::ToBase64String($artifacts[$name])}

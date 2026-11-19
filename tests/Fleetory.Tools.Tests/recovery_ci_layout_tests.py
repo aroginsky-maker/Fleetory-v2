@@ -19,7 +19,7 @@ PROVIDER = (
     ('PilotProvisioning.Tests.ps1', ''), ('IdentityBackup.Tests.ps1', ''),
     ('OpenBaoRaftRecovery.Tests.ps1', ''), ('NativeSignerBackend.Tests.ps1', ''),
     ('NativeJournalBackend.Tests.ps1', ''), ('NativeServerPair.Tests.ps1', ''),
-    ('NativeServerPair.Tests.ps1', '-Profile v2'))
+    ('NativeServerPair.Tests.ps1', '-Profile v2'), ('NativeServerPair.Tests.ps1', '-Profile v2-retained'))
 PAIR_ADMISSION = (
     '      - name: Verify coherent native Server pair restore and lifecycle\n'
     '        shell: pwsh\n'
@@ -112,6 +112,8 @@ def validate(text):
     assert text.count('python3 -B ./tests/Fleetory.Tools.Tests/fresh_server_pair_tests.py') == 1
     for key, platform, executable in (('windows-tls-chain', ' on Windows', 'python'), ('quality', '', 'python3')):
         for title, filename in (('held audit control namespace identity', 'audit_control_identity_tests.py'),
+                ('four frozen retained service inputs', 'retained_service_inputs_tests.py'),
+                ('private frozen service payload', 'retained_service_payload_tests.py'),
                 ('owned process identity and lifetime fence', 'audit_process_fence_tests.py'),
                 ('pinned payload reservation and controller binding', 'audit_payload_launch_tests.py'),
                 ('consumed generated container binding', 'audit_backend_binding_tests.py'),
