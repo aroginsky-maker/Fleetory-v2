@@ -3,6 +3,7 @@ param([Parameter(Mandatory)][string]$Python)
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot 'PilotNativeProcess.ps1')
+# Synchronous observers keep the active caller scope; an isolated closure module loses its local assertions in CI.
 function Require([bool]$Value,[string]$Name){if(-not$Value){throw ('Native observation test refused: '+$Name)}}
 $normal=@{calls=0;pid=0;final=$false}
 $observe={param([Diagnostics.Process]$Process)
@@ -10,7 +11,7 @@ $observe={param([Diagnostics.Process]$Process)
     if($normal.pid-eq0){$normal.pid=$Process.Id}else{Require ($normal.pid-eq$Process.Id) 'same-started-process'}
     if($Process.HasExited){$normal.final=$true}
     'observer-output-must-be-discarded'
-}.GetNewClosure()
+}
 $reply=Invoke-NativeBytes $Python @('-I','-S','-c',"import time; print('normal',flush=True); time.sleep(1.2)") -TimeoutSeconds 5 -ObserveProcess $observe
 Require ($reply.ExitCode-eq0-and$reply.Stdout.Trim()-ceq'normal'-and$reply.StderrBytes.Length-eq0-and$normal.calls-ge2-and$normal.final) 'normal-and-final-admission'
 $state=@{calls=0;process=$null;birth=$null;refused=$false}
@@ -25,7 +26,7 @@ $cancel={param([Diagnostics.Process]$Process)
         Require ($state.process.StartTime.ToUniversalTime().Ticks-eq$state.birth) 'held-observer-birth'
     }
     if($state.calls-ge2){throw [OperationCanceledException]::new('Generated observation refused.')}
-}.GetNewClosure()
+}
 try{
     $null=Invoke-NativeBytes $Python @('-I','-S','-c','import time; time.sleep(30)') -TimeoutSeconds 5 -ObserveProcess $cancel
 }catch{
@@ -39,7 +40,7 @@ try{
 $late=@{finalRefused=$false}
 $final={param([Diagnostics.Process]$Process)
     if($Process.HasExited){$late.finalRefused=$true;throw [OperationCanceledException]::new('Generated final admission refused.')}
-}.GetNewClosure()
+}
 $refused=$false
 try{$null=Invoke-NativeBytes $Python @('-I','-S','-c',"print('unaccepted')") -TimeoutSeconds 5 -ObserveProcess $final}catch{
     if($_.Exception.GetBaseException() -isnot [OperationCanceledException]){throw}
