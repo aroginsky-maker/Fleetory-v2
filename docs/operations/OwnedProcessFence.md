@@ -83,6 +83,10 @@ of a foreign process, environment filtering and the actual fixed native-owner
 pre-admission refusal. Tests use synthetic bytes and no original files, private
 PKI, source VPS, provider root or issuer. No generic process CLI is provided.
 
+The descendant deadline test now injects a deadline failure only after observing a real live descendant in its own generated fixture. It retains the original five-second outer launch bound and never restarts that clock. This separates descendant-cleanup coverage from Python startup speed on hosted Windows runners.
+
+The other process tests still exercise actual one-second creation, owner and input-backpressure deadlines. The descendant case requires real OS fencing, a live child before refusal, both owner and child absent afterward, and zero active fence members. Production deadlines, runtime code and required CI gates are unchanged. No test is skipped or retried to accept a failure.
+
 The Linux native-refusal fixture copies the installed PowerShell distribution
 into its own temporary directory, makes the copied directories private and
 checks that the runtime bytes match. Hosted installations with writable ancestor

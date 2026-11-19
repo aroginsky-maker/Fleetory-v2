@@ -193,15 +193,37 @@ class ProcessFenceTests(unittest.TestCase):
             self.assertFalse(self.running(child))
             self.assertTrue(json.loads(result.evidence)['fence']['noRunningMembersVerified'])
 
-    def test_timeout_kills_descendant_as_well_as_owner(self):
+    def test_deadline_failure_kills_ready_descendant_as_well_as_owner(self):
+        # A one-second startup deadline may correctly expire before the worker
+        # creates any descendant. Test the descendant cleanup branch by injecting
+        # that same refusal only after a real child is live. The actual five-second
+        # launch bound is still checked, never restarted. Other cases exercise real
+        # one-second creation/input/owner deadlines without a readiness assumption.
+        actual_deadline = policy._check_deadline
+        observed = []
+        child_path = self.root / 'generated-descendant.pid'
+        def fail_when_ready(start, seconds):
+            actual_deadline(start, seconds)
+            if child_path.exists():
+                text = child_path.read_text(encoding='ascii')
+                if text:
+                    self.assertRegex(text, r'^[1-9][0-9]*$')
+                    child = int(text)
+                    self.assertTrue(self.running(child))
+                    observed.append(child)
+                    raise policy.LaunchError('deadline')
         with ExitStack() as held, self.session() as session:
-            with self.assertRaises(policy.LaunchError) as seen:
-                policy._run_owned(self.command(held, 'child'), session, b'x', 1)
+            with patch.object(policy, '_check_deadline', side_effect=fail_when_ready):
+                with self.assertRaises(policy.LaunchError) as seen:
+                    policy._run_owned(self.command(held, 'child'), session, b'x', 5)
             value = json.loads(seen.exception.evidence)
             self.assertEqual(seen.exception.category, 'deadline')
             self.assertTrue(value['fence']['noRunningMembersVerified'])
             self.assertEqual(value['fence']['activeMembers'], 0)
-            child = int((self.root / 'generated-descendant.pid').read_text(encoding='ascii'))
+            self.assertEqual(len(observed), 1)
+            child = observed[0]
+            self.assertEqual(int(child_path.read_text(encoding='ascii')), child)
+            self.assertFalse(self.running(value['osIdentity']['pid']))
             self.assertFalse(self.running(child))
 
     def test_stdout_bound_refuses_without_returning_unbounded_output(self):
