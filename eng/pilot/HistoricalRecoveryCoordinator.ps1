@@ -69,8 +69,7 @@ function Finish-HistoricalRecoveryCoordinator($Peer,[ValidateSet('terminate','co
     $Peer.input.Dispose()
     return Receive-HistoricalCoordinatorCompletion $Peer $Outcome
 }
-function Receive-HistoricalCoordinatorCompletion($Peer,[ValidateSet('terminate','completed','refused','allocation-refused')][string]$Outcome,[string]$ResultFrame=''){
-    $token=$Peer.cancel.Token
+function Receive-HistoricalCoordinatorCompletion($Peer,[ValidateSet('terminate','completed','refused','allocation-refused')][string]$Outcome,[string]$ResultFrame='',[Threading.CancellationToken]$Token=$Peer.cancel.Token){
     if(-not $ResultFrame){$ResultFrame=Read-IndependentFrame $Peer.output $token 2048}
     $result=$ResultFrame|ConvertFrom-Json -AsHashtable -Depth 4
     $holder=$Peer.holder

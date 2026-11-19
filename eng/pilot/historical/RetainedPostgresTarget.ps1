@@ -1,7 +1,7 @@
 #requires -Version 7.3
 # Fixed PostgreSQL data-stage owner. Receives frozen private-pipe bytes, never source paths or adopted IDs.
 function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hashtable]$Payload,[hashtable]$Expected,
-    [ValidateSet('complete','after-acquire','lease-expired','after-work','lease-after-work','inspection-exit')][string]$Flow='complete',$AuditStage=$null){
+    [ValidateSet('complete','after-acquire','lease-expired','after-work','lease-after-work','inspection-exit','inflight-sql-exit')][string]$Flow='complete',$AuditStage=$null){
     $pilot=Join-Path $Repository 'eng/pilot'
     foreach($helper in @('HistoricalRecoveryCoordinator.ps1','HistoricalRecoveryInFlight.ps1')){. (Join-Path $pilot $helper)}
     . (Join-Path $Repository 'tests/Fleetory.Tools.Tests/NativeAuditDataFixture.ps1')
@@ -9,6 +9,7 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
     . (Join-Path $pilot 'historical/RetainedCoupledAudit.ps1')
     . (Join-Path $pilot 'historical/RetainedServerStage.ps1')
     . (Join-Path $pilot 'historical/RetainedConfiguration.ps1')
+    . (Join-Path $pilot 'historical/RetainedInFlightSql.ps1')
     $serverEnabled=$null -ne $AuditStage -and $AuditStage.ContainsKey('ServerEnabled') -and $AuditStage.ServerEnabled
     $configuration=if($null -ne $AuditStage){New-RetainedConfiguration $AuditStage.Material $serverEnabled $AuditStage.Historical}else{$null}
     $configurationPin=if($null -ne $configuration){$configuration.Sha256}else{Get-ImmuDataHash ([Text.Encoding]::UTF8.GetBytes('postgres-only.v1'))}
@@ -42,6 +43,7 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
     $context.Stores.Add($store);$client=${function:Invoke-Docker};$peer=$null;$proof=$null;$auditContext=$null;$auditStore=$null;$auditProof=$null;$serverProof=$null
     $meter=@{restores=0;sql=0;remove=0;auditRemove=0;copiedClaimsRefused=0;removeReplayRefused=$false;bootstrapped=$false;
         nativeDispatches=0;workInspections=0;controllerLossObserved=$false;workLossProof=$null;configurationWrites=0;configurationDriftRefusals=0;configurationReadonlyRefusals=0}
+    foreach($entry in @{processObservationChecks=0;inflightPending=$false;inflightObserved=$false;inflightObservationCalls=0;inflightObserver=$null;inflightBirth=$null;inflightNativePid=0;inflightClientExited=$false;lateWorkRefusals=0}.GetEnumerator()){$meter[$entry.Key]=$entry.Value}
     $clock=[Diagnostics.Stopwatch]::StartNew();$inventories=@{}
     function New-IndependentControllerStart([string]$ModeFlow,[string]$Mode){
         $start=New-HistoricalChildStart $comparisonPython
@@ -59,11 +61,11 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
         Assert-NativeJournal $items[0] $identifier $store.Session $context.ImageId $store.Started -CleanupOnly:$CleanupOnly
         return $identifier
     }
-    function Confirm-RetainedLiveWork{
+    function Confirm-RetainedLiveWork([Threading.CancellationToken]$Token=$peer.cancel.Token){
         Assert-ImmuData ($clock.Elapsed.TotalSeconds -lt 75 -and $null -ne $peer -and -not $peer.holder.HasExited -and
             $peer.workAdmitted -and $peer.workRequests -eq 1 -and -not $peer.expiredLiveCleanup -and $peer.workStatusRequests -lt 256) 'retained-work-window'
-        Send-HistoricalCoordinatorFrame $peer 'work-status';$peer.workStatusRequests++
-        $frame=Read-IndependentFrame $peer.output $peer.cancel.Token 2048
+        Send-IndependentFrame $peer.input ([Text.Encoding]::ASCII.GetBytes('work-status')) $Token;$peer.workStatusRequests++
+        $frame=Read-IndependentFrame $peer.output $Token 2048
         if($frame -cne ('alive:'+$peer.projection)){
             if($Flow -ceq 'inspection-exit' -and $peer.workStatusRequests -eq 2 -and $peer.workStatusChecks -eq 1 -and
                 $meter.workInspections -eq 1 -and $meter.nativeDispatches -eq 0){
@@ -85,7 +87,7 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
         Confirm-RetainedLiveWork
         Assert-ImmuData ($Arguments.Count -ge 2 -and $Arguments[0] -ceq 'exec' -and $Arguments -ccontains $identifier) 'retained-pg-own-command'
         $meter.nativeDispatches++
-        return Invoke-Docker $Arguments $InputBytes 15 -AllowFailure:$AllowFailure
+        return Invoke-Docker $Arguments $InputBytes 15 -AllowFailure:$AllowFailure -ObserveProcess ${function:Observe-RetainedNativeProcess}
     }
     function Pg-Sql([ValidateSet('postgres','fleetory','fleetory_signer')][string]$Database,[string]$Sql){
         $identifier=[Fleetory.Pilot.AuditContainerCustody]::Id($context,$store,$client);$meter.sql++
@@ -98,7 +100,7 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
         Confirm-RetainedLiveWork
         Assert-ImmuData ($Arguments.Count -ge 2 -and $Arguments[0] -ceq 'exec' -and $Arguments -ccontains $auditId) 'retained-audit-own-command'
         $meter.nativeDispatches++
-        return Invoke-Docker $Arguments $InputBytes 15 -AllowFailure:$AllowFailure
+        return Invoke-Docker $Arguments $InputBytes 15 -AllowFailure:$AllowFailure -ObserveProcess ${function:Observe-RetainedNativeProcess}
     }
     function Read-RetainedInventory([ValidateSet('fleetory','fleetory_signer')][string]$database){
         $sql=Invoke-NativeBytes $Python @('-B',(Join-Path $pilot 'pg_inventory_v2.py'),'sql','--database',$database) -TimeoutSeconds 10
@@ -241,7 +243,9 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
                     Snapshot=$copy['audit-export'];Nonce=$Payload.capture.nonce;Point=$AuditStage.Point;ImageContext=$AuditStage.ImageContext;Historical=$AuditStage.Historical}
                 $auditProof=Invoke-RetainedCoupledAudit @auditArgs
             }
-            if($Flow -ceq 'after-work'){
+            if($Flow -ceq 'inflight-sql-exit'){
+                Invoke-RetainedInFlightSql
+            }elseif($Flow -ceq 'after-work'){
                 $proof=Finish-HistoricalRecoveryCoordinator $peer 'terminate'
             }elseif($Flow -ceq 'lease-after-work'){
                 Assert-ImmuData ($peer.workRequests -eq 1 -and $peer.workAdmitted) 'retained-after-work-lease'
@@ -268,12 +272,16 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
             }
         }
     }catch{
-        if($Flow -cne 'inspection-exit' -or -not $meter.controllerLossObserved -or $meter.nativeDispatches -ne 0 -or
+        if($Flow -ceq 'inflight-sql-exit'){
+            if($_.Exception.GetBaseException() -isnot [OperationCanceledException]){throw}
+            Confirm-RetainedInterruptedSql
+        }elseif($Flow -cne 'inspection-exit' -or -not $meter.controllerLossObserved -or $meter.nativeDispatches -ne 0 -or
             $meter.workInspections -ne 1 -or $_.Exception.GetBaseException() -isnot [InvalidOperationException]){throw}
         $proof=$meter.workLossProof
     }finally{
         try{Close-HistoricalRecoveryCoordinator $peer}finally{
             if($null-ne$store.Id){Remove-OwnedHistoricalResources}
+            if($null -ne $meter.inflightObserver){$meter.inflightObserver.Dispose()}
             foreach($blob in $copy.Values){[Array]::Clear($blob)}
         }
     }
@@ -295,7 +303,9 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
         independentCreatorDeathCleanupVerified=$false;runtimeLoginVerified=($null -ne $serverProof);nativeAuditRestored=($null -ne $auditProof);serverStarted=($null -ne $serverProof);server=$serverProof;
         audit=$auditProof;auditContainerId=$(if($null -ne $auditStore){$auditStore.Id}else{$null});ownedAuditRemovalCalls=$meter.auditRemove;
         nativeWorkDispatches=$meter.nativeDispatches;runtimeWorkInspections=$meter.workInspections;
-        controllerLossAfterInspectionRefused=$meter.controllerLossObserved;
+        controllerLossAfterInspectionRefused=($Flow -ceq 'inspection-exit' -and $meter.controllerLossObserved);
+        processObservationChecks=$meter.processObservationChecks;
+        inFlightSql=@{nativeClientPid=$meter.inflightNativePid;nativeClientBirth=$meter.inflightBirth;actualQueryActive=$meter.inflightObserved;observationCalls=$meter.inflightObservationCalls;nativeClientExitVerified=$meter.inflightClientExited;lateNativeWorkRefusals=$meter.lateWorkRefusals;coordinatorLost=($Flow -ceq 'inflight-sql-exit' -and $meter.controllerLossObserved);metadataGrantsAuthority=$false};
         configurationSha256=$configurationPin;configurationFilesVerified=$meter.configurationWrites;
         configurationDriftRefusalsBeforeNativeCall=$meter.configurationDriftRefusals;configurationReadonlyRefusals=$meter.configurationReadonlyRefusals;
         originalUseAuthenticated=$false;executionAuthorized=$false;fullSystemRecoveryVerified=$false;phase7Complete=$false}

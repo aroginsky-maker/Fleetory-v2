@@ -1,5 +1,5 @@
 #requires -Version 7.3
-param([string]$Python='',[ValidateSet('none','after-stores')][string]$FailurePoint='none',[ValidateSet('legacy','v2','v2-retained','v2-retained-coupled','v2-retained-server','v2-retained-historical-server')][string]$Profile='legacy')
+param([string]$Python='',[ValidateSet('none','after-stores')][string]$FailurePoint='none',[ValidateSet('legacy','v2','v2-retained','v2-retained-coupled','v2-retained-server','v2-retained-historical-server','v2-retained-inflight')][string]$Profile='legacy')
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 foreach($helper in @('PilotNativeProcess.ps1','../../eng/pilot/ProviderRecoveryTransport.ps1','../../eng/pilot/ProviderRecoveryPolicy.ps1',
@@ -12,10 +12,28 @@ $state=@{Fixture=$fixture;Root=$root;Image=('fleetory-native-pair-'+$fixture.Rep
     Sides=[Collections.Generic.List[object]]::new();Audits=[Collections.Generic.List[object]]::new();Canaries=[Collections.Generic.List[string]]::new();Tls=$null;GatewayTls=@{};SigningPem=$null}
 $watch=[Diagnostics.Stopwatch]::StartNew();$cleaning=$false;$imageClaimed=$false;$stage='publish';$proof=$null;$lastClass='none';$lastExit=0
 $oldBuildKit=$env:DOCKER_BUILDKIT;$env:DOCKER_BUILDKIT='0'
-function Invoke-Docker([string[]]$Arguments,[byte[]]$InputBytes=$null,[int]$TimeoutSeconds=60,[switch]$AllowFailure){
+function Invoke-Docker([string[]]$Arguments,[byte[]]$InputBytes=$null,[int]$TimeoutSeconds=60,[switch]$AllowFailure,[scriptblock]$ObserveProcess=$null){
     Assert-Pair ($cleaning -or $watch.Elapsed.TotalSeconds -lt 600) 'fixture-deadline'
-    $result=if($IsLinux){Invoke-NativeBytes '/bin/sh' @('-c',(Get-ProviderDockerShellCommand $Arguments -ClassicBuilder:($Arguments[0] -ceq 'build'))) $InputBytes $TimeoutSeconds}
-        else{Invoke-NativeBytes 'docker' (@('--context','desktop-linux')+$Arguments) $InputBytes $TimeoutSeconds}
+    $privateConfig=$null
+    try{
+        if($null -ne $ObserveProcess){
+            Assert-RetainedObservedWorkArguments $Arguments
+            foreach($name in @('DOCKER_API_VERSION','DOCKER_CUSTOM_HEADERS')){
+                Assert-Pair ([string]::IsNullOrEmpty([Environment]::GetEnvironmentVariable($name))) 'observed-client-no-ambient-override'
+            }
+            if($IsLinux){
+                # Direct unprivileged client: the observed PID is Docker, not a shell/sudo intermediary.
+                $privateConfig=Join-Path $root ('observed-client-'+[Guid]::NewGuid().ToString('N'))
+                [Fleetory.Pilot.ExclusiveAuditDirectory]::Create($privateConfig)
+                $result=Invoke-NativeBytes '/usr/bin/docker' (@('--config',$privateConfig,'--host','unix:///var/run/docker.sock')+$Arguments) $InputBytes $TimeoutSeconds -ObserveProcess $ObserveProcess
+            }else{
+                $result=Invoke-NativeBytes 'docker' (@('--context','desktop-linux')+$Arguments) $InputBytes $TimeoutSeconds -ObserveProcess $ObserveProcess
+            }
+        }else{
+            $result=if($IsLinux){Invoke-NativeBytes '/bin/sh' @('-c',(Get-ProviderDockerShellCommand $Arguments -ClassicBuilder:($Arguments[0] -ceq 'build'))) $InputBytes $TimeoutSeconds}
+                else{Invoke-NativeBytes 'docker' (@('--context','desktop-linux')+$Arguments) $InputBytes $TimeoutSeconds}
+        }
+    }finally{if($null -ne $privateConfig){[IO.Directory]::Delete($privateConfig,$false)}}
     $script:lastExit=$result.ExitCode;$script:lastClass='unclassified'
     foreach($kind in @('syntax error','does not exist','permission denied','no such file','authentication failed','connection refused')){if(($result.Stdout+$result.Stderr).Contains($kind,[StringComparison]::OrdinalIgnoreCase)){$script:lastClass=$kind.Replace(' ','-');break}}
     if($result.Stderr -cmatch 'ERROR:\s+([A-Z0-9]{5})\b'){$script:lastClass='sqlstate-'+$Matches[1]}
@@ -78,7 +96,7 @@ try{
     Assert-Pair ($built.Count -eq 1 -and $built[0].Config.Labels['fleetory.native-pair.build'] -ceq $fixture) 'build-identity';$state.ImageId=$built[0].Id
     $state.Tls=New-PilotDisposableTlsMaterial -IncludeClient
     foreach($role in @('agent','admin')){$state.GatewayTls[$role]=New-PilotDisposableTlsMaterial}
-    if($Profile -cin @('v2','v2-retained','v2-retained-coupled','v2-retained-server','v2-retained-historical-server')){
+    if($Profile -cin @('v2','v2-retained','v2-retained-coupled','v2-retained-server','v2-retained-historical-server','v2-retained-inflight')){
         $state.SigningPems=@{}
         foreach($role in @('source','target')){
             $key=[Security.Cryptography.ECDsa]::Create([Security.Cryptography.ECCurve]::CreateFromFriendlyName('nistP256'))
@@ -89,12 +107,12 @@ try{
     try{$state.SigningPem=$key.ExportECPrivateKeyPem();[IO.File]::WriteAllText((Join-Path $root 'state-public.pem'),$key.ExportSubjectPublicKeyInfoPem(),[Text.UTF8Encoding]::new($false))}finally{$key.Dispose()}
     }
     foreach($pem in @($state.Tls.ServerPrivateKeyPem,$state.Tls.ClientPrivateKeyPem,$state.SigningPem,$state.GatewayTls.agent.ServerPrivateKeyPem,$state.GatewayTls.admin.ServerPrivateKeyPem)){foreach($line in ($pem -split "`n")){if($line.Length -ge 40 -and -not $line.StartsWith('-----')){$state.Canaries.Add($line.Substring(0,40))}}}
-    if($Profile -cin @('v2','v2-retained','v2-retained-coupled','v2-retained-server','v2-retained-historical-server')){foreach($pem in $state.SigningPems.Values){foreach($line in ($pem -split "`n")){if($line.Length -ge 40 -and -not $line.StartsWith('-----')){$state.Canaries.Add($line.Substring(0,40))}}}}
+    if($Profile -cin @('v2','v2-retained','v2-retained-coupled','v2-retained-server','v2-retained-historical-server','v2-retained-inflight')){foreach($pem in $state.SigningPems.Values){foreach($line in ($pem -split "`n")){if($line.Length -ge 40 -and -not $line.StartsWith('-----')){$state.Canaries.Add($line.Substring(0,40))}}}}
     . (Join-Path $repo 'eng/verify-immudb-state.ps1') -Address 'https://127.0.0.1:8090' -PublicKeyPath (Join-Path $root 'state-public.pem') -AnchorPath (Join-Path $root 'unused-anchor')
     $stage='stores';$source=New-PairSide $state 'source';$target=New-PairSide $state 'target'
     New-PairAudit $state $source;New-PairAudit $state $target
     if($FailurePoint -ceq 'after-stores'){Write-Output 'PAIR INJECTED FAILURE AFTER STORES';throw 'Intentional fresh pair failure.'}
-    if($Profile -cin @('v2','v2-retained','v2-retained-coupled','v2-retained-server','v2-retained-historical-server')){$proof=Invoke-V2PairWorkflow}else{
+    if($Profile -cin @('v2','v2-retained','v2-retained-coupled','v2-retained-server','v2-retained-historical-server','v2-retained-inflight')){$proof=Invoke-V2PairWorkflow}else{
     $stage='seed'
     $grants='RESET ROLE;GRANT USAGE ON SCHEMA core,platform TO fleetory_server;GRANT SELECT ON ALL TABLES IN SCHEMA core,platform TO fleetory_server;GRANT INSERT ON platform.audit_events,platform.audit_export_queue TO fleetory_server;GRANT UPDATE,DELETE ON platform.audit_export_queue TO fleetory_server;'
     $null=Pair-Sql $state $source 'fleetory' ("SET ROLE fleetory_migrator;`n"+$schema.sql+"`n"+$grants)

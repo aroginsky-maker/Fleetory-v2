@@ -1,7 +1,7 @@
 #requires -Version 7.3
 # Bounded binary stdin/stdout; callers must keep credentials out of Arguments.
 . (Join-Path $PSScriptRoot 'PilotCaptureStream.ps1')
-function Invoke-NativeBytes([string] $Executable, [string[]] $Arguments, [byte[]] $InputBytes = $null, [int] $TimeoutSeconds = 90) {
+function Invoke-NativeBytes([string] $Executable, [string[]] $Arguments, [byte[]] $InputBytes = $null, [int] $TimeoutSeconds = 90, [scriptblock] $ObserveProcess = $null) {
     $start = [Diagnostics.ProcessStartInfo]::new()
     $start.FileName = $Executable
     $start.UseShellExecute = $false
@@ -20,6 +20,7 @@ function Invoke-NativeBytes([string] $Executable, [string[]] $Arguments, [byte[]
     $stdout = [Fleetory.Tests.PilotCaptureStream]::new(67108864)
     $stderr = [Fleetory.Tests.PilotCaptureStream]::new(1048576)
     $stopwatch = [Diagnostics.Stopwatch]::StartNew()
+    $observationCancel = if ($null -ne $ObserveProcess) { [Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds($TimeoutSeconds)) } else { $null }
     $processStarted = $false
     $stdoutTask = $null
     $stderrTask = $null
@@ -37,6 +38,7 @@ function Invoke-NativeBytes([string] $Executable, [string[]] $Arguments, [byte[]
             $writeTask = [Threading.Tasks.Task]::CompletedTask
             $inputClosed = $true
         }
+        [double]$nextObservation=1
         while ($true) {
             if ($stopwatch.Elapsed.TotalSeconds -ge $TimeoutSeconds) { throw 'Native process deadline exceeded.' }
             if ($stdoutTask.IsFaulted -or $stderrTask.IsFaulted -or $writeTask.IsFaulted) { throw 'Bounded native process I/O failed.' }
@@ -45,7 +47,16 @@ function Invoke-NativeBytes([string] $Executable, [string[]] $Arguments, [byte[]
                 $process.StandardInput.Close()
                 $inputClosed = $true
             }
-            if ($process.HasExited -and $stdoutTask.IsCompleted -and $stderrTask.IsCompleted -and $writeTask.IsCompleted) { break }
+            if ($null -ne $ObserveProcess -and $stopwatch.Elapsed.TotalSeconds -ge $nextObservation) {
+                # Only this exact launched Process is supplied; observer output cannot enter the binary reply.
+                $null = & $ObserveProcess $process $observationCancel.Token
+                $observationCancel.Token.ThrowIfCancellationRequested()
+                $nextObservation = $stopwatch.Elapsed.TotalSeconds + 1
+            }
+            if ($process.HasExited -and $stdoutTask.IsCompleted -and $stderrTask.IsCompleted -and $writeTask.IsCompleted) {
+                if ($null -ne $ObserveProcess) { $null = & $ObserveProcess $process $observationCancel.Token; $observationCancel.Token.ThrowIfCancellationRequested() }
+                break
+            }
             Start-Sleep -Milliseconds 20
         }
         $null = $stdoutTask.GetAwaiter().GetResult()
@@ -67,6 +78,7 @@ function Invoke-NativeBytes([string] $Executable, [string[]] $Arguments, [byte[]
         foreach ($task in @($stdoutTask,$stderrTask,$writeTask)) {
             if ($null -ne $task -and -not $task.IsCompleted) { try { $null = $task.Wait(2000) } catch { } }
         }
+        if ($null -ne $observationCancel) { $observationCancel.Dispose() }
         $stopwatch.Stop()
         $stdout.Dispose()
         $stderr.Dispose()

@@ -41,8 +41,11 @@ claims whole-keyspace validation or authorizes an issuer.
 Six lifecycle cases cover completion, controller exit after resource acquisition,
 lease expiry, exit after restore, expiry after restore, and child loss at the
 runtime-inspection boundary. A fixed bounded work-status exchange checks the
-held child identity before and after inspection. No work dispatch follows the
-tested inspection-boundary loss. It does not prove atomicity against arbitrary
+held child identity before and after inspection, during observed native work and
+before accepting its final result. No work dispatch follows the tested
+inspection-boundary loss. The separate [in-flight SQL profile](RetainedInFlightSql.md)
+checks an actual active generated query, native-client cancellation and reverse
+cleanup after coordinator loss. It does not prove atomicity against arbitrary
 in-flight operation interruption, unknown creation outcomes, native owner death,
 Docker daemon failure or host loss.
 
