@@ -94,9 +94,11 @@ function Open-HistoricalCreateWitness($Request){
         Send-IndependentFrame $peer.input $bytes $deadline.Token
         $ack=(Read-IndependentFrame $peer.output $deadline.Token 512)|ConvertFrom-Json -AsHashtable -Depth 3
         if($Request.fault -ceq 'coordinator-exit'){
-            Assert-ImmuData ($ack.Count -eq 7 -and $ack.stage -ceq 'inflight' -and $ack.nonce -ceq $Request.nonce -and
+            Assert-ImmuData ($ack.Count -eq 8 -and $ack.stage -ceq 'inflight' -and $ack.nonce -ceq $Request.nonce -and
                 $ack.pid -eq $peer.process.Id -and $ack.nativePid -is [long] -and $ack.nativePid -gt 0 -and
-                $ack.nativePid -notin @($PID,$peer.process.Id) -and $ack.nativeStartedUtcTicks -is [long] -and
+                $ack.nativePid -notin @($PID,$peer.process.Id) -and
+                $ack.nativeBirthKind -ceq $(if($IsWindows){'windows-filetime'}else{'linux-proc-start-ticks'}) -and
+                $ack.nativeBirthToken -is [string] -and $ack.nativeBirthToken -cmatch '^[1-9][0-9]{0,19}\z' -and
                 $ack.responseSha256 -cmatch '^[a-f0-9]{64}\z' -and $ack.nativeStdoutBytes -eq 0) 'inflight-witness-ack'
             $peer.inFlight=$ack
             $peer.nativeObserver=[Diagnostics.Process]::GetProcessById($ack.nativePid)

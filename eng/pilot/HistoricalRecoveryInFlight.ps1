@@ -11,6 +11,30 @@ function New-HistoricalChildStart([string]$Executable){
     return $start
 }
 
+function Get-HistoricalNativeBirth([Diagnostics.Process]$Process){
+    Assert-ImmuData ($null -ne $Process -and -not $Process.HasExited -and $Process.Id -gt 0) 'inflight-native-live'
+    if($IsWindows){
+        return @{kind='windows-filetime';token=$Process.StartTime.ToFileTimeUtc().ToString([Globalization.CultureInfo]::InvariantCulture)}
+    }
+    Assert-ImmuData $IsLinux 'inflight-native-platform'
+    $stream=[IO.File]::Open('/proc/'+$Process.Id+'/stat',[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::ReadWrite)
+    try{
+        $buffer=[byte[]]::new(4097);$count=0
+        while($count -lt $buffer.Length){
+            $read=$stream.Read($buffer,$count,$buffer.Length-$count)
+            if($read -eq 0){break};$count+=$read
+        }
+        Assert-ImmuData ($count -gt 0 -and $count -le 4096) 'inflight-native-stat-bound'
+        $text=[Text.Encoding]::ASCII.GetString($buffer,0,$count)
+    }finally{$stream.Dispose()}
+    $end=$text.LastIndexOf(')')
+    Assert-ImmuData ($text.StartsWith(([string]$Process.Id+' ('),[StringComparison]::Ordinal) -and $end -gt 0) 'inflight-native-stat'
+    $fields=$text.Substring($end+1).Trim().Split(' ',[StringSplitOptions]::RemoveEmptyEntries)
+    Assert-ImmuData ($fields.Count -ge 20 -and $fields[0] -cnotin @('Z','X') -and
+        $fields[19] -cmatch '^[1-9][0-9]{0,19}\z' -and -not $Process.HasExited) 'inflight-native-stat'
+    return @{kind='linux-proc-start-ticks';token=$fields[19]}
+}
+
 function Invoke-HistoricalInFlightDocker([string[]]$Arguments,$Request,$Token,$InputStream,$OutputStream){
     Assert-ImmuData ($Arguments.Count -gt 2 -and $Arguments[0] -ceq 'run' -and $Arguments[1] -ceq '-d') 'inflight-original-arguments'
     $docker=(Get-Command $(if($IsWindows){'docker.exe'}else{'docker'}) -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
@@ -64,17 +88,17 @@ function Invoke-HistoricalInFlightDocker([string[]]$Arguments,$Request,$Token,$I
         $phase='native-start'
         $native=[Diagnostics.Process]::Start($start)
         $null=$native.Handle
-        $birth=$native.StartTime.ToUniversalTime().Ticks
+        $birth=Get-HistoricalNativeBirth $native
         $stdout=$native.StandardOutput.BaseStream.CopyToAsync($output);$stderr=$native.StandardError.BaseStream.CopyToAsync($errorOutput)
         $copies+=,$stdout;$copies+=,$stderr;$native.StandardInput.Close()
         $phase='held-response'
         $held=(Read-IndependentFrame $gate.StandardOutput.BaseStream $Token 512)|ConvertFrom-Json -AsHashtable -Depth 3
         Assert-ImmuData ($held.Count -eq 4 -and $held.stage -ceq 'held' -and $held.pid -eq $gate.Id -and
             $held.responseSha256 -cmatch '^[a-f0-9]{64}\z' -and $held.nativeDaemonStreamExited -eq $true -and
-            -not $native.HasExited -and $native.StartTime.ToUniversalTime().Ticks -eq $birth -and
+            -not $native.HasExited -and (Get-HistoricalNativeBirth $native).token -ceq $birth.token -and
             $output.Length -eq 0 -and -not $stdout.IsCompleted -and -not $stdout.IsFaulted -and -not $stderr.IsFaulted) 'inflight-native-client-held'
         Write-HistoricalWitnessFrame $OutputStream $Token @{stage='inflight';nonce=$Request.nonce;pid=$PID;
-            nativePid=$native.Id;nativeStartedUtcTicks=$birth;responseSha256=$held.responseSha256;nativeStdoutBytes=0}
+            nativePid=$native.Id;nativeBirthKind=$birth.kind;nativeBirthToken=$birth.token;responseSha256=$held.responseSha256;nativeStdoutBytes=0}
         $released=$false
         try{$released=(Read-IndependentFrame $InputStream $Token 96) -ceq ('release:'+$Request.nonce)}catch{}
         # Always drain this original invocation, even if its requester has gone away.
@@ -116,8 +140,11 @@ function Invoke-HistoricalInFlightDocker([string[]]$Arguments,$Request,$Token,$I
 
 function Assert-HistoricalInFlightClient($Peer){
     Assert-ImmuData ($null -ne $Peer.inFlight -and $null -ne $Peer.nativeObserver -and
-        -not $Peer.nativeObserver.HasExited -and $Peer.nativeObserver.Id -eq $Peer.inFlight.nativePid -and
-        $Peer.nativeObserver.StartTime.ToUniversalTime().Ticks -eq $Peer.inFlight.nativeStartedUtcTicks) 'inflight-same-native-client'
+        -not $Peer.nativeObserver.HasExited) 'inflight-native-live'
+    Assert-ImmuData ($Peer.nativeObserver.Id -eq $Peer.inFlight.nativePid) 'inflight-native-pid'
+    $birth=Get-HistoricalNativeBirth $Peer.nativeObserver
+    Assert-ImmuData ($birth.kind -ceq $Peer.inFlight.nativeBirthKind -and
+        $birth.token -ceq $Peer.inFlight.nativeBirthToken) 'inflight-native-birth'
 }
 
 function Complete-HistoricalInFlightWitness($Peer,$Request){

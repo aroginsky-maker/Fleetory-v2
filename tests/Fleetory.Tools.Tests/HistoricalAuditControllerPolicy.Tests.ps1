@@ -1,8 +1,16 @@
 #requires -Version 7.3
+param([int]$ObserveNativePid=0)
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot '../../eng/pilot/ImmuDataRoundtripPolicy.ps1')
 . (Join-Path $PSScriptRoot '../../eng/pilot/HistoricalAuditControllerPolicy.ps1')
+. (Join-Path $PSScriptRoot '../../eng/pilot/HistoricalRecoveryInFlight.ps1')
+if($ObserveNativePid -gt 0){
+    $observer=[Diagnostics.Process]::GetProcessById($ObserveNativePid);$null=$observer.Handle
+    try{Get-HistoricalNativeBirth $observer|ConvertTo-Json -Compress}
+    finally{$observer.Dispose()}
+    exit 0
+}
 $message="rpc error: code = DataLoss desc = transaction checksums don't match"
 if(-not (Test-HistoricalArchiveChecksumRefusal @{ExitCode=1;Stdout='';Stderr=$message})){throw 'Typed archive checksum refusal not recognized.'}
 if(Test-HistoricalArchiveChecksumRefusal @{ExitCode=0;Stdout='';Stderr=$message}){throw 'Success misclassified as checksum refusal.'}
@@ -88,3 +96,37 @@ $bad=$wire.Clone();$bad.session=[Guid]::Empty.ToString('D');Refused-Case {Assert
 $bad=$wire.Clone();$bad.fault='other';Refused-Case {Assert-HistoricalCreateWitnessRequest $bad} 'create-witness-request'
 $bad=$wire.Clone();$bad.extra=$true;Refused-Case {Assert-HistoricalCreateWitnessRequest $bad} 'create-witness-request'
 Write-Output 'HISTORICAL CREATE WITNESS INPUT PASS:3 accepted modes;7 malformed shape/identity/path refusals; no native launch.'
+
+# The same live child must have one exact birth token in independent observers.
+$launch=[Diagnostics.ProcessStartInfo]::new([Environment]::ProcessPath)
+$launch.UseShellExecute=$false;$launch.CreateNoWindow=$true
+foreach($part in @('-NoProfile','-NonInteractive','-Command','Start-Sleep -Seconds 20')){$launch.ArgumentList.Add($part)}
+$native=[Diagnostics.Process]::Start($launch);$null=$native.Handle
+try{
+    $birth=Get-HistoricalNativeBirth $native
+    $peer=@{nativeObserver=$native;inFlight=@{nativePid=$native.Id;nativeBirthKind=$birth.kind;nativeBirthToken=$birth.token}}
+    Assert-HistoricalInFlightClient $peer
+    for($n=0;$n -lt 2;$n++){
+        $start=[Diagnostics.ProcessStartInfo]::new([Environment]::ProcessPath)
+        $start.UseShellExecute=$false;$start.CreateNoWindow=$true
+        $start.RedirectStandardOutput=$true;$start.RedirectStandardError=$true
+        foreach($part in @('-NoProfile','-NonInteractive','-File',$PSCommandPath,'-ObserveNativePid',[string]$native.Id)){$start.ArgumentList.Add($part)}
+        $reader=[Diagnostics.Process]::Start($start)
+        try{
+            if(-not $reader.WaitForExit(8000)){$reader.Kill($true);throw 'Native birth observer deadline exceeded.'}
+            $observed=$reader.StandardOutput.ReadToEnd()|ConvertFrom-Json -AsHashtable
+            Assert-ImmuData ($reader.ExitCode -eq 0 -and $reader.StandardError.ReadToEnd().Length -eq 0 -and
+                $observed.Count -eq 2 -and $observed.kind -ceq $birth.kind -and $observed.token -ceq $birth.token) 'native-birth-independent-observer'
+            Assert-HistoricalInFlightClient $peer
+        }finally{$reader.Dispose()}
+    }
+    $bad=$peer.Clone();$bad.inFlight=$peer.inFlight.Clone();$bad.inFlight.nativeBirthToken+='1'
+    Refused-Case {Assert-HistoricalInFlightClient $bad} 'inflight-native-birth'
+    $bad=$peer.Clone();$bad.inFlight=$peer.inFlight.Clone();$bad.inFlight.nativeBirthKind='untrusted-kind'
+    Refused-Case {Assert-HistoricalInFlightClient $bad} 'inflight-native-birth'
+    $bad=$peer.Clone();$bad.inFlight=$peer.inFlight.Clone();$bad.inFlight.nativePid++
+    Refused-Case {Assert-HistoricalInFlightClient $bad} 'inflight-native-pid'
+    $native.Kill($true);$native.WaitForExit()
+    Refused-Case {Assert-HistoricalInFlightClient $peer} 'inflight-native-live'
+}finally{if(-not $native.HasExited){$native.Kill($true);$native.WaitForExit()};$native.Dispose()}
+Write-Output 'HISTORICAL NATIVE BIRTH PASS:2 independent native observers;exact OS birth token;changed birth,kind,PID and exited process refused;no clock tolerance or cleanup authority.'

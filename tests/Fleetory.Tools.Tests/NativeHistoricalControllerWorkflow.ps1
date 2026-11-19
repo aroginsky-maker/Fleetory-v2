@@ -248,9 +248,10 @@ function Assert-HistoricalRoutedCreateFault($Result,[string]$Fault){
     if($interrupted){
         $held=$proof.nativeInFlight
         Assert-ImmuData ($peer.coordinatorExitCode -ne 0 -and $proof.coordinatorExitedBeforeNativeRelease -eq $true -and
-            $held.Count -eq 7 -and $held.stage -ceq 'inflight' -and $held.pid -eq $proof.witnessPid -and
+            $held.Count -eq 8 -and $held.stage -ceq 'inflight' -and $held.pid -eq $proof.witnessPid -and
             $held.nativePid -gt 0 -and $held.nativePid -notin @($peer.ownerPid,$peer.coordinatorPid,$peer.supervisorPid,$proof.witnessPid) -and
-            $held.nativeStartedUtcTicks -gt 0 -and $held.nativeStdoutBytes -eq 0 -and
+            $held.nativeBirthKind -ceq $(if($IsWindows){'windows-filetime'}else{'linux-proc-start-ticks'}) -and
+            $held.nativeBirthToken -is [string] -and $held.nativeBirthToken -cmatch '^[1-9][0-9]{0,19}\z' -and $held.nativeStdoutBytes -eq 0 -and
             $held.responseSha256 -cmatch '^[a-f0-9]{64}\z') 'inflight-native-before-coordinator-exit'
     }
     $r=Invoke-Docker @('inspect',$proof.containerId) -AllowFailure

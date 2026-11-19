@@ -57,23 +57,19 @@ is used. Native setup and reader-write refusal probes are separate from the
 read-only observation mode. CI runs the eighteen portable contracts on both OSes
 and the generated native lifecycle on Linux.
 
-CI runs the ten database/audit native fixtures in the independent
-`Native database and audit recovery` job (20 minutes). Five provider/identity
-fixtures run in `Native provider and identity recovery` (15 minutes). Each job
-checks out the same revision, selects the pinned SDK, restores pinned tools,
-audits dependencies and builds its prerequisites before running unchanged
-fixture commands. Neither needs Sonar credentials or a successful upstream job.
-All jobs must succeed; partial success is not a green workflow. Six portable
-layout contracts reject missing/duplicated fixture commands, skip/soft-failure
-conditions, missing bootstrap gates and changed deadlines or Sonar ownership.
-The execution job keeps its 30-minute limit, coverage/issue gates and Sonar
-analysis. A final always-evaluated aggregate retains the previous check name
-`Strict build, tests, coverage and Sonar` and fails unless all four execution
-jobs succeed. The portable suite executes this actual aggregate with failed,
-cancelled, skipped and missing job results. This preserves the old required
-check's meaning without changing branch settings. This partition avoids
-exhausting the quality deadline on sequential
-independent fixtures; it does not change test bounds or repository budgets.
+The current CI graph, execution-job bounds and aggregate requirements are
+maintained in [Phase 7 closure](Phase7Closure.md). Database/audit and
+provider/identity lifecycles run in independent jobs with pinned SDK/tool
+bootstrap, dependency audit and prerequisite builds. The Server pair and v2
+composition checks run with provider/identity. Neither native job requires
+Sonar credentials or a successful upstream execution job.
+
+The portable `recovery_ci_layout_tests.py` contracts reject missing or duplicated
+fixtures, skipped/softened gates, altered bootstrap and changed job bounds. They
+also execute the actual final aggregate with failed, cancelled, skipped and
+missing results. All five execution jobs, including both Windows jobs, must
+succeed for that aggregate. Partial success is not a green workflow. This
+partition preserves required checks and repository budgets.
 
 The [owned native controller](OwnedHistoricalAuditController.md) adds a bounded
 input protocol, one fresh restore target and typed failure/cleanup contracts.

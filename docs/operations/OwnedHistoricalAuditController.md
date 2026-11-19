@@ -429,3 +429,11 @@ header, token, daemon warning or arbitrary subprocess error. Native response
 reader failures retain their category across the bounded reader thread; a
 generic thread wrapper must not hide them as an unclassified ValueError. These
 diagnostics add no retry, result admission or cleanup authority.
+
+For that read-only native-client identity comparison, Windows uses the exact
+creation-time token and Linux uses `/proc/<pid>/stat` start ticks. Converting a
+Linux process birth to UTC through .NET `Process.StartTime` may produce different
+ticks in two observers and must not be used as a cross-process identity token.
+The token kind, canonical string value, live process object and PID must all
+match without rounding or tolerance. This observation never grants kill or
+resource-cleanup authority; the separate creator retains the original client.
