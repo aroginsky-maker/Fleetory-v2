@@ -33,8 +33,9 @@ The test builds a public image containing immudb, but does not start PostgreSQL,
 immudb or Server services, restore data, generate/use credentials or read original
 data/PKI/provider material. The provider CI job requires this additional test.
 
-Next: attach this profile to the same coordinator and frozen four-input restore
-lifecycle, restore audit and compare against the separate PostgreSQL export before
-Server admission; use generated TLS/fresh target credentials first. Preserve the
-historical null-member comparison and strict writer boundary. Original sensitive
-work requires its own concrete applicable authorization. Phase 7 remains open.
+The [combined generated Server profiles](RetainedCombinedServer.md) now attach this
+helper to the frozen four-input restore lifecycle. They add audit comparison,
+configuration binding, temporary TLS/runtime authentication and actual Server
+start/stop. The empty-container profile remains a separate resource-custody test.
+Original sensitive work still requires concrete applicable authorization.
+Phase 7 remains open.

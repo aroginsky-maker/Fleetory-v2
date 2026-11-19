@@ -1082,6 +1082,14 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/NativeServerPair.Tests.ps1 -Profile v2-retained -Python (Get-Command python3).Source
 
+      - name: Verify frozen retained PostgreSQL audit and strict Server lifecycle
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativeServerPair.Tests.ps1 -Profile v2-retained-server -Python (Get-Command python3).Source
+
+      - name: Verify explicit historical null readonly Server lifecycle
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativeServerPair.Tests.ps1 -Profile v2-retained-historical-server -Python (Get-Command python3).Source
+
       - name: Verify retained audit namespace custody and parent-loss refusal
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/NativeRetainedNamespace.Tests.ps1

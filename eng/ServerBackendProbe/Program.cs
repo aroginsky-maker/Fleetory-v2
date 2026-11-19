@@ -17,6 +17,7 @@ internal static class Program
     internal const string PrivateDirectory = "/run/fleetory-native/server";
     private static readonly HashSet<string> Modes = new(StringComparer.Ordinal)
     {
+        "retained-readonly-host", "retained-runtime",
         "observation-read", "observation-history-read", "observation-history-seed", "observation-seed", "observation-zset", "observation-kv", "observation-rewrite", "observation-many", "observation-reader-denial",
         "history-seed", "history-seed-reversed", "history-users", "history-read", "history-reader", "history-extra", "history-rewrite", "history-wrong-password",
         "v2pair-seed-sql", "v2pair-publish", "v2pair-read", "v2pair-host",
@@ -113,6 +114,7 @@ internal static class Program
             binding.RootCertificate != PrivateDirectory + "/infrastructure-ca" ||
             binding.SslMode != (mode == "db-plaintext" ? SslMode.Disable : SslMode.VerifyFull))
         { throw new InvalidOperationException("Invalid generated fixture binding."); }
+        if (mode == "retained-runtime") { return await RetainedRuntimeControl.ExecuteAsync(deadline.Token); }
         await using var app = FleetoryApplication.Build([
             "--environment=Production", "--Logging:LogLevel:Default=None",
             "--Logging:WorkerObservation:LogLevel:Default=Error",
@@ -122,12 +124,13 @@ internal static class Program
             "--Fleetory:AdminGateway:Oidc:Enabled=true", "--Fleetory:AdminGateway:Oidc:Authority=https://127.0.0.1:19999/realms/fixture",
             "--Fleetory:AdminGateway:Oidc:Audience=fleetory-fixture", "--Fleetory:AdminGateway:Oidc:ClientId=fleetory-fixture",
             "--Fleetory:AuditExport:Enabled=true", "--Fleetory:AuditExport:Sink=Immudb", "--Fleetory:AuditExport:Address=https://127.0.0.1:8090",
-            "--Fleetory:AuditExport:Username=" + (mode == "audit-readonly" ? "fixture_reader" : "fixture_writer"),
+            "--Fleetory:AuditExport:Username=" + (mode is "audit-readonly" or "retained-readonly-host" ? "fixture_reader" : "fixture_writer"),
             "--Fleetory:AuditExport:Database=" + (mode == "audit-database" ? "missingfixture" : "fleetoryaudit")
         ]);
         await using var scope = app.Services.CreateAsyncScope();
         var platform = scope.ServiceProvider.GetRequiredService<PlatformDbContext>();
         var core = scope.ServiceProvider.GetRequiredService<CoreDbContext>();
+        if (mode == "retained-readonly-host") { return await RetainedHostControl.ExecuteAsync(app, platform, deadline.Token); }
         if (mode is "pair-host" or "v2pair-host") { return await FreshPairHost.ExecuteAsync(app, platform, mode == "v2pair-host", deadline.Token); }
         if (mode == "schema")
         {

@@ -14,8 +14,9 @@ function New-AuditDataNativeCall([string[]]$Arguments,[byte[]]$InputBytes=$null,
     }.GetNewClosure()
     return @{Client=$client;Invoke=$operation}
 }
-function Invoke-AuditDataContainerOperation($Context,$Store,[ValidateSet('Create','Inspect','Remove','ConfirmRemoval')][string]$Mode,[string[]]$Arguments){
-    $native=New-AuditDataNativeCall $Arguments
+function Invoke-AuditDataContainerOperation($Context,$Store,[ValidateSet('Create','Inspect','Remove','ConfirmRemoval')][string]$Mode,[string[]]$Arguments,
+    [ValidateSet(5,15,60)][int]$TimeoutSeconds=60){
+    $native=New-AuditDataNativeCall $Arguments $null $TimeoutSeconds
     switch -CaseSensitive ($Mode){
         'Create' {return [Fleetory.Pilot.AuditContainerCustody]::Create($Context,$Store,$native.Client,$native.Invoke)}
         'Inspect' {

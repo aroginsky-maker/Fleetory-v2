@@ -263,7 +263,12 @@ COORDINATOR_LIMIT_SECONDS = 105
 CREATE_REFUSED = 'create-refused'
 ALLOCATION_REFUSED = b'allocation-refused'
 CREATE_INTERRUPTED = 'during-create'
-COORDINATOR_FLOWS = ('complete', 'before-acquire', 'after-acquire', 'lease-expired', CREATE_REFUSED, CREATE_INTERRUPTED)
+AFTER_WORK_EXIT = 'after-work'
+AFTER_WORK_LEASE = 'lease-after-work'
+INSPECTION_EXIT = 'inspection-exit'
+MAX_WORK_STATUS = 256
+COORDINATOR_FLOWS = ('complete', 'before-acquire', 'after-acquire', 'lease-expired', CREATE_REFUSED, CREATE_INTERRUPTED,
+                     AFTER_WORK_EXIT, AFTER_WORK_LEASE, INSPECTION_EXIT)
 HANDOFF_EXIT = 'between-operations-exit'
 RESTART_UNCONFIRMED = 'restart-unconfirmed'
 CREATOR_FLOWS = ('complete', 'controller-exit', 'lease-expired', HANDOFF_EXIT, RESTART_UNCONFIRMED)
@@ -619,6 +624,22 @@ def _coordinator_handoff(link, flow, nonce):
     return commitment, False
 
 
+def _work_decision(link, flow, commitment):
+    checks = 0
+    while True:
+        decision = link.receive_owner(96)
+        if decision != b'work-status':
+            return decision
+        checks += 1
+        packet.require(checks <= MAX_WORK_STATUS)
+        link.live()
+        if flow == INSPECTION_EXIT and checks == 2:
+            # Fixed fault point: the owner has inspected its runtime, but has not dispatched native work.
+            # The surviving supervisor ends the held coordinator and emits its actual fence/exit proof.
+            return None
+        _creator_write(sys.stdout.buffer, b'alive:' + commitment)
+
+
 def _coordinator_dialog(link, flow, nonce):
     commitment, stopped = _coordinator_handoff(link, flow, nonce)
     if commitment is None:
@@ -640,8 +661,24 @@ def _coordinator_dialog(link, flow, nonce):
     link.send_application(b'work:' + commitment)
     packet.require(link.receive_application(96) == request)
     _creator_write(output, request)
-    outcome = b'refused' if flow == 'lease-expired' else b'completed'
-    packet.require(link.receive_owner(96) == outcome)
+    outcome = b'refused' if flow in ('lease-expired', AFTER_WORK_LEASE) else b'completed'
+    decision = _work_decision(link, flow, commitment)
+    if decision is None:
+        return {'projection': commitment.decode('ascii'), 'lateRequestRefused': False}, True
+    if flow == AFTER_WORK_EXIT:
+        packet.require(decision == b'terminate')
+        link.live()
+        return {'projection': commitment.decode('ascii'), 'lateRequestRefused': False}, True
+    if flow == AFTER_WORK_LEASE:
+        packet.require(decision == b'status')
+        link.live()
+        _creator_write(output, LIVE_STATUS)
+        packet.require(link.receive_owner(96) == b'work')
+        link.live()
+        # The first work request was already relayed. Never relay this second request to the application.
+        _creator_write(output, b'late-work')
+        decision = link.receive_owner(96)
+    packet.require(decision == outcome)
     link.send_application(outcome)
     link.child.stdin.close()
     packet.require(link.receive_application(96) == outcome)

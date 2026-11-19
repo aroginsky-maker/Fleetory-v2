@@ -19,7 +19,8 @@ function Read-IndependentFrame([IO.Stream]$Stream,[Threading.CancellationToken]$
 function Open-HistoricalRecoveryCoordinator([string]$Flow){
     $cancel=[Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds(108))
     $peer=@{flow=$Flow;holder=$null;cancel=$cancel;input=$null;output=$null;projection=$null;
-        lease=$null;allocationRequests=0;workRequests=0;workAdmitted=$false;expiredLiveCleanup=$false;allocationReplayRefused=$false}
+        lease=$null;allocationRequests=0;workRequests=0;workAdmitted=$false;expiredLiveCleanup=$false;allocationReplayRefused=$false;
+        workStatusRequests=0;workStatusChecks=0}
     try{
         $peer.holder=[Diagnostics.Process]::Start((New-IndependentControllerStart $Flow '--recovery-owner'))
         Assert-ImmuData ($null -ne $peer.holder -and $peer.holder.Id -ne $PID) 'coordinator-supervisor'
@@ -66,8 +67,12 @@ function Read-HistoricalCoordinatorWork($Peer){
 function Finish-HistoricalRecoveryCoordinator($Peer,[ValidateSet('terminate','completed','refused','allocation-refused')][string]$Outcome){
     Send-HistoricalCoordinatorFrame $Peer $Outcome
     $Peer.input.Dispose()
+    return Receive-HistoricalCoordinatorCompletion $Peer $Outcome
+}
+function Receive-HistoricalCoordinatorCompletion($Peer,[ValidateSet('terminate','completed','refused','allocation-refused')][string]$Outcome,[string]$ResultFrame=''){
     $token=$Peer.cancel.Token
-    $result=(Read-IndependentFrame $Peer.output $token 2048)|ConvertFrom-Json -AsHashtable -Depth 4
+    if(-not $ResultFrame){$ResultFrame=Read-IndependentFrame $Peer.output $token 2048}
+    $result=$ResultFrame|ConvertFrom-Json -AsHashtable -Depth 4
     $holder=$Peer.holder
     $null=$holder.WaitForExitAsync($token).GetAwaiter().GetResult()
     $fence=if($IsLinux){'linux-process-group'}else{'windows-job-object'}
@@ -86,6 +91,8 @@ function Finish-HistoricalRecoveryCoordinator($Peer,[ValidateSet('terminate','co
     $result.workRequests=$Peer.workRequests
     $result.workAdmitted=$Peer.workAdmitted
     $result.expiredLiveCleanup=$Peer.expiredLiveCleanup
+    $result.workStatusRequests=$Peer.workStatusRequests
+    $result.workStatusChecks=$Peer.workStatusChecks
     return $result
 }
 function Complete-HistoricalCoordinatorCreateRefusal($Peer){

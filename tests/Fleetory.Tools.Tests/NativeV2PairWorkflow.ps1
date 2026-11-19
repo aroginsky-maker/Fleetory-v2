@@ -32,6 +32,8 @@ function Assert-V2RefusedPorts{
     Assert-Pair ((Invoke-PairProbe $state $target 'pair-closed').closedPorts -eq 3 -and $script:v2HostCalls -eq 0) 'v2-refused-before-host-start'
 }
 function Invoke-V2PairWorkflow{
+    $historical=$Profile -ceq 'v2-retained-historical-server'
+    if($historical){. (Join-Path $PSScriptRoot 'NativeRetainedHistoricalSource.ps1')}
     $script:stage='v2-bootstrap';$script:sqls=@{};$script:captured=@{};$script:pins=@{};$script:expected=@{};$script:restores=0;$script:auditRestores=0;$script:v2HostCalls=0
     foreach($db in @('fleetory','fleetory_signer')){
         $r=Invoke-NativeBytes $Python @('-B',(Join-Path $repo 'eng/pilot/pg_inventory_v2.py'),'sql','--database',$db) -TimeoutSeconds 10
@@ -50,16 +52,22 @@ function Invoke-V2PairWorkflow{
     $seed=Invoke-PairProbe $state $source 'v2pair-seed-sql'
     Assert-Pair ($seed.fixture -ceq $fixture -and $seed.sql.Length -le 16384 -and @($seed.eventIds).Count -eq 4) 'v2-composed-event-model'
     $null=V2-Sql $source 'fleetory' ($seed.sql+'GRANT INSERT,UPDATE,DELETE ON platform.audit_export_queue TO fleetory_server;')
-    $null=Invoke-PairProbe $state $source 'v2pair-publish'
-    $script:v2Expected=Get-V2CompositionPoint $source;$script:expected=$v2Expected.postgres
+    if($historical){
+        Initialize-RetainedHistoricalSource $source $seed.eventIds[0]
+        $script:v2Expected=Get-RetainedHistoricalSourcePoint $source
+    }else{
+        $null=Invoke-PairProbe $state $source 'v2pair-publish'
+        $script:v2Expected=Get-V2CompositionPoint $source
+    }
+    $script:expected=$v2Expected.postgres
     $script:stage='v2-capture';$artifacts=@{}
     foreach($entry in @(@('application','fleetory'),@('signer','fleetory_signer'))){
         Read-PairStore $state $source 'postgres';$artifacts[$entry[0]]=(Invoke-Docker @('exec',$source.Id,'pg_dump','-Fc','--compress=0','--no-password','-U','postgres','-d',$entry[1])).StdoutBytes
     }
     Read-PairStore $state $source.Audit 'audit';$artifacts.audit=(Invoke-Docker (Get-ImmuDataCliArguments $source.Audit.Id 'backup')).StdoutBytes
-    $after=Get-V2CompositionPoint $source;Same-V2Source $after $v2Expected
+    $after=if($historical){Get-RetainedHistoricalSourcePoint $source}else{Get-V2CompositionPoint $source};Same-V2Source $after $v2Expected
     $artifactMeta=@{};foreach($name in $artifacts.Keys){$artifactMeta[$name]=@{bytes=$artifacts[$name].Length;sha256=(Get-PgDataHash $artifacts[$name])}}
-    if($Profile -ceq 'v2-retained'){return Invoke-NativeRetainedPostgresWorkflow $artifacts $v2Expected.postgres}
+    if($Profile -cin @('v2-retained','v2-retained-coupled','v2-retained-server','v2-retained-historical-server')){return Invoke-NativeRetainedPostgresWorkflow $artifacts $v2Expected.postgres $v2Expected.audit}
     $manifest=@{schema='fleetory.generated-v2-server-composition.v1';scope='generated-only-no-original-approval';fixture=$fixture;probeSha256=$state.ProbeHash;images=@{postgres=$state.PgImageId;audit=$state.ImageId};sourceContainers=@{postgres=$source.Id;audit=$source.Audit.Id};point=$v2Expected;capture=@{before=$v2Expected;after=$after};artifacts=$artifactMeta}
     $manifestBytes=[Text.Encoding]::UTF8.GetBytes(($manifest|ConvertTo-Json -Depth 25 -Compress));$manifestPin=Get-PgDataHash $manifestBytes
     $body=@{manifestBase64=[Convert]::ToBase64String($manifestBytes)};foreach($name in $artifacts.Keys){$body[$name+'Base64']=[Convert]::ToBase64String($artifacts[$name])}

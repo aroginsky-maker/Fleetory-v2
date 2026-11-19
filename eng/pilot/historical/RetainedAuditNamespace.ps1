@@ -44,7 +44,7 @@ function Get-RetainedAuditNamespace($Context){
     $image=[Fleetory.Pilot.AuditImageCustody]::Id($link[2],$client)
     Assert-ImmuData ($Context.ImageId -ceq $image -and $Context.ImageName -ceq $image -and
         $Context.LifetimeSeconds -eq 3300) 'retained-namespace-image'
-    $reply=Invoke-AuditDataContainerOperation $link[0] $link[1] 'Inspect' @('inspect',$parent)
+    $reply=Invoke-AuditDataContainerOperation $link[0] $link[1] 'Inspect' @('inspect',$parent) -TimeoutSeconds 5
     Assert-ImmuData ($reply.ExitCode -eq 0) 'retained-namespace-parent-inspect'
     $items=@($reply.Stdout|ConvertFrom-Json -AsHashtable -Depth 32)
     Assert-ImmuData ($items.Count -eq 1) 'retained-namespace-parent-single-object'
@@ -66,7 +66,7 @@ function Read-RetainedAuditNamespace($Context,$Store,[switch]$CleanupOnly){
     # Cleanup deliberately does not require a live parent; the child creator still owns its own ID.
     $id=[Fleetory.Pilot.AuditContainerCustody]::Id($Context,$Store,${function:Invoke-Docker})
     $link=if(-not $CleanupOnly){Get-RetainedAuditNamespace $Context}else{$null}
-    $reply=Invoke-AuditDataContainerOperation $Context $Store 'Inspect' @('inspect',$id)
+    $reply=Invoke-AuditDataContainerOperation $Context $Store 'Inspect' @('inspect',$id) -TimeoutSeconds 5
     Assert-ImmuData ($reply.ExitCode -eq 0) 'retained-namespace-inspect'
     $items=@($reply.Stdout|ConvertFrom-Json -AsHashtable -Depth 32)
     Assert-ImmuData ($items.Count -eq 1) 'retained-namespace-single-object'

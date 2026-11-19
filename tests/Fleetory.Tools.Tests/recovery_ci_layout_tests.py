@@ -20,6 +20,8 @@ PROVIDER = (
     ('OpenBaoRaftRecovery.Tests.ps1', ''), ('NativeSignerBackend.Tests.ps1', ''),
     ('NativeJournalBackend.Tests.ps1', ''), ('NativeServerPair.Tests.ps1', ''),
     ('NativeServerPair.Tests.ps1', '-Profile v2'), ('NativeServerPair.Tests.ps1', '-Profile v2-retained'),
+    ('NativeServerPair.Tests.ps1', '-Profile v2-retained-server'),
+    ('NativeServerPair.Tests.ps1', '-Profile v2-retained-historical-server'),
     ('NativeRetainedNamespace.Tests.ps1', ''))
 PAIR_ADMISSION = (
     '      - name: Verify coherent native Server pair restore and lifecycle\n'
@@ -597,6 +599,14 @@ class RecoveryCiLayoutTests(unittest.TestCase):
     def test_actual_owned_cleanup_flag_cannot_be_removed_or_duplicated(self):
         self.refused(self.text.replace(' --owned-cleanup','',1))
         self.refused(self.text.replace(' --owned-cleanup',' --owned-cleanup --owned-cleanup',1))
+
+
+    def test_combined_server_gates_cannot_be_omitted_duplicated_or_softened(self):
+        for profile in ('v2-retained-server', 'v2-retained-historical-server'):
+            command='./tests/Fleetory.Tools.Tests/NativeServerPair.Tests.ps1 -Profile '+profile+' -Python (Get-Command python3).Source'
+            self.refused(self.text.replace(command,'omitted',1))
+            self.refused(self.text.replace('run: '+command,'continue-on-error: true\n        run: '+command,1))
+            self.refused(self.text.replace(command,command+'\n          '+command,1))
 
 
 if __name__ == '__main__':

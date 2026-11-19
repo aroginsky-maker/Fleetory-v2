@@ -6,6 +6,7 @@ from pathlib import Path
 import subprocess
 import sys
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import audit_observation_tests as vectors
@@ -340,6 +341,76 @@ class HistoricalObservationTests(unittest.TestCase):
         self.assertEqual(value['unreviewedRawEntries'], 1)
         self.assertFalse(value['additionalStateReviewed'])
         self.assertFalse(value['wholeKeyspaceVerified'])
+
+
+class RecoveryAfterWorkTests(unittest.TestCase):
+    def dialog(self, flow, frames):
+        owner = iter(frames)
+        application = iter((b'run:' + b'a' * 64, b'refused'))
+        sent, output = [], io.BytesIO()
+        link = SimpleNamespace(receive_owner=lambda maximum: next(owner),
+            receive_application=lambda maximum: next(application), send_application=sent.append,
+            live=lambda: None, child=SimpleNamespace(stdin=io.BytesIO()))
+        with patch.object(policy, '_coordinator_handoff', return_value=(b'a' * 64, False)), \
+             patch.object(policy.sys, 'stdout', SimpleNamespace(buffer=output)):
+            report = policy._coordinator_dialog(link, flow, NONCE)
+        return report, sent, output.getvalue()
+
+    def test_after_work_exit_does_not_report_completed_application(self):
+        report, sent, _ = self.dialog(policy.AFTER_WORK_EXIT, (b'work', b'terminate'))
+        self.assertTrue(report[1])
+        self.assertFalse(report[0]['lateRequestRefused'])
+        self.assertEqual(sent, [b'work:' + b'a' * 64])
+        with self.assertRaises(ValueError):
+            self.dialog(policy.AFTER_WORK_EXIT, (b'work', b'completed'))
+
+    def test_after_work_expiry_never_relays_second_work_request(self):
+        report, sent, raw = self.dialog(policy.AFTER_WORK_LEASE, (b'work', b'status', b'work', b'refused'))
+        self.assertFalse(report[1])
+        self.assertTrue(report[0]['lateRequestRefused'])
+        self.assertEqual(sent, [b'work:' + b'a' * 64, b'refused'])
+        output = io.BytesIO(raw)
+        self.assertEqual(tuple(policy._creator_read(output) for _ in range(3)),
+                         (b'run:' + b'a' * 64, b'alive', b'late-work'))
+        self.assertFalse(output.read(1))
+
+    def test_after_work_expiry_refuses_wrong_phase_or_success_reply(self):
+        for frames in ((b'work', b'completed'), (b'work', b'status', b'replay', b'refused'),
+                       (b'work', b'status', b'work', b'completed')):
+            with self.subTest(frames=frames), self.assertRaises(ValueError):
+                self.dialog(policy.AFTER_WORK_LEASE, frames)
+
+
+class RecoveryWorkStatusTests(unittest.TestCase):
+    def decide(self, flow, frames, live=None):
+        source = iter(frames)
+        output = io.BytesIO()
+        link = SimpleNamespace(receive_owner=lambda maximum: next(source), live=live or (lambda: None))
+        with patch.object(policy.sys, 'stdout', SimpleNamespace(buffer=output)):
+            value = policy._work_decision(link, flow, b'a' * 64)
+        return value, output.getvalue()
+
+    def test_status_acknowledgements_bind_projection_and_do_not_forward_work(self):
+        value, raw = self.decide('complete', (b'work-status', b'work-status', b'completed'))
+        self.assertEqual(value, b'completed')
+        output = io.BytesIO(raw)
+        self.assertEqual(tuple(policy._creator_read(output) for _ in range(2)), (b'alive:' + b'a' * 64,) * 2)
+        self.assertFalse(output.read(1))
+
+    def test_loss_at_second_lookup_confirmation_does_not_acknowledge_work(self):
+        value, raw = self.decide(policy.INSPECTION_EXIT, (b'work-status', b'work-status'))
+        self.assertIsNone(value)
+        output = io.BytesIO(raw)
+        self.assertEqual(policy._creator_read(output), b'alive:' + b'a' * 64)
+        self.assertFalse(output.read(1))
+
+    def test_request_bound_and_dead_held_identity_refuse_status(self):
+        with self.assertRaises(ValueError):
+            self.decide('complete', (b'work-status',) * (policy.MAX_WORK_STATUS + 1))
+        def dead():
+            raise ValueError('Held identity is no longer live')
+        with self.assertRaises(ValueError):
+            self.decide('complete', (b'work-status',), live=dead)
 
 
 if __name__ == '__main__':
