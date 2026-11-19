@@ -57,7 +57,7 @@ of another held process, final-result refusal, default calls and original
 deadline-token behavior, including an expired observer that returns normally.
 Eight additional purpose refusals check creation/build, null/empty/case and incomplete exec requests.
 Portable protocol tests separately cover flow/projection/held-identity refusal.
-The three retained native profiles run in a dedicated required 15-minute Linux
+The four retained native profiles run in a dedicated required 15-minute Linux
 job with a cold probe restore; all original jobs and deadlines remain required.
 The aggregate requires all six execution jobs, including the new lane.
 
@@ -68,3 +68,8 @@ unknown create outcomes, Docker daemon or host loss. The creator remains alive
 to perform cleanup. Original service/configuration/provider/PKI continuity,
 independent custody/actors, human login, physical Agent and full RPO/RTO remain
 open. Phase 7 is incomplete and PR #2 remains draft/unmerged.
+
+The separate [actual COPY interruption profile](RetainedInFlightRestore.md)
+extends the same owner/observer to a real frozen-archive data restore. It records
+its pre-data schema operation and interrupted data-only attempt separately from
+the successful complete database/audit restore counts in this SQL profile.

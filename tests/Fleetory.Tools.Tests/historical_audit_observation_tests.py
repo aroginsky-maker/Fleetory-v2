@@ -441,5 +441,38 @@ class RecoveryWorkStatusTests(unittest.TestCase):
         self.assertFalse(stream.read(1))
 
 
+    def test_restore_interrupt_requires_its_own_flow_and_projection(self):
+        calls=[]
+        value,raw=self.decide(policy.INFLIGHT_RESTORE_EXIT,(policy.INTERRUPT_RESTORE+b'a'*64,),live=lambda:calls.append(True))
+        self.assertIsNone(value)
+        self.assertEqual(calls,[True])
+        self.assertFalse(raw)
+
+    def test_sql_and_restore_interruption_cannot_cross_purposes(self):
+        for flow,frame in ((policy.INFLIGHT_SQL_EXIT,policy.INTERRUPT_RESTORE+b'a'*64),(policy.INFLIGHT_RESTORE_EXIT,policy.INTERRUPT_INFLIGHT+b'a'*64)):
+            with self.subTest(flow=flow),self.assertRaises(ValueError):
+                self.decide(flow,(frame,))
+
+    def test_restore_interrupt_refuses_changed_projection_dead_identity_and_other_flows(self):
+        def dead():raise ValueError('Held identity no longer live')
+        with self.assertRaises(ValueError):
+            self.decide(policy.INFLIGHT_RESTORE_EXIT,(policy.INTERRUPT_RESTORE+b'b'*64,))
+        with self.assertRaises(ValueError):
+            self.decide(policy.INFLIGHT_RESTORE_EXIT,(policy.INTERRUPT_RESTORE+b'a'*64,),live=dead)
+        for flow in policy.COORDINATOR_FLOWS:
+            if flow!=policy.INFLIGHT_RESTORE_EXIT:
+                with self.subTest(flow=flow),self.assertRaises(ValueError):
+                    self.decide(flow,(policy.INTERRUPT_RESTORE+b'a'*64,))
+
+    def test_restore_interrupt_does_not_report_completed_restore(self):
+        report,sent,raw=RecoveryAfterWorkTests().dialog(policy.INFLIGHT_RESTORE_EXIT,(b'work',policy.INTERRUPT_RESTORE+b'a'*64))
+        self.assertTrue(report[1])
+        self.assertFalse(report[0]['lateRequestRefused'])
+        self.assertEqual(sent,[b'work:'+b'a'*64])
+        stream=io.BytesIO(raw)
+        self.assertEqual(policy._creator_read(stream),b'run:'+b'a'*64)
+        self.assertFalse(stream.read(1))
+
+
 if __name__ == '__main__':
     unittest.main()

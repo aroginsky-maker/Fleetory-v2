@@ -6,10 +6,10 @@ function Assert-RetainedObservedWorkArguments([string[]]$Arguments){
 function Observe-RetainedNativeProcess([Diagnostics.Process]$Process,[Threading.CancellationToken]$Token){
     $meter.processObservationChecks++
     Confirm-RetainedLiveWork $Token
-    if($meter.inflightPending){Interrupt-RetainedActiveSql $Process $Token}
+    if($meter.inflightPending){Interrupt-RetainedActiveNative $Process $Token}
 }
-function Interrupt-RetainedActiveSql([Diagnostics.Process]$Process,[Threading.CancellationToken]$Token){
-    Assert-ImmuData ($Flow -ceq 'inflight-sql-exit' -and $meter.inflightPending -and -not $meter.inflightObserved -and
+function Interrupt-RetainedActiveNative([Diagnostics.Process]$Process,[Threading.CancellationToken]$Token){
+    Assert-ImmuData ($Flow -cin @('inflight-sql-exit','inflight-restore-exit') -and $meter.inflightPending -and -not $meter.inflightObserved -and
         $Token.CanBeCanceled -and -not $Process.HasExited -and $Process.ProcessName -ceq 'docker' -and $meter.inflightWatch.Elapsed.TotalSeconds -lt 8) 'retained-inflight-fault-scope'
     $Token.ThrowIfCancellationRequested()
     $id=[Fleetory.Pilot.AuditContainerCustody]::Id($context,$store,$client)
@@ -19,21 +19,24 @@ function Interrupt-RetainedActiveSql([Diagnostics.Process]$Process,[Threading.Ca
     $other=Get-HistoricalNativeBirth $meter.inflightObserver
     Assert-ImmuData ($birth.kind -ceq $other.kind -and $birth.token -ceq $other.token) 'retained-inflight-client-birth'
     $meter.inflightBirth=$birth;$meter.inflightNativePid=$Process.Id
-    $sql="SELECT count(*) FROM pg_stat_activity WHERE datname='postgres' AND usename='postgres' AND application_name='"+
-        $meter.inflightApplication+"' AND state='active' AND wait_event_type='Timeout' AND wait_event='PgSleep' AND query='"+$meter.inflightSql+"';"
+    $observation=if($Flow -ceq 'inflight-restore-exit'){Get-RetainedRestoreObservation}else{
+        @{Database='postgres';Sql=("SELECT count(*) FROM pg_stat_activity WHERE datname='postgres' AND usename='postgres' AND application_name='"+
+            $meter.inflightApplication+"' AND state='active' AND wait_event_type='Timeout' AND wait_event='PgSleep' AND query='"+$meter.inflightSql+"';")}
+    }
     $meter.inflightObservationCalls++
-    $reply=Invoke-Docker @('exec','-i',$id,'psql','-XqAt','-v','ON_ERROR_STOP=1','-U','postgres','-d','postgres') ([Text.Encoding]::UTF8.GetBytes($sql)) 2
+    $reply=Invoke-Docker @('exec','-i',$id,'psql','-XqAt','-v','ON_ERROR_STOP=1','-U','postgres','-d',$observation.Database) ([Text.Encoding]::UTF8.GetBytes($observation.Sql)) 2
     Assert-ImmuData ($reply.ExitCode -eq 0 -and $reply.Stdout.Trim() -ceq '1' -and [string]::IsNullOrWhiteSpace($reply.Stderr) -and
         -not $Process.HasExited) 'retained-inflight-query-actually-active'
     $Token.ThrowIfCancellationRequested()
     $meter.inflightObserved=$true
     $meter.dispatchesAtInterruption=$meter.nativeDispatches
-    Send-IndependentFrame $peer.input ([Text.Encoding]::ASCII.GetBytes('interrupt-inflight:'+$peer.projection)) $Token
+    $prefix=if($Flow -ceq 'inflight-restore-exit'){'interrupt-restore:'}else{'interrupt-inflight:'}
+    Send-IndependentFrame $peer.input ([Text.Encoding]::ASCII.GetBytes($prefix+$peer.projection)) $Token
     $frame=Read-IndependentFrame $peer.output $Token 2048
     $peer.input.Dispose()
     $meter.workLossProof=Receive-HistoricalCoordinatorCompletion $peer 'terminate' $frame -Token $Token
     $meter.controllerLossObserved=$true
-    throw [OperationCanceledException]::new('Retained coordinator exited during native SQL.', $Token)
+    throw [OperationCanceledException]::new('Retained coordinator exited during native work.', $Token)
 }
 function Invoke-RetainedInFlightSql{
     Assert-ImmuData ($Flow -ceq 'inflight-sql-exit' -and $null -ne $auditProof -and $meter.restores -eq 2) 'retained-inflight-restored-scope'
@@ -48,7 +51,7 @@ function Invoke-RetainedInFlightSql{
         throw 'Retained in-flight fault did not interrupt the native operation.'
     }finally{$meter.inflightPending=$false}
 }
-function Confirm-RetainedInterruptedSql{
+function Confirm-RetainedInterruptedNative{
     Assert-ImmuData ($meter.inflightObserved -and $meter.controllerLossObserved -and $meter.inflightObservationCalls -eq 1 -and
         $null -ne $meter.inflightObserver -and $meter.inflightObserver.HasExited -and $peer.holder.HasExited -and
         $meter.workLossProof.coordinatorExitCode -ne 0 -and $meter.workLossProof.membersAbsent -and

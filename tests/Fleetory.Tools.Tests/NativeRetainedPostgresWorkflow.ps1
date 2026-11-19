@@ -38,7 +38,7 @@ function Invoke-NativeRetainedPostgresWorkflow($Artifacts,$Expected,$AuditPoint=
     foreach($blob in $Artifacts.Values){[Array]::Clear($blob)};$sourceFrame=$prepared=$captured=$body=$null
     $script:stage='retained-pg-owned-target';$results=[Collections.Generic.List[object]]::new()
     $imageContext=$null
-    if($Profile -cin @('v2-retained-coupled','v2-retained-server','v2-retained-historical-server','v2-retained-inflight')){
+    if($Profile -cin @('v2-retained-coupled','v2-retained-server','v2-retained-historical-server','v2-retained-inflight','v2-retained-restore-inflight')){
         $imageRoot=Join-Path $root 'retained-owned-public-build';$null=New-Item -ItemType Directory -Path $imageRoot
         Copy-Item -LiteralPath (Join-Path $root 'publish') -Destination (Join-Path $imageRoot 'publish') -Recurse
         $imageContext=@{Fixture=[Guid]::NewGuid().ToString('D');Root=$imageRoot;ImageName=('retained-coupled-'+[Guid]::NewGuid().ToString('N'));
@@ -48,6 +48,7 @@ function Invoke-NativeRetainedPostgresWorkflow($Artifacts,$Expected,$AuditPoint=
     $flows=@('complete','after-acquire','lease-expired')
     if($null -ne $imageContext){$flows+=@('after-work','lease-after-work','inspection-exit')}
     if($Profile -ceq 'v2-retained-inflight'){$flows=@('inflight-sql-exit')}
+    if($Profile -ceq 'v2-retained-restore-inflight'){$flows=@('inflight-restore-exit')}
     try{foreach($flow in $flows){
         $script:stage='retained-pg-'+$flow
         $auditStage=$null
@@ -82,6 +83,13 @@ function Invoke-NativeRetainedPostgresWorkflow($Artifacts,$Expected,$AuditPoint=
             $result.removalReplayRefusedBeforeNativeCall-eq$true) 'retained-pg-owned-result'
         $restored=$flow -cin @('complete','after-work','lease-after-work','inflight-sql-exit')
         Assert-Pair ($result.nativePgRestores-eq$(if($restored){2}else{0})) 'retained-pg-restore-dispatch'
+        if($flow -ceq 'inflight-restore-exit'){
+            Assert-Pair ($result.inFlightRestore.actualQueryActive -and $result.inFlightRestore.nativeClientExitVerified -and
+                $result.inFlightRestore.coordinatorLost -and $result.inFlightRestore.observationCalls -eq 1 -and
+                $result.inFlightRestore.lateNativeWorkRefusals -eq 1 -and $result.nativePgPreDataSchemaRestores -eq 1 -and
+                $result.nativePgDataRestoreAttempts -eq 1 -and $result.ownRestoreLockVerified -and
+                -not $result.nativeAuditRestored -and -not $result.inFlightSql.actualQueryActive -and -not $result.serverStarted) 'retained-actual-copy-cancellation'
+        }
         if($flow -ceq 'inflight-sql-exit'){
             Assert-Pair ($result.inFlightSql.actualQueryActive -and $result.inFlightSql.nativeClientExitVerified -and
                 $result.inFlightSql.coordinatorLost -and $result.inFlightSql.observationCalls -eq 1 -and
@@ -112,17 +120,17 @@ function Invoke-NativeRetainedPostgresWorkflow($Artifacts,$Expected,$AuditPoint=
         }
         $results.Add($result)
     }}finally{if($null -ne $imageContext){Remove-AuditDataImage $imageContext}}
-    return @{schema=$(if($Profile -ceq 'v2-retained-inflight'){'fleetory.native-retained-inflight-sql-stage.v1'}elseif($Profile -ceq 'v2-retained-historical-server'){'fleetory.native-retained-historical-server-stage.v1'}elseif($Profile -ceq 'v2-retained-server'){'fleetory.native-retained-server-stage.v1'}elseif($null -ne $imageContext){'fleetory.native-retained-coupled-data-stage.v1'}else{'fleetory.native-retained-postgres-data-stage.v1'});
+    return @{schema=$(if($Profile -ceq 'v2-retained-restore-inflight'){'fleetory.native-retained-inflight-restore-stage.v1'}elseif($Profile -ceq 'v2-retained-inflight'){'fleetory.native-retained-inflight-sql-stage.v1'}elseif($Profile -ceq 'v2-retained-historical-server'){'fleetory.native-retained-historical-server-stage.v1'}elseif($Profile -ceq 'v2-retained-server'){'fleetory.native-retained-server-stage.v1'}elseif($null -ne $imageContext){'fleetory.native-retained-coupled-data-stage.v1'}else{'fleetory.native-retained-postgres-data-stage.v1'});
         verified=$true;scope='Generated four-input capture and owned data-stage lifecycle';probeSha256=$state.ProbeHash;
         fourInputReaderUsed=$true;nativePgRestores=[int](($results|Measure-Object -Property nativePgRestores -Sum).Sum);cases=$results;actualOwnedPostgresTargets=$flows.Count;copiedClaimsRefused=($flows.Count*2);
         nativeAuditRestores=@($results|Where-Object nativeAuditRestored).Count;
         ownAuditImageId=$(if($null -ne $imageContext){$imageContext.ImageId}else{$null});
         ownAuditImageRemovalVerified=$(if($null -ne $imageContext){Test-AuditDataImageClosed $imageContext}else{$false});
         postRestoreCoordinatorExitVerified=($flows -ccontains 'after-work');postRestoreLiveLeaseExpiryVerified=($flows -ccontains 'lease-after-work');
-        coordinatorLossAfterInspectionVerified=($flows -ccontains 'inspection-exit');inFlightSqlCancellationVerified=($flows -ccontains 'inflight-sql-exit');
-        controllerExitCleanupVerified=($flows -ccontains 'after-acquire' -or $flows -ccontains 'inflight-sql-exit');liveLeaseExpiryCleanupVerified=($flows -ccontains 'lease-expired');completeNativeReplyCustodyUsed=$true;
+        coordinatorLossAfterInspectionVerified=($flows -ccontains 'inspection-exit');inFlightSqlCancellationVerified=($flows -ccontains 'inflight-sql-exit');inFlightRestoreCancellationVerified=($flows -ccontains 'inflight-restore-exit');
+        controllerExitCleanupVerified=($flows -ccontains 'after-acquire' -or $flows -ccontains 'inflight-sql-exit' -or $flows -ccontains 'inflight-restore-exit');liveLeaseExpiryCleanupVerified=($flows -ccontains 'lease-expired');completeNativeReplyCustodyUsed=$true;
         allFourGeneratedPathsReplacedAfterCapture=$true;nativeRestoreFromFrozenBytesVerified=$true;removalReplayRefusals=$flows.Count;
-        sourceOriginalFilesRead=$false;nativeAuditRestored=($null -ne $imageContext);serverStarted=($Profile -cin @('v2-retained-server','v2-retained-historical-server'));runtimeLoginVerified=($Profile -cin @('v2-retained-server','v2-retained-historical-server'));
+        sourceOriginalFilesRead=$false;nativeAuditRestored=(@($results|Where-Object nativeAuditRestored).Count -gt 0);serverStarted=($Profile -cin @('v2-retained-server','v2-retained-historical-server'));runtimeLoginVerified=($Profile -cin @('v2-retained-server','v2-retained-historical-server'));
         untrustedArchiveSandboxVerified=$false;originalUseAuthenticated=$false;sourceVpsAccessed=$false;
         originalPkiOrProviderUsed=$false;fullSystemRecoveryVerified=$false;phase7Complete=$false}
 }

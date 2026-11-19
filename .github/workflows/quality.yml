@@ -1142,6 +1142,10 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/NativeServerPair.Tests.ps1 -Profile v2-retained-inflight -Python (Get-Command python3).Source
 
+      - name: Verify actual frozen PostgreSQL data restore interruption
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativeServerPair.Tests.ps1 -Profile v2-retained-restore-inflight -Python (Get-Command python3).Source
+
   quality-gate:
     name: Strict build, tests, coverage and Sonar
     runs-on: ubuntu-24.04

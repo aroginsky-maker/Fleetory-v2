@@ -268,9 +268,11 @@ AFTER_WORK_LEASE = 'lease-after-work'
 INSPECTION_EXIT = 'inspection-exit'
 INFLIGHT_SQL_EXIT = 'inflight-sql-exit'
 INTERRUPT_INFLIGHT = b'interrupt-inflight:'
+INFLIGHT_RESTORE_EXIT = 'inflight-restore-exit'
+INTERRUPT_RESTORE = b'interrupt-restore:'
 MAX_WORK_STATUS = 256
 COORDINATOR_FLOWS = ('complete', 'before-acquire', 'after-acquire', 'lease-expired', CREATE_REFUSED, CREATE_INTERRUPTED,
-                     AFTER_WORK_EXIT, AFTER_WORK_LEASE, INSPECTION_EXIT, INFLIGHT_SQL_EXIT)
+                     AFTER_WORK_EXIT, AFTER_WORK_LEASE, INSPECTION_EXIT, INFLIGHT_SQL_EXIT, INFLIGHT_RESTORE_EXIT)
 HANDOFF_EXIT = 'between-operations-exit'
 RESTART_UNCONFIRMED = 'restart-unconfirmed'
 CREATOR_FLOWS = ('complete', 'controller-exit', 'lease-expired', HANDOFF_EXIT, RESTART_UNCONFIRMED)
@@ -630,8 +632,9 @@ def _work_decision(link, flow, commitment):
     checks = 0
     while True:
         decision = link.receive_owner(96)
-        if decision.startswith(INTERRUPT_INFLIGHT):
-            packet.require(flow == INFLIGHT_SQL_EXIT and decision == INTERRUPT_INFLIGHT + commitment)
+        if decision.startswith((INTERRUPT_INFLIGHT, INTERRUPT_RESTORE)):
+            prefix = {INFLIGHT_SQL_EXIT: INTERRUPT_INFLIGHT, INFLIGHT_RESTORE_EXIT: INTERRUPT_RESTORE}.get(flow)
+            packet.require(prefix is not None and decision == prefix + commitment)
             link.live()
             return None
         if decision != b'work-status':
