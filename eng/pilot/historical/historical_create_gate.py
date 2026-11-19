@@ -21,9 +21,19 @@ HOST_DEFAULTS = frozenset('Binds ContainerIDFile PortBindings VolumeDriver Volum
     'IOMaximumIOps IOMaximumBandwidth MaskedPaths ReadonlyPaths Init StorageOpt Sysctls Runtime'.split())
 
 
-def require(value):
+REFUSAL_CODES = frozenset('policy profile-required profile-optional profile-extra request-auth request-target '
+    'request-framing response-status response-header response-chunk response-length response-json response-fields response-id '
+    'response-warnings response-deadline native-exit native-stderr native-trailing'.split())
+
+
+class GateRefusal(ValueError):
+    """Only a fixed category crosses the native diagnostic boundary."""
+
+
+def require(value, code='policy'):
     if not value:
-        raise ValueError('Historical create gate refused.')
+        category = code if code in REFUSAL_CODES else 'policy'
+        raise GateRefusal('Historical create gate refused: ' + category + '.')
 
 
 def _unique(pairs):
@@ -50,13 +60,13 @@ def _empty(value):
 def _profile(actual, expected, optional, defaults):
     require(type(actual) is dict)
     for key, value in expected.items():
-        require(key in actual and _same(actual[key], value))
+        require(key in actual and _same(actual[key], value), 'profile-required')
     for key, value in actual.items():
         if key not in expected:
             if key in optional:
-                require(any(_same(value, v) for v in optional[key]))
+                require(any(_same(value, v) for v in optional[key]), 'profile-optional')
             else:
-                require(key in defaults and _empty(value))
+                require(key in defaults and _empty(value), 'profile-extra')
 
 
 def _same(first, second):
@@ -83,21 +93,21 @@ def validate_create(raw, image, nonce):
     }, HOST_DEFAULTS)
 
 
-def _read_headers(stream, first):
-    require(first.endswith(b'\r\n') and len(first) <= HEADER_LIMIT)
+def _read_headers(stream, first, code):
+    require(first.endswith(b'\r\n') and len(first) <= HEADER_LIMIT, code)
     wire = bytearray(first)
     headers = {}
     while True:
         line = stream.readline(HEADER_LIMIT + 1)
         wire.extend(line)
-        require(line.endswith(b'\r\n') and len(wire) <= HEADER_LIMIT)
+        require(line.endswith(b'\r\n') and len(wire) <= HEADER_LIMIT, code)
         if line == b'\r\n':
             break
-        require(b':' in line)
+        require(b':' in line, code)
         name, value = line[:-2].split(b':', 1)
-        require(re.fullmatch(rb'[A-Za-z0-9-]+', name) is not None)
+        require(re.fullmatch(rb'[A-Za-z0-9-]+', name) is not None, code)
         name = name.decode('ascii').lower()
-        require(name not in headers)
+        require(name not in headers, code)
         headers[name] = value.strip().decode('ascii')
     return wire, headers
 
@@ -107,7 +117,7 @@ def read_request(stream):
     require(first.endswith(b'\r\n'))
     parts = first[:-2].decode('ascii').split(' ')
     require(len(parts) == 3 and parts[2] == 'HTTP/1.1')
-    _, headers = _read_headers(stream, first)
+    _, headers = _read_headers(stream, first, 'request-framing')
     require('transfer-encoding' not in headers and 'upgrade' not in headers and
             'expect' not in headers and 'authorization' not in headers)
     length = headers.get('content-length', '0')
@@ -142,13 +152,13 @@ class CreateGatePolicy:
         if method != 'HEAD' or target != '/_ping':
             self.attempted = True
         supplied = headers.get('x-fleetory-create-nonce', '')
-        require(hmac.compare_digest(supplied.encode('ascii'), self.token.encode('ascii')))
+        require(hmac.compare_digest(supplied.encode('ascii'), self.token.encode('ascii')), 'request-auth')
         if method == 'HEAD' and target == '/_ping':
             require(not body and self.pings < 2)
             self.pings += 1
             return 'ping'
         require(method == 'POST' and
-                target == '/v' + self.version + '/containers/create?name=' + self.name)
+                target == '/v' + self.version + '/containers/create?name=' + self.name, 'request-target')
         require(headers.get('content-type') == 'application/json')
         validate_create(body, self.image, self.nonce)
         return 'create'
@@ -158,42 +168,43 @@ def _read_chunks(stream):
     wire, body = bytearray(), bytearray()
     for _ in range(64):
         line = stream.readline(16)
-        require(re.fullmatch(rb'[a-fA-F0-9]{1,4}\r\n', line) is not None)
+        require(re.fullmatch(rb'[a-fA-F0-9]{1,4}\r\n', line) is not None, 'response-chunk')
         count = int(line[:-2], 16)
-        require(count <= 4096 - len(body))
+        require(count <= 4096 - len(body), 'response-chunk')
         chunk = stream.read(count)
         ending = stream.read(2)
-        require(len(chunk) == count and ending == b'\r\n')
+        require(len(chunk) == count and ending == b'\r\n', 'response-chunk')
         wire.extend(line + chunk + ending)
         body.extend(chunk)
-        require(len(wire) <= 8192)
+        require(len(wire) <= 8192, 'response-chunk')
         if count == 0:
             return bytes(wire), bytes(body)
-    require(False)
+    require(False, 'response-chunk')
 
 
 def read_response(stream, method):
     first = stream.readline(HEADER_LIMIT + 1)
-    require(first in (b'HTTP/1.1 200 OK\r\n', b'HTTP/1.1 201 Created\r\n'))
-    wire, headers = _read_headers(stream, first)
+    require(first in (b'HTTP/1.1 200 OK\r\n', b'HTTP/1.1 201 Created\r\n'), 'response-status')
+    wire, headers = _read_headers(stream, first, 'response-header')
     if method == 'HEAD':
         require(first == b'HTTP/1.1 200 OK\r\n' and 'transfer-encoding' not in headers and
                 re.fullmatch(r'1\.[0-9]{2}', headers.get('api-version', '')) is not None)
     else:
-        require(first == b'HTTP/1.1 201 Created\r\n')
+        require(first == b'HTTP/1.1 201 Created\r\n', 'response-status')
         if 'transfer-encoding' in headers:
-            require(headers['transfer-encoding'] == 'chunked' and 'content-length' not in headers)
+            require(headers['transfer-encoding'] == 'chunked' and 'content-length' not in headers, 'response-header')
             chunks, body = _read_chunks(stream)
             wire.extend(chunks)
         else:
             length = headers.get('content-length', '')
-            require(re.fullmatch(r'[1-9][0-9]{0,3}', length) is not None and int(length) <= 4096)
+            require(re.fullmatch(r'[1-9][0-9]{0,3}', length) is not None and int(length) <= 4096, 'response-length')
             body = stream.read(int(length))
-            require(len(body) == int(length))
+            require(len(body) == int(length), 'response-length')
             wire.extend(body)
         result = document(body)
-        require(set(result) == {'Id', 'Warnings'} and type(result['Id']) is str and
-                re.fullmatch(r'[a-f0-9]{64}', result['Id']) is not None and result['Warnings'] in (None, []))
+        require(set(result) == {'Id', 'Warnings'}, 'response-fields')
+        require(type(result['Id']) is str and re.fullmatch(r'[a-f0-9]{64}', result['Id']) is not None, 'response-id')
+        require(result['Warnings'] in (None, []), 'response-warnings')
     return bytes(wire), headers
 
 
@@ -219,10 +230,18 @@ def daemon_exchange(command, environment, method, target, body):
     try:
         reader.start()
         reader.join(12)
-        require(not reader.is_alive() and 'error' not in result and 'reply' in result)
+        require(not reader.is_alive(), 'response-deadline')
+        if 'error' in result:
+            error = result['error']
+            if isinstance(error, GateRefusal):
+                raise error
+            require(False, 'response-json')
+        require('reply' in result, 'response-length')
         process.stdin.close()
         process.wait(timeout=3)
-        require(process.returncode == 0 and not process.stderr.read(1025) and not process.stdout.read(1))
+        require(process.returncode == 0, 'native-exit')
+        require(not process.stderr.read(1025), 'native-stderr')
+        require(not process.stdout.read(1), 'native-trailing')
         return result['reply']
     finally:
         if process.poll() is None:

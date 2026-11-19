@@ -421,3 +421,11 @@ advertised version, with API 1.48 as the minimum supported contract. Docker 28's
 legacy `OnBuild: null` field is accepted only as null. Build instructions or any
 other value are refused. The command, image, user, network, privilege, resource,
 mount, nonce and replay restrictions remain required.
+
+The private create gate reports fixed refusal categories for request profile,
+response status/framing/body and native transport completion. Its owning witness
+copies only the bounded category into the typed refusal, never a request body,
+header, token, daemon warning or arbitrary subprocess error. Native response
+reader failures retain their category across the bounded reader thread; a
+generic thread wrapper must not hide them as an unclassified ValueError. These
+diagnostics add no retry, result admission or cleanup authority.

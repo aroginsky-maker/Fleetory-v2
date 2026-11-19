@@ -92,8 +92,12 @@ function Invoke-HistoricalInFlightDocker([string[]]$Arguments,$Request,$Token,$I
         if($null -ne $gate -and $gate.HasExited){
             try{$null=$gateErrors.Wait(2000)}catch{}
             $captured=[Text.Encoding]::UTF8.GetString($gateError.ToArray())
-            $types=[regex]::Matches($captured,'(?m)^([A-Za-z0-9]+Error):')
-            if($types.Count -gt 0){$category+='-'+$types[$types.Count-1].Groups[1].Value.ToLowerInvariant()}
+            $causes=[regex]::Matches($captured,'(?m)^GateRefusal: Historical create gate refused: ([a-z-]{1,32})\.\r?$')
+            if($causes.Count -gt 0){$category+='-'+$causes[$causes.Count-1].Groups[1].Value}
+            else{
+                $types=[regex]::Matches($captured,'(?m)^([A-Za-z0-9]+Error):')
+                if($types.Count -gt 0){$category+='-'+$types[$types.Count-1].Groups[1].Value.ToLowerInvariant()}
+            }
         }
         Assert-ImmuData $false $category
     }finally{

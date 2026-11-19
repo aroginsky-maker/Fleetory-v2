@@ -40,6 +40,27 @@ def create(p, value=None):
 
 
 class PolicyTests(unittest.TestCase):
+    def test_refusal_codes_never_include_input_values(self):
+        for code in gate.REFUSAL_CODES | {'untrusted-canary-token'}:
+            with self.subTest(code=code), self.assertRaises(gate.GateRefusal) as raised:
+                gate.require(False, code)
+            expected = code if code in gate.REFUSAL_CODES else 'policy'
+            self.assertEqual(str(raised.exception), 'Historical create gate refused: ' + expected + '.')
+            self.assertNotIn('untrusted-canary-token', str(raised.exception))
+
+    def test_response_refusals_distinguish_status_fields_id_and_warnings(self):
+        cases = [('response-fields', {'Id': 'c' * 64}),
+                 ('response-id', {'Id': 'untrusted-canary-token', 'Warnings': []}),
+                 ('response-warnings', {'Id': 'c' * 64, 'Warnings': ['untrusted-canary-token']})]
+        for code, value in cases:
+            payload = raw(value)
+            wire = b'HTTP/1.1 201 Created\r\nContent-Length: ' + str(len(payload)).encode() + b'\r\n\r\n' + payload
+            with self.subTest(code=code), self.assertRaises(gate.GateRefusal) as raised:
+                gate.read_response(io.BytesIO(wire), 'POST')
+            self.assertEqual(str(raised.exception), 'Historical create gate refused: ' + code + '.')
+        with self.assertRaisesRegex(gate.GateRefusal, 'response-status'):
+            gate.read_response(io.BytesIO(b'HTTP/1.1 500 Untrusted canary\r\n\r\n'), 'POST')
+
     def test_docker28_empty_legacy_onbuild_has_no_instructions(self):
         value = body()
         value['OnBuild'] = None
@@ -188,6 +209,36 @@ class ResponseTests(unittest.TestCase):
                          b'HTTP/1.1 201 Created\r\nContent-Length: 2\r\n\r\n{}']:
             with self.subTest(response=response[:70]), self.assertRaises(ValueError):
                 gate.read_response(io.BytesIO(response), 'POST')
+
+
+class NativeResponseDiagnosticTests(unittest.TestCase):
+    class Process:
+        def __init__(self, response, error=b'', exit_code=0):
+            self.stdin, self.stdout, self.stderr = io.BytesIO(), io.BytesIO(response), io.BytesIO(error)
+            self.returncode = exit_code
+        def wait(self, timeout):
+            return self.returncode
+        def poll(self):
+            return self.returncode
+
+    def test_reader_failure_category_survives_worker_thread(self):
+        from unittest.mock import patch
+        payload = raw({'Id': 'c' * 64, 'Warnings': ['untrusted-canary-token']})
+        response = b'HTTP/1.1 201 Created\r\nContent-Length: ' + str(len(payload)).encode() + b'\r\n\r\n' + payload
+        process = self.Process(response)
+        with patch('subprocess.Popen', return_value=process), self.assertRaises(gate.GateRefusal) as raised:
+            gate.daemon_exchange(['fixed-generated-test-command'], {}, 'POST', '/fixed', b'{}')
+        self.assertEqual(str(raised.exception), 'Historical create gate refused: response-warnings.')
+        self.assertTrue(all(stream.closed for stream in (process.stdin, process.stdout, process.stderr)))
+
+    def test_native_stderr_is_refused_without_copying_its_contents(self):
+        from unittest.mock import patch
+        response = b'HTTP/1.1 200 OK\r\nAPI-Version: 1.48\r\n\r\n'
+        process = self.Process(response, b'untrusted-canary-token')
+        with patch('subprocess.Popen', return_value=process), self.assertRaises(gate.GateRefusal) as raised:
+            gate.daemon_exchange(['fixed-generated-test-command'], {}, 'HEAD', '/_ping', b'')
+        self.assertEqual(str(raised.exception), 'Historical create gate refused: native-stderr.')
+        self.assertTrue(all(stream.closed for stream in (process.stdin, process.stdout, process.stderr)))
 
 
 class LiveGateTests(unittest.TestCase):
