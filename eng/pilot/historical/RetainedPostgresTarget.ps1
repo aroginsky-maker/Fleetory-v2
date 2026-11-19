@@ -94,6 +94,17 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
         $meter.nativeDispatches++
         return Invoke-Docker $Arguments $InputBytes 15 -AllowFailure:$AllowFailure -ObserveProcess ${function:Observe-RetainedNativeProcess}
     }
+    function Start-RetainedPgBackend{
+        $null=Invoke-RetainedPgNative (@('exec','-d',$identifier,'postgres','-D','/var/lib/postgresql/18/recovery',
+            '-c',$listen,'-c','unix_socket_directories=/var/run/postgresql','-c','shared_buffers=32MB',
+            '-c','max_connections=20','-c','password_encryption=scram-sha-256','-c','log_statement=none','-c','log_min_error_statement=panic')+$tlsArguments)
+        $ready=$false
+        for($n=0;$n-lt40;$n++){
+            $r=Invoke-RetainedPgNative @('exec',$identifier,'pg_isready','-q','-U','postgres') -AllowFailure
+            if($r.ExitCode-eq0){$ready=$true;break};Start-Sleep -Milliseconds 100
+        }
+        Assert-ImmuData $ready 'retained-pg-ready';$meter.bootstrapped=$true
+    }
     function Pg-Sql([ValidateSet('postgres','fleetory','fleetory_signer')][string]$Database,[string]$Sql){
         $identifier=[Fleetory.Pilot.AuditContainerCustody]::Id($context,$store,$client);$meter.sql++
         return Invoke-RetainedPgNative @('exec','-i','-e','PGCLIENTENCODING=UTF8',$identifier,'psql','-XqAt','-v','ON_ERROR_STOP=1','-U','postgres','-d',$Database) ([Text.Encoding]::UTF8.GetBytes($Sql))
@@ -210,15 +221,7 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
                 $listen='listen_addresses=127.0.0.1'
                 $tlsArguments=@('-c','hba_file=/tmp/hba.conf','-c','ssl=on','-c','ssl_cert_file=/tmp/server.crt','-c','ssl_key_file=/tmp/server.key','-c','ssl_min_protocol_version=TLSv1.2')
             }
-            $null=Invoke-RetainedPgNative (@('exec','-d',$identifier,'postgres','-D','/var/lib/postgresql/18/recovery',
-                '-c',$listen,'-c','unix_socket_directories=/var/run/postgresql','-c','shared_buffers=32MB',
-                '-c','max_connections=20','-c','password_encryption=scram-sha-256','-c','log_statement=none','-c','log_min_error_statement=panic')+$tlsArguments)
-            $ready=$false
-            for($n=0;$n-lt40;$n++){
-                $r=Invoke-RetainedPgNative @('exec',$identifier,'pg_isready','-q','-U','postgres') -AllowFailure
-                if($r.ExitCode-eq0){$ready=$true;break};Start-Sleep -Milliseconds 100
-            }
-            Assert-ImmuData $ready 'retained-pg-ready';$meter.bootstrapped=$true
+            Start-RetainedPgBackend
             $roles=''
             foreach($role in @('fleetory_migrator','fleetory_server','fleetory_signer_owner','fleetory_signer')){
                 $login=if($role-cin@('fleetory_server','fleetory_signer')){'LOGIN'}else{'NOLOGIN'}

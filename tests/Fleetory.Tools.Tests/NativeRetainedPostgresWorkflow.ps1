@@ -100,6 +100,11 @@ function Invoke-NativeRetainedPostgresWorkflow($Artifacts,$Expected,$AuditPoint=
         }
         if($Profile -cin @('v2-retained-server','v2-retained-historical-server')){
             Assert-Pair ($result.serverStarted -eq ($flow -ceq 'complete') -and $result.runtimeLoginVerified -eq ($flow -ceq 'complete')) 'retained-server-dispatch'
+            if($flow -ceq 'complete'){
+                Assert-Pair ($result.server.boundedRestartVerified -and $result.server.sameTargetBackendRestartVerified -and
+                    $result.server.postgresOutageRefusedBeforeHost -and $result.server.auditOutageRefusedBeforeHost -and
+                    $result.server.nativeApplicationStarts -eq 2 -and $result.server.nativeApplicationStops -eq 2) 'retained-server-backend-retry-restart'
+            }
         }
         $results.Add($result)
     }}finally{if($null -ne $imageContext){Remove-AuditDataImage $imageContext}}

@@ -43,6 +43,11 @@ function Invoke-NativeRetainedServiceUseWorkflow([string]$InputRoot,[hashtable]$
             $result.runtimeLoginVerified -eq (-not $loss) -and $result.admissionLossAfterPgRestoreVerified -eq $loss -and
             $result.ownRemovalCalls -eq 1 -and $result.ownedAuditRemovalCalls -eq 1 -and
             $result.configurationSha256 -ceq $configuration.Sha256) 'service-use-native-result'
+        if(-not $loss){
+            Assert-Pair ($result.server.boundedRestartVerified -and $result.server.sameTargetBackendRestartVerified -and
+                $result.server.postgresOutageRefusedBeforeHost -and $result.server.auditOutageRefusedBeforeHost -and
+                $result.server.nativeApplicationStarts -eq 2 -and $result.server.nativeApplicationStops -eq 2) 'service-use-backend-retry-restart'
+        }
         if(-not $loss){Confirm-RetainedServiceUseLive $admission $admission.cancel.Token}
         Remove-AuditDataImage $imageContext
         Assert-Pair (Test-AuditDataImageClosed $imageContext) 'service-use-own-image-removed'

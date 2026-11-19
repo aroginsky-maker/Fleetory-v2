@@ -1,4 +1,11 @@
 #requires -Version 7.3
+function Get-RetainedAuditStartArguments([string]$Identifier){
+    return @('exec','-d','-e','SSL_CERT_FILE=/tmp/ca.pem','-e','SSL_CERT_DIR=/tmp/empty-ca-dir',$Identifier,
+        '/usr/sbin/immudb','--config=/tmp/immudb.toml','--dir=/data','--address=127.0.0.1','--port=3322',
+        '--auth=true','--devmode=false','--web-server=true','--web-server-port=8090','--pgsql-server=false','--metrics-server=false',
+        '--certificate=/tmp/server.crt','--pkey=/tmp/server.key','--clientcas=/tmp/ca.pem','--signingKey=/tmp/state.key',
+        '--pidfile=/tmp/immudb.pid','--logdir=/tmp','--logfile=fixture.log','--max-active-databases=3')
+}
 # Called only inside the live retained PG owner. Frozen packets and live CWT handles stay in that process.
 function Invoke-RetainedCoupledAudit($Namespace,$AuditStore,$Material,[byte[]]$Archive,[byte[]]$Snapshot,[string]$Nonce,$Point,$ImageContext,[bool]$Historical=$false){
     $id=[Fleetory.Pilot.AuditContainerCustody]::Id($Namespace,$AuditStore,${function:Invoke-Docker})
@@ -24,11 +31,7 @@ function Invoke-RetainedCoupledAudit($Namespace,$AuditStore,$Material,[byte[]]$A
         @('/tmp/client.key',$Material.Tls.ClientPrivateKeyPem),@('/tmp/state.key',$Material.SigningPem))){Write-CoupledSlot $entry[0] $entry[1]}
     Write-CoupledSlot '/tmp/immudb.toml' ('admin-password = "'+$Material.Secrets.admin+'"'+"`n")
     Write-CoupledSlot '/tmp/cli.toml' $configuration.Values['audit:/tmp/cli.toml']
-    $null=Invoke-RetainedAuditNative @('exec','-d','-e','SSL_CERT_FILE=/tmp/ca.pem','-e','SSL_CERT_DIR=/tmp/empty-ca-dir',$id,
-        '/usr/sbin/immudb','--config=/tmp/immudb.toml','--dir=/data','--address=127.0.0.1','--port=3322',
-        '--auth=true','--devmode=false','--web-server=true','--web-server-port=8090','--pgsql-server=false','--metrics-server=false',
-        '--certificate=/tmp/server.crt','--pkey=/tmp/server.key','--clientcas=/tmp/ca.pem','--signingKey=/tmp/state.key',
-        '--pidfile=/tmp/immudb.pid','--logdir=/tmp','--logfile=fixture.log','--max-active-databases=3')
+    $null=Invoke-RetainedAuditNative (Get-RetainedAuditStartArguments $id)
     $ready=$false
     for($n=0;$n -lt 20;$n++){
         try{$health=Invoke-CoupledProbe 'audit-health';if($health.category -ceq 'audit-health'){$ready=$true;break}}catch{Start-Sleep -Milliseconds 200}

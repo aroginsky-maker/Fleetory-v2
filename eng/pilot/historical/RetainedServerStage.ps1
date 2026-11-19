@@ -57,16 +57,47 @@ function Invoke-RetainedServerStage($Namespace,$AuditStore,$Material,[byte[]]$Sn
         Assert-ImmuData ($closed.closedPorts -eq 3) 'retained-server-refused-ports'
         $refused++
     }
-    $hostResult=Invoke-RetainedServerProbe 'retained-readonly-host' $frame
-    Assert-ImmuData ($hostResult.applicationStarts -eq 1 -and $hostResult.applicationStops -eq 1 -and $hostResult.workerStopped -and
+    $pgId=[Fleetory.Pilot.AuditContainerCustody]::Id($context,$store,${function:Invoke-Docker})
+    $null=Invoke-RetainedPgNative @('exec',$pgId,'pg_ctl','-D','/var/lib/postgresql/18/recovery','stop','-m','fast','-w','-t','5')
+    $null=Invoke-RetainedServerProbe 'retained-readonly-host' $frame -ExpectedType 'NpgsqlException'
+    $closed=Invoke-RetainedServerProbe 'pair-closed' @{fixture=$Nonce}
+    Assert-ImmuData ($closed.closedPorts -eq 3) 'retained-postgres-outage-before-host'
+    Start-RetainedPgBackend
+    $daemon=(Invoke-RetainedAuditNative @('exec',$id,'/bin/cat','/tmp/immudb.pid')).Stdout.Trim()
+    Assert-ImmuData ($daemon -cmatch '^[1-9][0-9]{0,7}\z') 'retained-audit-owned-daemon'
+    $null=Invoke-RetainedAuditNative @('exec',$id,'/bin/kill','-TERM',$daemon)
+    $stopped=$false
+    for($n=0;$n -lt 5;$n++){
+        $r=Invoke-RetainedAuditNative @('exec',$id,'/bin/kill','-0',$daemon) -AllowFailure
+        if($r.ExitCode -ne 0){$stopped=$true;break}
+        Start-Sleep -Milliseconds 100
+    }
+    Assert-ImmuData $stopped 'retained-audit-outage-observed'
+    $null=Invoke-RetainedServerProbe 'retained-readonly-host' $frame -ExpectedType 'HttpRequestException'
+    $closed=Invoke-RetainedServerProbe 'pair-closed' @{fixture=$Nonce}
+    Assert-ImmuData ($closed.closedPorts -eq 3) 'retained-audit-outage-before-host'
+    $null=Invoke-RetainedAuditNative (Get-RetainedAuditStartArguments $id)
+    $ready=$false
+    for($n=0;$n -lt 5;$n++){
+        try{$null=Invoke-RetainedServerProbe 'audit-health';$ready=$true;break}catch{Start-Sleep -Milliseconds 100}
+    }
+    Assert-ImmuData $ready 'retained-audit-restart-ready'
+    $hosts=[Collections.Generic.List[object]]::new()
+    foreach($attempt in 1..2){
+        $hostResult=Invoke-RetainedServerProbe 'retained-readonly-host' $frame
+        Assert-ImmuData ($hostResult.applicationStarts -eq 1 -and $hostResult.applicationStops -eq 1 -and $hostResult.workerStopped -and
         $hostResult.readiness -ceq 'Healthy' -and $hostResult.postgresSnapshotMatched -and $hostResult.nonemptyDataUnchanged -and
         $hostResult.readOnlyAuditCredentialUsed -and -not $hostResult.writerAdmissionVerified -and -not $hostResult.fixtureDerivedIdentityAdmissionUsed -and
         $hostResult.historicalNullMembersPreserved -eq $(if($Historical){1}else{0}) -and $hostResult.knownEvents -eq 4 -and $hostResult.nativeTransactions -eq 5) 'retained-server-host-proof'
-    foreach($name in @('stateBefore','stateAfter')){
-        $receipt=New-ImmudbStateReceipt $hostResult[$name] 'fleetoryaudit' $Material.PublicKeyPath
-        Assert-ImmuData ($receipt.txId -eq 5 -and $receipt.txHash -ceq $AuditExpectation.point.txHash) 'retained-server-signed-state'
+        foreach($name in @('stateBefore','stateAfter')){
+            $receipt=New-ImmudbStateReceipt $hostResult[$name] 'fleetoryaudit' $Material.PublicKeyPath
+            Assert-ImmuData ($receipt.txId -eq 5 -and $receipt.txHash -ceq $AuditExpectation.point.txHash) 'retained-server-signed-state'
+        }
+        $hosts.Add($hostResult)
     }
-    return @{runtime=$runtime;host=$hostResult;serverStarted=$true;runtimeLoginVerified=$true;historicalNullProfileVerified=$Historical;
+    return @{runtime=$runtime;host=$hosts[0];restartHost=$hosts[1];nativeApplicationStarts=2;nativeApplicationStops=2;
+        boundedRestartVerified=$true;postgresOutageRefusedBeforeHost=$true;auditOutageRefusedBeforeHost=$true;
+        sameTargetBackendRestartVerified=$true;serverStarted=$true;runtimeLoginVerified=$true;historicalNullProfileVerified=$Historical;
         postHostAuditSignaturesVerified=$true;hostAdmissionRefusals=$refused;refusedPortsClosed=$true;
         originalUseAuthenticated=$false;fullSystemRecoveryVerified=$false;phase7Complete=$false}
 }

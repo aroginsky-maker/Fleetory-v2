@@ -75,6 +75,18 @@ The wrapper does not adopt Docker replies or clean resources by copied IDs.
 Preparation failures expose only a closed stage name (metadata, parent runtime
 or parent identity), never the input bytes or an arbitrary exception message.
 
+Before host admission, the same target now stops PostgreSQL and requires a
+typed connection refusal with all three host ports still closed, then restarts
+that same database process. It similarly stops its own immudb daemon, observes
+its exit, refuses host admission, and restarts immudb against its existing data.
+Both restarts use the original fixed startup arguments and owned namespaces.
+Two successful host start/stop cycles then use the same frozen expectation and
+configuration. Both signed audit tips and final full database inventories must
+remain unchanged. No test event is inserted and no writer admission is granted.
+The strict, historical and live-use native profiles require these backend and
+host restart assertions. The75-second work window,108-second admission,
+256 status bound and15-second observed native calls are unchanged.
+
 Portable tests use only generated files. They require real own process identity,
 four-file capture, flushed pre-open consumption, frozen packets, refusal after
 source/record/owner loss, original-clock expiry before/after capture or return,
