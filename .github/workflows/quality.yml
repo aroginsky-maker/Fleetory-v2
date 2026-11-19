@@ -88,6 +88,10 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/historical_audit_observation_tests.py
 
+      - name: Verify single-create reply gate on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/historical_create_gate_tests.py
+
       - name: Verify historical controller input bounds on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/historical_audit_restore_tests.py
@@ -610,6 +614,10 @@ jobs:
       - name: Verify historical audit observation scope
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/historical_audit_observation_tests.py
+
+      - name: Verify single-create reply gate on Linux
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/historical_create_gate_tests.py
 
       - name: Verify historical controller input bounds
         shell: pwsh

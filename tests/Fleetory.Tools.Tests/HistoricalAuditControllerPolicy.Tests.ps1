@@ -33,7 +33,7 @@ function Refused-Case([scriptblock]$Action,[string]$Category){
     if(-not $seen){throw 'Generated controller case accepted invalid preparation.'}
 }
 $registry=New-CaseRegistry
-foreach($n in 1..32){
+foreach($n in 1..33){
     $case=New-HistoricalControllerCase $plan $packet (Case-Nonce $n) $registry
     $body=[Text.Encoding]::UTF8.GetString($case.bytes)|ConvertFrom-Json -AsHashtable
     $declared=[Convert]::FromBase64String($body.planBase64)
@@ -43,9 +43,9 @@ foreach($n in 1..32){
         $body.valuesBase64 -ceq $packet.valuesBase64 -and
         ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($body.valuesBase64))|ConvertFrom-Json).nonce -ceq $parent) 'case-roundtrip'
 }
-Assert-ImmuData ($registry.Count -eq 32 -and (ConvertTo-Json $plan -Depth 8 -Compress) -ceq $beforePlan -and
+Assert-ImmuData ($registry.Count -eq 33 -and (ConvertTo-Json $plan -Depth 8 -Compress) -ceq $beforePlan -and
     (ConvertTo-Json $packet -Depth 8 -Compress) -ceq $beforePacket) 'case-parent-unchanged'
-Refused-Case {New-HistoricalControllerCase $plan $packet (Case-Nonce 33) $registry} 'controller-case-registry'
+Refused-Case {New-HistoricalControllerCase $plan $packet (Case-Nonce 34) $registry} 'controller-case-registry'
 foreach($nonce in @($parent,[Guid]::Empty.ToString('D'),(Case-Nonce 1).ToUpperInvariant(),(Case-Nonce 1).Replace('-',''),'bad',$true,42)){
     Refused-Case {New-HistoricalControllerCase $plan $packet $nonce (New-CaseRegistry)} 'controller-case-nonce'
 }
@@ -69,4 +69,22 @@ foreach($nonce in @([Guid]::Empty.ToString('D'),'BAD')){
     $bad=$plan.Clone();$bad.nonce=$nonce
     Refused-Case {New-HistoricalControllerCase $bad $packet (Case-Nonce 5) (New-CaseRegistry)} 'controller-case-nonce'
 }
-Write-Output 'HISTORICAL CONTROLLER CASE PASS:32 distinct child nonces;source identity and parent bytes preserved;replay,changed-plan,preparation failure,bounds,canonical identities andregistry refusals verified. Generated-only in-memory consumption;no native launch orauthority.'
+Write-Output 'HISTORICAL CONTROLLER CASE PASS:33 distinct child nonces;source identity and parent bytes preserved;replay,changed-plan,preparation failure,bounds,canonical identities andregistry refusals verified. Generated-only in-memory consumption;no native launch orauthority.'
+
+# Exercise every wire shape through the same pure guard used before any witness Docker call.
+. (Join-Path $PSScriptRoot '../../eng/pilot/HistoricalRecoveryCreateFault.ps1')
+$wire=@{fault='lost';fixture=([Guid]::NewGuid().ToString('D'));nonce=([Guid]::NewGuid().ToString('D'));
+    session=([Guid]::NewGuid().ToString('D'));imageId=('sha256:'+('a'*64))}
+$wireBefore=$wire|ConvertTo-Json -Compress
+Assert-HistoricalCreateWitnessRequest $wire
+Assert-ImmuData (($wire|ConvertTo-Json -Compress) -ceq $wireBefore) 'witness-request-not-mutated'
+$wire.fault='truncated';Assert-HistoricalCreateWitnessRequest $wire
+$wire.fault='coordinator-exit';$wire.python=[Environment]::ProcessPath;Assert-HistoricalCreateWitnessRequest $wire
+$bad=$wire.Clone();$bad.Remove('python');Refused-Case {Assert-HistoricalCreateWitnessRequest $bad} 'create-witness-request'
+$bad=$wire.Clone();$bad.fault='lost';Refused-Case {Assert-HistoricalCreateWitnessRequest $bad} 'create-witness-request'
+$bad=$wire.Clone();$bad.python='relative-python';Refused-Case {Assert-HistoricalCreateWitnessRequest $bad} 'inflight-python'
+$bad=$wire.Clone();$bad.imageId='local:tag';Refused-Case {Assert-HistoricalCreateWitnessRequest $bad} 'create-witness-request'
+$bad=$wire.Clone();$bad.session=[Guid]::Empty.ToString('D');Refused-Case {Assert-HistoricalCreateWitnessRequest $bad} 'create-witness-nonce'
+$bad=$wire.Clone();$bad.fault='other';Refused-Case {Assert-HistoricalCreateWitnessRequest $bad} 'create-witness-request'
+$bad=$wire.Clone();$bad.extra=$true;Refused-Case {Assert-HistoricalCreateWitnessRequest $bad} 'create-witness-request'
+Write-Output 'HISTORICAL CREATE WITNESS INPUT PASS:3 accepted modes;7 malformed shape/identity/path refusals; no native launch.'

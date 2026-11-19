@@ -379,3 +379,32 @@ the supplied ID. The coordinator receives an allocation refusal and sees no
 resource projection or request to start the historical workload. The owner
 then cleans its original image and temporary payload from its own claims.
 Loss of the live resource owner, Docker daemon or host remains open.
+
+The generated `coordinator-create-coordinator-exit` case holds the original
+successful Docker API create reply at a loopback-only, authenticated gate. The
+fixed native Docker client remains alive with zero stdout admitted while the
+existing OS-fenced supervisor terminates the exact coordinator. Its process
+identity is held and checked again after the coordinator exit. Only then is the
+original reply released. This case uses `docker create --rm` and never starts
+the container process. The surviving witness admits its own original native
+reply once, checks the created state and removes the exact container from its
+live claim. The parent allocation remains unknown and rejects cleanup, replay
+and late ID adoption. The image and payload remain with the surviving owner.
+
+The gate forwards at most one strictly constrained create and bounded HEAD
+negotiation, with a fresh test-only header in a temporary configuration below
+the owned payload. It has no general Docker operation endpoint. Both a bounded
+Content-Length response and bounded chunked response retain their original wire
+bytes. Duplicate headers/JSON fields, ambiguous framing, other images, commands,
+users, networks, mounts, privileges and replay are rejected. The upstream native
+daemon stream stays duplex through response completion. No original materials,
+VPS access or original PKI are part of this case.
+
+`NativeAuditHistory.Tests.ps1 -Profile historical-controller
+-HistoricalCreateFault coordinator-exit` selects this one generated case for
+diagnosis. The default continues to run the complete controller profile. A
+selected case emits `fleetory.generated-historical-create-fault-subset.v1` and
+explicitly reports `fullControllerSuiteExecuted=false`; it cannot substitute for
+the full suite's receipt. An unknown result still supplies no automated cleanup
+authority. Operator disposal of a fixture after a failed attempt must be kept
+separate from program cleanup acceptance.

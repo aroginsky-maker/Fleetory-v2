@@ -262,7 +262,8 @@ CREATOR_LIMIT_SECONDS = 55
 COORDINATOR_LIMIT_SECONDS = 105
 CREATE_REFUSED = 'create-refused'
 ALLOCATION_REFUSED = b'allocation-refused'
-COORDINATOR_FLOWS = ('complete', 'before-acquire', 'after-acquire', 'lease-expired', CREATE_REFUSED)
+CREATE_INTERRUPTED = 'during-create'
+COORDINATOR_FLOWS = ('complete', 'before-acquire', 'after-acquire', 'lease-expired', CREATE_REFUSED, CREATE_INTERRUPTED)
 HANDOFF_EXIT = 'between-operations-exit'
 RESTART_UNCONFIRMED = 'restart-unconfirmed'
 CREATOR_FLOWS = ('complete', 'controller-exit', 'lease-expired', HANDOFF_EXIT, RESTART_UNCONFIRMED)
@@ -594,6 +595,10 @@ def _coordinator_handoff(link, flow, nonce):
     link.live()
     _creator_write(output, b'acquire:' + bound)
     receipt = link.receive_owner(96)
+    if flow == CREATE_INTERRUPTED:
+        packet.require(receipt == b'terminate')
+        link.live()
+        return None, True
     if flow == CREATE_REFUSED:
         packet.require(receipt == b'unavailable:' + bound)
         link.send_application(receipt)

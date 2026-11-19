@@ -1,7 +1,8 @@
 #requires -Version 7.3
-param([string]$Python='',[ValidateSet('none','after-stores')][string]$FailurePoint='none',[ValidateSet('history','observation','historical-observation','historical-controller')][string]$Profile='history')
+param([string]$Python='',[ValidateSet('none','after-stores')][string]$FailurePoint='none',[ValidateSet('history','observation','historical-observation','historical-controller')][string]$Profile='history',[ValidateSet('none','lost','truncated','coordinator-exit')][string]$HistoricalCreateFault='none')
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
+if($HistoricalCreateFault -cne 'none' -and $Profile -cne 'historical-controller'){throw 'A selected create fault requires the historical-controller profile.'}
 foreach($helper in @('PilotNativeProcess.ps1','../../eng/pilot/ProviderRecoveryTransport.ps1','../../eng/pilot/ProviderRecoveryPolicy.ps1','../../eng/pilot/ImmuDataRoundtripPolicy.ps1','../../eng/pilot/AuditHistoryPolicy.ps1','../../eng/pilot/AuditObservationPolicy.ps1','PilotDisposableTls.ps1','NativeSignerFixture.ps1','NativeAuditFixture.ps1','NativeWorkerRuntime.ps1','NativeAuditDataFixture.ps1')){. (Join-Path $PSScriptRoot $helper)}
 $repo=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 if(-not $Python){$Python=(Get-Command $(if($IsLinux){'python3'}else{'python'})).Source}
@@ -78,7 +79,7 @@ try{
         . (Join-Path $PSScriptRoot 'NativeAuditObservationWorkflow.ps1')
         . (Join-Path $PSScriptRoot 'NativeHistoricalObservationWorkflow.ps1')
         . (Join-Path $PSScriptRoot 'NativeHistoricalControllerWorkflow.ps1')
-        $proof=Invoke-NativeHistoricalControllerWorkflow $source $target
+        $proof=Invoke-NativeHistoricalControllerWorkflow $source $target $HistoricalCreateFault
     }elseif($Profile -ceq 'historical-observation'){
         . (Join-Path $PSScriptRoot 'NativeAuditObservationWorkflow.ps1')
         . (Join-Path $PSScriptRoot 'NativeHistoricalObservationWorkflow.ps1')

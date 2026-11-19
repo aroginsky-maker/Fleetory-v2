@@ -6,7 +6,7 @@ param([Parameter(Mandatory)][string]$ExpectedPlanSha256,[string]$Python='',
         'dotnet-denial-early-eof','dotnet-denial-abrupt-exit','dotnet-transport-loss',
         'independent-complete','independent-controller-exit','independent-lease-expired','independent-between-operations-exit',
         'independent-restart-reply-lost','independent-restart-reply-malformed',
-        'coordinator-before-acquire','coordinator-after-acquire','coordinator-lease-expired','coordinator-create-lost','coordinator-create-truncated')][string]$FailurePoint='none',[switch]$PreparationOnly,[string]$PreparationGitPath='',
+        'coordinator-before-acquire','coordinator-after-acquire','coordinator-lease-expired','coordinator-create-lost','coordinator-create-truncated','coordinator-create-coordinator-exit')][string]$FailurePoint='none',[switch]$PreparationOnly,[string]$PreparationGitPath='',
     [switch]$PayloadReservationOnly,[switch]$ResourceAcknowledgementOnly,[switch]$ProbeRuntimeAcknowledgementOnly,[switch]$ProbeRuntimeCreationOnly,[switch]$PublicProbePublicationOnly,[string]$PublicationDotnetPath='',[switch]$GeneratedCreateWitness)
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
@@ -34,7 +34,7 @@ if($PreparationOnly -or $PayloadReservationOnly -or $ResourceAcknowledgementOnly
     }
     exit (Invoke-HistoricalPreparation $ExpectedPlanSha256 $Python $repo $PreparationGitPath)
 }
-foreach($helper in @('PilotNativeProcess.ps1','ProviderRecoveryTransport.ps1','ProviderRecoveryPolicy.ps1','ImmuDataRoundtripPolicy.ps1','AuditObservationPolicy.ps1','HistoricalAuditControllerPolicy.ps1','HistoricalRecoveryCoordinator.ps1','HistoricalRecoveryCreateFault.ps1')){. (Join-Path $PSScriptRoot $helper)}
+foreach($helper in @('PilotNativeProcess.ps1','ProviderRecoveryTransport.ps1','ProviderRecoveryPolicy.ps1','ImmuDataRoundtripPolicy.ps1','AuditObservationPolicy.ps1','HistoricalAuditControllerPolicy.ps1','HistoricalRecoveryCoordinator.ps1','HistoricalRecoveryCreateFault.ps1','HistoricalRecoveryInFlight.ps1')){. (Join-Path $PSScriptRoot $helper)}
 foreach($helper in @('PilotDisposableTls.ps1','NativeSignerFixture.ps1','NativeAuditFixture.ps1','NativeWorkerRuntime.ps1','NativeAuditDataFixture.ps1')){. (Join-Path $testRoot $helper)}
 if(-not $Python -and -not $GeneratedCreateWitness){$Python=(Get-Command $(if($IsLinux){'python3'}else{'python'})).Source}
 $fixture=[Guid]::NewGuid().ToString('D');$root=Join-Path $repo ('artifacts/native-audit-controller-'+$fixture)
@@ -42,6 +42,7 @@ $context=@{Fixture=$fixture;Root=$root;ImageName=(Get-ImmuDataImageName $fixture
     PayloadClaimed=$false;PayloadRemoved=$false;LifetimeSeconds=660;Stores=[Collections.Generic.List[object]]::new();Tls=$null;SigningPems=@{};Secrets=@{}}
 $canaries=[Collections.Generic.List[string]]::new();$watch=[Diagnostics.Stopwatch]::StartNew();$cleaning=$false
 $stage='input';$refusal='operational';$failure=$false;$cleanup=$false;$proof=$null;$store=$null;$body=$null;$archive=$null;$raw=$null
+$failureKind=$null;$failureLine=0
 $cleanupAttempted=$false;$independentAttempted=$false;$independentProof=$null
 $independentNativeStages=[Collections.Generic.List[string]]::new();$independentNativeOutcomeUnconfirmed=$null
 $restartReplyFault=$null
@@ -415,7 +416,14 @@ function Invoke-IndependentHistoricalObservation([ValidateSet('complete','contro
 }
 if($GeneratedCreateWitness){
     try{Invoke-HistoricalCreateWitness $ExpectedPlanSha256;exit 0}
-    catch{[Console]::Error.WriteLine('Generated create witness refused.');exit 1}
+    catch{
+        $kind=$_.Exception.GetBaseException().GetType().Name
+        $line=$_.InvocationInfo.ScriptLineNumber
+        $reason='unknown'
+        if($_.Exception.GetBaseException().Message -cmatch '^Audit data fixture refused: ([a-z0-9-]{1,64})\z'){$reason=$Matches[1]}
+        [Console]::Error.WriteLine('Generated create witness refused: '+$kind+'; line='+$line+'; reason='+$reason+'.')
+        exit 1
+    }
     finally{$env:DOCKER_BUILDKIT=$oldBuildKit}
 }
 [Fleetory.Pilot.AuditHistoricalProbeProfile]::Begin($context,${function:Invoke-Docker})
@@ -440,6 +448,7 @@ try{
         'coordinator-after-acquire' {'after-acquire'}
         'coordinator-lease-expired' {'lease-expired'}
         {$_ -cin @('coordinator-create-lost','coordinator-create-truncated')} {'create-refused'}
+        'coordinator-create-coordinator-exit' {'during-create'}
     }
     if($coordinatorFlow){
         $stage='coordinator'
@@ -470,7 +479,7 @@ try{
     try{$context.SigningPems.target=$key.ExportECPrivateKeyPem();[IO.File]::WriteAllText((Join-Path $root 'target-public.pem'),$key.ExportSubjectPublicKeyInfoPem(),[Text.UTF8Encoding]::new($false))}finally{$key.Dispose()}
     foreach($pem in @($context.Tls.ServerPrivateKeyPem,$context.Tls.ClientPrivateKeyPem,$context.SigningPems.target)){foreach($line in ($pem -split "`n")){if($line.Length -ge 40 -and -not $line.StartsWith('-----')){$canaries.Add($line.Substring(0,40))}}}
     $stage='container'
-    if($coordinatorFlow -ceq 'create-refused'){
+    if($coordinatorFlow -cin @('create-refused','during-create')){
         $routedCreateFault=Invoke-HistoricalRoutedCreateFault $recoveryCoordinator ($FailurePoint.Substring('coordinator-create-'.Length))
         $recoveryCoordinatorProof=$routedCreateFault.coordinator
         $routedCreateFault.Remove('coordinator')
@@ -553,6 +562,7 @@ try{
         writerAdmissionVerified=$false;productionTokensIssued=$false;executionAuthorized=$false;fullSystemRecoveryVerified=$false;phase7Complete=$false}
 }catch{
     $failure=$true
+    $failureKind=$_.Exception.GetBaseException().GetType().Name;$failureLine=$_.InvocationInfo.ScriptLineNumber
     $message=$_.Exception.GetBaseException().Message
     if($message -cmatch '^Audit data fixture refused: ([a-z0-9-]{1,64})\z'){$refusal=$Matches[1]}
     elseif($_.Exception.Message -ceq 'immudb state public key does not match the pinned key.'){$refusal='controller-source-public-pin'}
@@ -574,7 +584,7 @@ try{
     $watch.Stop();$env:DOCKER_BUILDKIT=$oldBuildKit
 }
 if($failure -or -not $cleanup){
-    @{schema='fleetory.historical-audit-controller-cleanup.v1';stage=$stage;refusal=$refusal;cleanupVerified=$cleanup;resources=$resources;comparisonFault=$comparisonFault;dotnetFault=$managedFault;dotnetTransportFault=$transportFault;independentController=$independentProof;independentNativeOutcomeUnconfirmed=$independentNativeOutcomeUnconfirmed;nativeRestartReplyFault=$restartReplyFault;recoveryCoordinator=$recoveryCoordinatorProof;routedCreateFault=$routedCreateFault;dotnetApplicationRefusal=$managedApplicationRefusal}|ConvertTo-Json -Compress -Depth 5
+    @{schema='fleetory.historical-audit-controller-cleanup.v1';stage=$stage;refusal=$refusal;failureKind=$failureKind;failureLine=$failureLine;cleanupVerified=$cleanup;resources=$resources;comparisonFault=$comparisonFault;dotnetFault=$managedFault;dotnetTransportFault=$transportFault;independentController=$independentProof;independentNativeOutcomeUnconfirmed=$independentNativeOutcomeUnconfirmed;nativeRestartReplyFault=$restartReplyFault;recoveryCoordinator=$recoveryCoordinatorProof;routedCreateFault=$routedCreateFault;dotnetApplicationRefusal=$managedApplicationRefusal}|ConvertTo-Json -Compress -Depth 5
     [Console]::Error.WriteLine('Historical native controller refused; no input contents or credentials logged.')
     exit 1
 }

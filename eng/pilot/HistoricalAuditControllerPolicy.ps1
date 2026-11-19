@@ -12,7 +12,7 @@ function New-HistoricalControllerCase($Plan,$Packet,$ChildNonce,$Consumed){
         [Guid]::TryParseExact($ChildNonce,'D',[ref]$child) -and $child -ne [Guid]::Empty -and
         $child.ToString('D') -ceq $ChildNonce -and $child -ne $parent) 'controller-case-nonce'
     Assert-ImmuData ($Consumed -is [Collections.Generic.HashSet[string]] -and
-        $Consumed.Comparer.Equals([StringComparer]::Ordinal) -and $Consumed.Count -lt 32) 'controller-case-registry'
+        $Consumed.Comparer.Equals([StringComparer]::Ordinal) -and $Consumed.Count -lt 33) 'controller-case-registry'
     # Consume before serialization; failed preparation must not silently reuse an operation.
     Assert-ImmuData ($Consumed.Add($ChildNonce)) 'controller-case-replay'
     $childPlan=($Plan|ConvertTo-Json -Depth 12 -Compress -WarningAction Stop)|ConvertFrom-Json -AsHashtable -Depth 16
