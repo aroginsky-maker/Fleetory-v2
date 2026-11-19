@@ -413,3 +413,11 @@ The unstarted create profile uses a dedicated container scratch mount at
 `/run/fleetory-native-create` rather than the general `/tmp` location. Its
 32-MiB tmpfs remains noexec/nosuid/nodev, owned by UID/GID 3322 with mode 0700.
 The normal historical running profiles keep their existing mount layout.
+
+The reply gate lives in the separate `eng/pilot/historical` profile namespace;
+it does not expand the fixed public v1 source inventory. It binds its one-create
+route to the lower of the same native client's API version and the daemon's
+advertised version, with API 1.48 as the minimum supported contract. Docker 28's
+legacy `OnBuild: null` field is accepted only as null. Build instructions or any
+other value are refused. The command, image, user, network, privilege, resource,
+mount, nonce and replay restrictions remain required.

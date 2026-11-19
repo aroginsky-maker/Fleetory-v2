@@ -5,7 +5,7 @@ import json
 import unittest
 
 import audit_probe_image_tests  # Installs the fixed eng/pilot import path.
-import historical_create_gate as gate
+from historical import historical_create_gate as gate
 
 IMAGE = 'sha256:' + 'a' * 64
 NONCE = '5ad88fc0-8a83-40d3-b5b3-da80e89dc064'
@@ -40,6 +40,23 @@ def create(p, value=None):
 
 
 class PolicyTests(unittest.TestCase):
+    def test_docker28_empty_legacy_onbuild_has_no_instructions(self):
+        value = body()
+        value['OnBuild'] = None
+        self.assertEqual(create(policy(), value), 'create')
+        for instructions in ([], ['RUN id'], '', False, 0, {'RUN': 'id'}):
+            value['OnBuild'] = instructions
+            with self.subTest(instructions=instructions), self.assertRaises(ValueError):
+                create(policy(), value)
+
+    def test_api_version_matches_the_same_client_and_server(self):
+        self.assertEqual(gate.select_api_version('1.56', '1.48'), '1.48')
+        self.assertEqual(gate.select_api_version('1.48', '1.56'), '1.48')
+        self.assertEqual(gate.select_api_version('1.56', '1.56'), '1.56')
+        for value in ('1.47', '1.0', '2.48', '1.48/containers', None, 1.48):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                gate.select_api_version('1.56', value)
+
     def test_native_negotiation_is_bounded(self):
         p = policy()
         for _ in range(2):

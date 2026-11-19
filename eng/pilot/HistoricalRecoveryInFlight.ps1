@@ -17,11 +17,13 @@ function Invoke-HistoricalInFlightDocker([string[]]$Arguments,$Request,$Token,$I
     Assert-ImmuData ($Request.python -is [string] -and [IO.Path]::IsPathFullyQualified($Request.python) -and
         (Test-Path -LiteralPath $Request.python -PathType Leaf)) 'inflight-python'
     $secret=[Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32)).ToLowerInvariant()
-    $gateRequest=@{image=$Request.imageId;nonce=$Request.session;token=$secret;docker=$docker;
+    $clientApi=(Invoke-Docker @('version','--format','{{.Client.APIVersion}}')).Stdout.Trim()
+    Assert-ImmuData ($clientApi -cmatch '^1\.[0-9]{2}\z') 'inflight-client-api'
+    $gateRequest=@{image=$Request.imageId;nonce=$Request.session;token=$secret;docker=$docker;clientApiVersion=$clientApi;
         dockerSha256=(Get-ImmuDataHash ([IO.File]::ReadAllBytes($docker)))}
     $bytes=[Text.Encoding]::UTF8.GetBytes(($gateRequest|ConvertTo-Json -Compress))
     $gateStart=New-HistoricalChildStart $Request.python
-    foreach($part in @('-B',(Join-Path $PSScriptRoot 'historical_create_gate.py'),'--request-sha256',(Get-ImmuDataHash $bytes))){$gateStart.ArgumentList.Add($part)}
+    foreach($part in @('-B',(Join-Path $PSScriptRoot 'historical/historical_create_gate.py'),'--request-sha256',(Get-ImmuDataHash $bytes))){$gateStart.ArgumentList.Add($part)}
     $gate=$null;$native=$null;$output=[Fleetory.Tests.PilotCaptureStream]::new(128)
     $errorOutput=[Fleetory.Tests.PilotCaptureStream]::new(4096);$gateError=[Fleetory.Tests.PilotCaptureStream]::new(8192)
     $copies=@();$directory=$null;$configuration=$null;$phase='startup'

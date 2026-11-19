@@ -70,7 +70,7 @@ def validate_create(raw, image, nonce):
                 'Labels': {'fleetory.immu-data.session': nonce}}
     host = value.pop('HostConfig', None)
     _profile(value, expected, {'AttachStdout': (True, False), 'AttachStderr': (True, False),
-                             'NetworkingConfig': ({'EndpointsConfig': {}},)}, CONFIG_DEFAULTS)
+                             'NetworkingConfig': ({'EndpointsConfig': {}},), 'OnBuild': (None,)}, CONFIG_DEFAULTS)
     expected_host = {'NetworkMode': 'none', 'ReadonlyRootfs': True, 'AutoRemove': True,
                      'CapDrop': ['ALL'], 'SecurityOpt': ['no-new-privileges'],
                      'Memory': 402653184, 'NanoCpus': 1000000000, 'PidsLimit': 128,
@@ -117,6 +117,12 @@ def read_request(stream):
     body = stream.read(length)
     require(len(body) == length)
     return parts[0], parts[1], headers, body
+
+
+def select_api_version(server, client):
+    for value in (server, client):
+        require(type(value) is str and re.fullmatch(r'1\.[0-9]{2}', value) is not None and int(value[2:]) >= 48)
+    return min((server, client), key=lambda value: int(value[2:]))
 
 
 class CreateGatePolicy:
@@ -270,7 +276,7 @@ def run_gate(raw, expected):
 
     require(hashlib.sha256(raw).hexdigest() == expected)
     request = document(raw)
-    require(set(request) == {'image', 'nonce', 'token', 'docker', 'dockerSha256'})
+    require(set(request) == {'image', 'nonce', 'token', 'docker', 'dockerSha256', 'clientApiVersion'})
     docker = Path(request['docker'])
     require(docker.is_absolute() and not docker.is_symlink() and docker.is_file() and
             hashlib.sha256(docker.read_bytes()).hexdigest() == request['dockerSha256'])
@@ -288,7 +294,7 @@ def run_gate(raw, expected):
             command = [sudo, '-n'] + command
         _, response_headers = daemon_exchange(command, environment, 'HEAD', '/_ping', b'')
         require(response_headers.get('ostype') == 'linux')
-        version = response_headers['api-version']
+        version = select_api_version(response_headers['api-version'], request['clientApiVersion'])
         policy = CreateGatePolicy(request['image'], request['nonce'], request['token'], version)
         def exchange(method, target, body):
             return daemon_exchange(command, environment, method, target, body)
@@ -297,6 +303,8 @@ def run_gate(raw, expected):
 
 if __name__ == '__main__':
     import sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from historical_audit_observation import _creator_read
     require(len(sys.argv) == 3 and sys.argv[1] == '--request-sha256' and
             re.fullmatch(r'[a-f0-9]{64}', sys.argv[2]) is not None)
