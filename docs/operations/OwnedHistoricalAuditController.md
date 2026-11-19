@@ -408,3 +408,8 @@ explicitly reports `fullControllerSuiteExecuted=false`; it cannot substitute for
 the full suite's receipt. An unknown result still supplies no automated cleanup
 authority. Operator disposal of a fixture after a failed attempt must be kept
 separate from program cleanup acceptance.
+
+The unstarted create profile uses a dedicated container scratch mount at
+`/run/fleetory-native-create` rather than the general `/tmp` location. Its
+32-MiB tmpfs remains noexec/nosuid/nodev, owned by UID/GID 3322 with mode 0700.
+The normal historical running profiles keep their existing mount layout.

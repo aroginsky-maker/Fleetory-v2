@@ -46,7 +46,17 @@ function Invoke-HistoricalInFlightDocker([string[]]$Arguments,$Request,$Token,$I
         [IO.File]::WriteAllText($configuration,(@{HttpHeaders=@{'X-Fleetory-Create-Nonce'=$secret}}|ConvertTo-Json -Compress),[Text.UTF8Encoding]::new($false))
         if(-not $IsWindows){[IO.File]::SetUnixFileMode($configuration,[IO.UnixFileMode]384)}
         $start=New-HistoricalChildStart $docker
-        foreach($part in (@('--config',$directory,'--host',('tcp://127.0.0.1:'+$bound.port),'create','--pull=never')+$Arguments[2..($Arguments.Count-1)])){
+        $createArguments=[Collections.Generic.List[string]]::new();$privateScratch=0
+        for($index=2;$index -lt $Arguments.Count;$index++){
+            $part=$Arguments[$index]
+            if($index -gt 2 -and $Arguments[$index-1] -ceq '--tmpfs' -and
+                $part -ceq ('/tmp:'+$script:nativeAuditTmpfs['/tmp'])){
+                $part='/run/fleetory-native-create:'+$script:nativeAuditTmpfs['/tmp'];$privateScratch++
+            }
+            $createArguments.Add($part)
+        }
+        Assert-ImmuData ($privateScratch -eq 1) 'inflight-private-scratch'
+        foreach($part in (@('--config',$directory,'--host',('tcp://127.0.0.1:'+$bound.port),'create','--pull=never')+$createArguments.ToArray())){
             $start.ArgumentList.Add($part)
         }
         $phase='native-start'

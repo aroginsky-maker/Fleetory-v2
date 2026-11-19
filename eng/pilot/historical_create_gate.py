@@ -8,7 +8,7 @@ HEADER_LIMIT = 8192
 BODY_LIMIT = 16384
 TMPFS = {
     '/data': 'rw,noexec,nosuid,nodev,size=256m,uid=3322,gid=3322,mode=0700',
-    '/tmp': 'rw,noexec,nosuid,nodev,size=32m,uid=3322,gid=3322,mode=0700',
+    '/run/fleetory-native-create': 'rw,noexec,nosuid,nodev,size=32m,uid=3322,gid=3322,mode=0700',
 }
 CONFIG_DEFAULTS = frozenset(('Hostname', 'Domainname', 'AttachStdin', 'Tty', 'OpenStdin',
                              'StdinOnce', 'Env', 'Volumes', 'WorkingDir'))
