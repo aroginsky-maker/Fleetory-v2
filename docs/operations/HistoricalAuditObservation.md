@@ -61,13 +61,14 @@ The current CI graph, execution-job bounds and aggregate requirements are
 maintained in [Phase 7 closure](Phase7Closure.md). Database/audit and
 provider/identity lifecycles run in independent jobs with pinned SDK/tool
 bootstrap, dependency audit and prerequisite builds. The Server pair and v2
-composition checks run with provider/identity. Neither native job requires
-Sonar credentials or a successful upstream execution job.
+composition checks run with provider/identity. Retained strict/historical
+Server and SQL/COPY interruption checks have their own required native job.
+No native job requires Sonar credentials or a successful upstream execution job.
 
 The portable `recovery_ci_layout_tests.py` contracts reject missing or duplicated
 fixtures, skipped/softened gates, altered bootstrap and changed job bounds. They
 also execute the actual final aggregate with failed, cancelled, skipped and
-missing results. All five execution jobs, including both Windows jobs, must
+missing results. All six execution jobs, including both Windows jobs, must
 succeed for that aggregate. Partial success is not a green workflow. This
 partition preserves required checks and repository budgets.
 

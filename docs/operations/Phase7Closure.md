@@ -49,13 +49,15 @@ limit and the same pinned SDK/build prerequisites. Signed artifact/journal,
 dependency/quality/readiness, expectation/Sonar CLI and Windows PowerShell 5.1
 checks retain their original commands and shells. No verification is omitted,
 softened or made conditional. Linux retains its 35-minute limit, and native
-data/provider jobs retain their 20-minute and 15-minute limits. Both native
-Server pair checks run with the provider and identity job. They keep the same
-admission, restore and lifecycle checks, with the Server probe restored on its
-new runner. This gives the historical audit controller room to finish in the
-database and audit job.
+data/provider jobs retain their 20-minute and 15-minute limits. The legacy and
+v2 Server pair checks run with provider/identity. A separate required retained
+Server job keeps a 15-minute limit and runs strict and explicit historical
+Server recovery, active-SQL cancellation and actual data-only COPY interruption.
+Each native job restores its own pinned prerequisites; none depends on Sonar
+credentials or an upstream execution result. Admission, restore, lifecycle and
+cleanup checks remain required.
 
-The final aggregate requires all five execution jobs, including both Windows
+The final aggregate requires all six execution jobs, including both Windows
 jobs. A missing, failed, cancelled, skipped or extra job result is rejected.
 Layout tests also reject removed/duplicated/softened moved checks, altered
 bootstrap and changed deadlines. The split addresses observed exhaustion of
