@@ -86,7 +86,7 @@ class ConsumedAttempt:
 def _claim_record(trusted_operator_root,name,record):
     packet.require(type(name) is str and len(name)>41)
     nonce=packet.identity(name[-41:-5])
-    prefixes=('public-sleep-cleanup-','public-sleep-guard-start-','public-sleep-guard-ready-','public-sleep-guard-cleanup-',
+    prefixes=('retained-service-use-','public-sleep-cleanup-','public-sleep-guard-start-','public-sleep-guard-ready-','public-sleep-guard-cleanup-',
         'retained-public-guard-attempt-','retained-public-guard-ready-',
         'retained-context-start-','retained-context-ready-',
         *('retained-owned-'+kind+'-' for kind in ('start','admission','build','image','copy','copy-delete','copy-closed',

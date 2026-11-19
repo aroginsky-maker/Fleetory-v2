@@ -280,6 +280,10 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/retained_service_payload_tests.py
 
+      - name: Verify live retained service use on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/retained_service_use_tests.py
+
       - name: Verify scoped PostgreSQL expectation source on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/audit_expectation_source_tests.py
@@ -826,6 +830,10 @@ jobs:
       - name: Verify private frozen service payload
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/retained_service_payload_tests.py
+
+      - name: Verify live retained service use
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/retained_service_use_tests.py
 
       - name: Verify scoped PostgreSQL expectation source
         shell: pwsh

@@ -130,6 +130,7 @@ def validate(text):
         for title, filename in (('held audit control namespace identity', 'audit_control_identity_tests.py'),
                 ('four frozen retained service inputs', 'retained_service_inputs_tests.py'),
                 ('private frozen service payload', 'retained_service_payload_tests.py'),
+                ('live retained service use', 'retained_service_use_tests.py'),
                 ('owned process identity and lifetime fence', 'audit_process_fence_tests.py'),
                 ('pinned payload reservation and controller binding', 'audit_payload_launch_tests.py'),
                 ('consumed generated container binding', 'audit_backend_binding_tests.py'),
@@ -358,6 +359,13 @@ class RecoveryCiLayoutTests(unittest.TestCase):
     def test_process_fence_gate_is_required_once_and_cannot_be_softened(self):
         for executable in ('python', 'python3'):
             command = executable + ' -B ./tests/Fleetory.Tools.Tests/audit_process_fence_tests.py'
+            self.refused(self.text.replace(command, 'omitted', 1))
+            self.refused(self.text.replace(command, command + '\n          ' + command, 1))
+            self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
+
+    def test_live_service_use_gate_is_required_once_and_cannot_be_softened(self):
+        for executable in ('python', 'python3'):
+            command = executable + ' -B ./tests/Fleetory.Tools.Tests/retained_service_use_tests.py'
             self.refused(self.text.replace(command, 'omitted', 1))
             self.refused(self.text.replace(command, command + '\n          ' + command, 1))
             self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
