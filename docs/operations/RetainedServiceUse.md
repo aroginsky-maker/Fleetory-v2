@@ -67,6 +67,14 @@ shortens that deadline or renews a lease. These three profiles are mandatory in
 the existing 15-minute retained Linux CI job; its deadline and the six-job
 aggregate remain unchanged.
 
+On Linux these three fixture profiles start their actual PowerShell owner from
+a private copy of the selected public runtime, using the existing runtime
+fixture helper. Its entrypoint hash is checked; host permissions are not
+changed. The new process creates and retains its own native custody objects.
+The wrapper does not adopt Docker replies or clean resources by copied IDs.
+Preparation failures expose only a closed stage name (metadata, parent runtime
+or parent identity), never the input bytes or an arbitrary exception message.
+
 Portable tests use only generated files. They require real own process identity,
 four-file capture, flushed pre-open consumption, frozen packets, refusal after
 source/record/owner loss, original-clock expiry before/after capture or return,

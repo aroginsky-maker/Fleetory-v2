@@ -19,6 +19,13 @@ EXTRA = ('historical/retained_service_peer.py', 'historical/RetainedServiceUseTr
 REPO = Path(__file__).resolve().parents[3]
 
 
+class PreparationRefused(ValueError):
+    def __init__(self, stage):
+        packet.require(stage in ('metadata', 'parent-runtime', 'parent-identity'))
+        self.stage = stage
+        super().__init__('Fixed preparation refused')
+
+
 def _parent_path():
     if os.name == 'posix':
         return (Path('/proc') / str(os.getppid()) / 'exe').resolve(strict=True)
@@ -70,10 +77,20 @@ def prepare(raw):
                 pythonSha256=H(Path(sys.executable).resolve().read_bytes()),
                 **{n:value[n] for n in ('imageId','probeSha256','configurationSha256')})
     frozen = C(plan)
-    use._admit(frozen, H(frozen), metadata, root)  # Metadata only; no original artifacts opened.
-    parent_path = _parent_path()
-    with identity.process.PinnedFile(parent_path, H(parent_path.read_bytes()), True) as pinned:
-        parent = _parent_identity(pinned)
+    try:
+        use._admit(frozen, H(frozen), metadata, root)  # Metadata only; no original artifacts opened.
+    except Exception:
+        raise PreparationRefused('metadata') from None
+    try:
+        parent_path = _parent_path()
+        pinned = identity.process.PinnedFile(parent_path, H(parent_path.read_bytes()), True)
+    except Exception:
+        raise PreparationRefused('parent-runtime') from None
+    with pinned:
+        try:
+            parent = _parent_identity(pinned)
+        except Exception:
+            raise PreparationRefused('parent-identity') from None
     header = dict(schema=HEADER, plan=base64.b64encode(frozen).decode('ascii'), planSha256=H(frozen),
                   metadata=value['metadata'], parent=parent, mode=_mode(value['mode']),
                   sources={n:H((REPO/'eng/pilot'/n).read_bytes()) for n in EXTRA})
@@ -211,6 +228,9 @@ if __name__ == '__main__':
             print(C(prepare(raw)).decode('utf-8'))
         else:
             run(args.header_sha256)
+    except PreparationRefused as refusal:
+        os.write(2, ('Retained service preparation refused at '+refusal.stage+'; no input contents logged.\n').encode('ascii'))
+        sys.exit(1)
     except Exception:
         os.write(2,b'Retained service peer refused; no input contents logged.\n')
         sys.exit(1)

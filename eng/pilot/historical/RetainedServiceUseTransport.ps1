@@ -38,7 +38,11 @@ function Open-RetainedServiceUsePeer([string]$Repository,[string]$Python,[string
     try{
         [Environment]::CurrentDirectory=$InputRoot
         $prepared=Invoke-NativeBytes $Python @('-B',(Join-Path $PSScriptRoot 'retained_service_peer.py'),'--prepare') ([Text.Encoding]::UTF8.GetBytes(($request|ConvertTo-Json -Depth 8 -Compress))) 20
-        Assert-ImmuData ($prepared.ExitCode -eq 0 -and [string]::IsNullOrWhiteSpace($prepared.Stderr)) 'service-peer-header'
+        $category='unclassified'
+        foreach($stage in @('metadata','parent-runtime','parent-identity')){
+            if($prepared.Stderr.TrimEnd() -ceq ('Retained service preparation refused at '+$stage+'; no input contents logged.')){$category=$stage}
+        }
+        Assert-ImmuData ($prepared.ExitCode -eq 0 -and [string]::IsNullOrWhiteSpace($prepared.Stderr)) ('service-peer-header-'+$category)
         $header=$prepared.Stdout|ConvertFrom-Json -AsHashtable -Depth 8
     }finally{[Environment]::CurrentDirectory=$oldDirectory}
     $self=[Diagnostics.Process]::GetCurrentProcess();$null=$self.Handle
