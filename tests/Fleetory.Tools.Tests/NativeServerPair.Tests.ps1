@@ -18,35 +18,7 @@ $state=@{Fixture=$fixture;Root=$root;Image=('fleetory-native-pair-'+$fixture.Rep
     Sides=[Collections.Generic.List[object]]::new();Audits=[Collections.Generic.List[object]]::new();Canaries=[Collections.Generic.List[string]]::new();Tls=$null;GatewayTls=@{};SigningPem=$null}
 $watch=[Diagnostics.Stopwatch]::StartNew();$cleaning=$false;$imageClaimed=$false;$stage='publish';$proof=$null;$lastClass='none';$lastExit=0
 $oldBuildKit=$env:DOCKER_BUILDKIT;$env:DOCKER_BUILDKIT='0'
-function Invoke-Docker([string[]]$Arguments,[byte[]]$InputBytes=$null,[int]$TimeoutSeconds=60,[switch]$AllowFailure,[scriptblock]$ObserveProcess=$null){
-    Assert-Pair ($cleaning -or $watch.Elapsed.TotalSeconds -lt 600) 'fixture-deadline'
-    $privateConfig=$null
-    try{
-        if($null -ne $ObserveProcess){
-            Assert-RetainedObservedWorkArguments $Arguments
-            foreach($name in @('DOCKER_API_VERSION','DOCKER_CUSTOM_HEADERS')){
-                Assert-Pair ([string]::IsNullOrEmpty([Environment]::GetEnvironmentVariable($name))) 'observed-client-no-ambient-override'
-            }
-            if($IsLinux){
-                # Direct unprivileged client: the observed PID is Docker, not a shell/sudo intermediary.
-                $privateConfig=Join-Path $root ('observed-client-'+[Guid]::NewGuid().ToString('N'))
-                [Fleetory.Pilot.ExclusiveAuditDirectory]::Create($privateConfig)
-                $result=Invoke-NativeBytes '/usr/bin/docker' (@('--config',$privateConfig,'--host','unix:///var/run/docker.sock')+$Arguments) $InputBytes $TimeoutSeconds -ObserveProcess $ObserveProcess
-            }else{
-                $result=Invoke-NativeBytes 'docker' (@('--context','desktop-linux')+$Arguments) $InputBytes $TimeoutSeconds -ObserveProcess $ObserveProcess
-            }
-        }else{
-            $result=if($IsLinux){Invoke-NativeBytes '/bin/sh' @('-c',(Get-ProviderDockerShellCommand $Arguments -ClassicBuilder:($Arguments[0] -ceq 'build'))) $InputBytes $TimeoutSeconds}
-                else{Invoke-NativeBytes 'docker' (@('--context','desktop-linux')+$Arguments) $InputBytes $TimeoutSeconds}
-        }
-    }finally{if($null -ne $privateConfig){[IO.Directory]::Delete($privateConfig,$false)}}
-    $script:lastExit=$result.ExitCode;$script:lastClass='unclassified'
-    foreach($kind in @('syntax error','does not exist','permission denied','no such file','authentication failed','connection refused')){if(($result.Stdout+$result.Stderr).Contains($kind,[StringComparison]::OrdinalIgnoreCase)){$script:lastClass=$kind.Replace(' ','-');break}}
-    if($result.Stderr -cmatch 'ERROR:\s+([A-Z0-9]{5})\b'){$script:lastClass='sqlstate-'+$Matches[1]}
-    foreach($secret in $state.Canaries){Assert-Pair (-not ($result.Stdout+$result.Stderr).Contains($secret,[StringComparison]::Ordinal)) 'credential-canary'}
-    if(-not $AllowFailure){Assert-Pair ($result.ExitCode -eq 0) 'docker-operation'}
-    return $result
-}
+. (Join-Path $repo 'eng/pilot/historical/RetainedNativeClient.ps1')
 function Pg-Inventory($Side){return Read-PgDataInventory (Pair-Sql $state $Side 'fleetory' $script:inventorySql).StdoutBytes}
 function Get-PairPoint($Side){
     $v=Invoke-PairProbe $state $Side 'pair-read'

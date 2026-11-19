@@ -129,11 +129,18 @@ def validate(text):
     assert provider[start:end if end >= 0 else len(provider)].strip() == PAIR_ADMISSION.strip()
     assert provider.count('dotnet restore ./eng/ServerBackendProbe/ServerBackendProbe.csproj') == 1
     assert text.count('python3 -B ./tests/Fleetory.Tools.Tests/fresh_server_pair_tests.py') == 1
+    for key, platform in (('windows-tls-chain', ' on Windows'), ('quality', '')):
+        step = ('      - name: Verify generated data host callback boundary' + platform + '\n'
+                '        shell: pwsh\n'
+                '        run: ./tests/Fleetory.Tools.Tests/RetainedDataHostBoundary.Tests.ps1\n')
+        assert blocks[key].count(step) == 1
+        assert text.count('./tests/Fleetory.Tools.Tests/RetainedDataHostBoundary.Tests.ps1') == 2
     for key, platform, executable in (('windows-tls-chain', ' on Windows', 'python'), ('quality', '', 'python3')):
         for title, filename in (('held audit control namespace identity', 'audit_control_identity_tests.py'),
                 ('four frozen retained service inputs', 'retained_service_inputs_tests.py'),
                 ('private frozen service payload', 'retained_service_payload_tests.py'),
                 ('live retained service use', 'retained_service_use_tests.py'),
+                ('original inventory metadata mapping', 'retained_expected_inventory_tests.py'),
                 ('owned process identity and lifetime fence', 'audit_process_fence_tests.py'),
                 ('pinned payload reservation and controller binding', 'audit_payload_launch_tests.py'),
                 ('consumed generated container binding', 'audit_backend_binding_tests.py'),
@@ -365,6 +372,18 @@ class RecoveryCiLayoutTests(unittest.TestCase):
             self.refused(self.text.replace(command, 'omitted', 1))
             self.refused(self.text.replace(command, command + '\n          ' + command, 1))
             self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
+
+    def test_original_inventory_mapping_gate_is_required_once_and_cannot_be_softened(self):
+        for executable in ('python', 'python3'):
+            command = executable + ' -B ./tests/Fleetory.Tools.Tests/retained_expected_inventory_tests.py'
+            self.refused(self.text.replace(command, 'omitted', 1))
+            self.refused(self.text.replace(command, command + '\n          ' + command, 1))
+            self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
+
+    def test_data_host_callback_boundary_cannot_be_omitted_or_softened(self):
+        command = './tests/Fleetory.Tools.Tests/RetainedDataHostBoundary.Tests.ps1'
+        self.refused(self.text.replace(command, 'omitted', 1))
+        self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
 
     def test_live_service_use_gate_is_required_once_and_cannot_be_softened(self):
         for executable in ('python', 'python3'):

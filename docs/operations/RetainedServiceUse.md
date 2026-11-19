@@ -97,3 +97,27 @@ Original backups, credentials/private PKI, provider/identity material and VPS
 are not used. General creator/guardian/daemon/host loss, original release/build/
 configuration/key lineage, independent WORM/actors, human/physical Agent and
 full recovery RPO/RTO remain open. Phase 7 and draft PR #2 stay open.
+
+The live native client and parent data-stage lifecycle are now shared libraries
+(`RetainedNativeClient.ps1` and `RetainedDataStageHost.ps1`). The generated route
+uses those same fixed commands, ownership objects, time limits and cleanup.
+The shared host returns a neutral data-host schema; only the generated wrapper
+claims that generated paths were replaced and no original files were read.
+Its optional after-capture callback is restricted to the exact UUID fixture
+directory before any input opening. Outside-root attempts are rejected in all
+three modes. This callback must never be supplied for original inputs.
+
+`retained_expected_inventory.py` maps three pinned metadata packets (selection,
+coherent capture and accepted database report) into the existing native target
+expectations. It performs no file reads or execution. It reconciles exact dump
+hashes/lengths, source declarations, database inventory/security digests and the
+stable audit point. Historical metadata does not contain the later additional
+security digest: the fresh-target-role-policy-v1 expectation is explicitly a
+target policy, never a claimed original measurement. Twelve portable tests
+cover mismatched metadata, mutable buffers, invented source measurements and
+forbidden path/permission/provider/identity fields.
+
+These libraries and generated lifecycle tests do not yet supply the complete
+fixed trusted operator entry or transitive code/command/resource inventory.
+Original executor readiness and original recovery remain false. The four
+previously authorized original archives are not opened by these tests.

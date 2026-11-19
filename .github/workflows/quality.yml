@@ -284,6 +284,14 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/retained_service_use_tests.py
 
+      - name: Verify original inventory metadata mapping on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/retained_expected_inventory_tests.py
+
+      - name: Verify generated data host callback boundary on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/RetainedDataHostBoundary.Tests.ps1
+
       - name: Verify scoped PostgreSQL expectation source on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/audit_expectation_source_tests.py
@@ -834,6 +842,14 @@ jobs:
       - name: Verify live retained service use
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/retained_service_use_tests.py
+
+      - name: Verify original inventory metadata mapping
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/retained_expected_inventory_tests.py
+
+      - name: Verify generated data host callback boundary
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/RetainedDataHostBoundary.Tests.ps1
 
       - name: Verify scoped PostgreSQL expectation source
         shell: pwsh
