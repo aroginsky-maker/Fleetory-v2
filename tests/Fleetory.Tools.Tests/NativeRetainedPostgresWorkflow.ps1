@@ -5,6 +5,8 @@ function Invoke-NativeRetainedPostgresWorkflow($Artifacts,$Expected,$AuditPoint=
     . (Join-Path $repo 'eng/pilot/ImmuDataRoundtripPolicy.ps1')
     . (Join-Path $repo 'eng/pilot/AuditDataResourceOwnership.ps1')
     . (Join-Path $PSScriptRoot 'NativeAuditDataFixture.ps1')
+    . (Join-Path $PSScriptRoot 'NativeRetainedMaterial.ps1')
+    . (Join-Path $PSScriptRoot 'NativeRetainedServiceUseWorkflow.ps1')
     $script:stage='retained-pg-source-snapshot'
     $writer=Join-Path $PSScriptRoot 'native_retained_pg_inputs.py'
     $sql=Invoke-NativeBytes $Python @('-B',$writer,'sql') -TimeoutSeconds 10
@@ -20,6 +22,9 @@ function Invoke-NativeRetainedPostgresWorkflow($Artifacts,$Expected,$AuditPoint=
         Assert-Pair ($prepared.ExitCode-eq0-and[string]::IsNullOrWhiteSpace($prepared.Stderr)) 'retained-pg-source-files'
         $metadata=$prepared.Stdout|ConvertFrom-Json -AsHashtable
         Assert-Pair ($metadata.generatedFixtureOnly-eq$true-and$metadata.nonce-ceq$fixture) 'retained-pg-source-scope'
+        if($Profile -cin @('v2-retained-service-use','v2-retained-service-use-loss','v2-retained-service-use-expiry')){
+            return Invoke-NativeRetainedServiceUseWorkflow $inputRoot $metadata $Expected $AuditPoint
+        }
         $body=[Text.Encoding]::UTF8.GetBytes(($metadata.body|ConvertTo-Json -Compress))
         $captured=Invoke-NativeBytes $Python @('-B',(Join-Path $repo 'eng/pilot/historical/retained_service_payload.py'),
             '--selection-sha256',$metadata.pins.selection,'--manifest-sha256',$metadata.pins.manifest,
@@ -53,29 +58,7 @@ function Invoke-NativeRetainedPostgresWorkflow($Artifacts,$Expected,$AuditPoint=
         $script:stage='retained-pg-'+$flow
         $auditStage=$null
         if($null -ne $imageContext){
-            $material=@{Tls=(New-PilotDisposableTlsMaterial -IncludeClient);Secrets=@{};SigningPem=$null;
-                PublicKeyPath=(Join-Path $root ('retained-target-'+$flow+'-public.pem'))}
-            foreach($name in @('admin','writer','reader')){
-                $material.Secrets[$name]=[Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32)).ToLowerInvariant()
-                $state.Canaries.Add($material.Secrets[$name])
-            }
-            $key=[Security.Cryptography.ECDsa]::Create([Security.Cryptography.ECCurve]::CreateFromFriendlyName('nistP256'))
-            try{$material.SigningPem=$key.ExportECPrivateKeyPem();[IO.File]::WriteAllText($material.PublicKeyPath,$key.ExportSubjectPublicKeyInfoPem(),[Text.UTF8Encoding]::new($false))}finally{$key.Dispose()}
-            foreach($pem in @($material.Tls.ServerPrivateKeyPem,$material.Tls.ClientPrivateKeyPem,$material.SigningPem)){
-                foreach($line in ($pem -split "`n")){if($line.Length -ge 40 -and -not $line.StartsWith('-----')){$state.Canaries.Add($line.Substring(0,40))}}
-            }
-            if($Profile -cin @('v2-retained-server','v2-retained-historical-server')){
-                $material.PostgresTls=New-PilotDisposableTlsMaterial
-                $material.GatewayTls=@{}
-                foreach($role in @('agent','admin')){$material.GatewayTls[$role]=New-PilotDisposableTlsMaterial}
-                foreach($name in @('database','signer')){
-                    $material.Secrets[$name]=[Convert]::ToHexString([Security.Cryptography.RandomNumberGenerator]::GetBytes(32)).ToLowerInvariant()
-                    $state.Canaries.Add($material.Secrets[$name])
-                }
-                foreach($pem in @($material.PostgresTls.ServerPrivateKeyPem,$material.GatewayTls.agent.ServerPrivateKeyPem,$material.GatewayTls.admin.ServerPrivateKeyPem)){
-                    foreach($line in ($pem -split "`n")){if($line.Length -ge 40 -and -not $line.StartsWith('-----')){$state.Canaries.Add($line.Substring(0,40))}}
-                }
-            }
+            $material=New-NativeRetainedMaterial $flow ($Profile -cin @('v2-retained-server','v2-retained-historical-server'))
             $auditStage=@{ImageContext=$imageContext;Material=$material;Point=$AuditPoint;ServerEnabled=($Profile -cin @('v2-retained-server','v2-retained-historical-server'));Historical=($Profile -ceq 'v2-retained-historical-server')}
         }
         $result=Invoke-RetainedPostgresTarget $repo $Python $payload $Expected $flow $auditStage

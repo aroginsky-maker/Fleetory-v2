@@ -14,6 +14,9 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
     $serverEnabled=$null -ne $AuditStage -and $AuditStage.ContainsKey('ServerEnabled') -and $AuditStage.ServerEnabled
     $configuration=if($null -ne $AuditStage){New-RetainedConfiguration $AuditStage.Material $serverEnabled $AuditStage.Historical}else{$null}
     $configurationPin=if($null -ne $configuration){$configuration.Sha256}else{Get-ImmuDataHash ([Text.Encoding]::UTF8.GetBytes('postgres-only.v1'))}
+    if($null -ne $AuditStage -and $AuditStage.ContainsKey('ExpectedConfigurationSha256')){
+        Assert-ImmuData ($configurationPin -ceq $AuditStage.ExpectedConfigurationSha256) 'retained-service-configuration-commitment'
+    }
     $plan=@{nonce=[Guid]::NewGuid().ToString('D')}
     $comparisonPython=$Python;$comparisonPythonHash=Get-ImmuDataHash ([IO.File]::ReadAllBytes($Python))
     $workerNames=@('historical_audit_observation','audit_observation','audit_process_fence','audit_process_posix',
@@ -63,6 +66,7 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
         return $identifier
     }
     function Confirm-RetainedLiveWork([Threading.CancellationToken]$Token=$peer.cancel.Token){
+        if($null -ne $AuditStage -and $AuditStage.ContainsKey('AdmissionPeer')){Confirm-RetainedServiceUseLive $AuditStage.AdmissionPeer $Token}
         Assert-ImmuData ($clock.Elapsed.TotalSeconds -lt 75 -and $null -ne $peer -and -not $peer.holder.HasExited -and
             $peer.workAdmitted -and $peer.workRequests -eq 1 -and -not $peer.expiredLiveCleanup -and $peer.workStatusRequests -lt 256) 'retained-work-window'
         Send-IndependentFrame $peer.input ([Text.Encoding]::ASCII.GetBytes('work-status')) $Token;$peer.workStatusRequests++
@@ -165,6 +169,7 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
     try{
         $peer=Open-HistoricalRecoveryCoordinator $Flow
         Enter-HistoricalCoordinatorAllocation $peer
+        if($null -ne $AuditStage -and $AuditStage.ContainsKey('AdmissionPeer')){Confirm-RetainedServiceUseLive $AuditStage.AdmissionPeer $peer.cancel.Token}
         $store.Id=Invoke-AuditDataContainerOperation $context $store 'Create' (Get-NativeJournalArguments $store.Session) -TimeoutSeconds 15
         $identifier=Read-RetainedPg
         if($null -ne $AuditStage){
@@ -172,6 +177,7 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
             $auditStore=@{Session=$auditContext.Fixture;Name=('fleetory-retained-audit-'+$auditContext.Fixture.Replace('-',''));
                 Role='retained-coupled-audit';Started=[DateTimeOffset]::UtcNow;Id=$null}
             $auditContext.Stores.Add($auditStore)
+            if($AuditStage.ContainsKey('AdmissionPeer')){Confirm-RetainedServiceUseLive $AuditStage.AdmissionPeer $peer.cancel.Token}
             $auditStore.Id=Invoke-AuditDataContainerOperation $auditContext $auditStore 'Create' (Get-RetainedAuditArguments $auditContext $auditStore) -TimeoutSeconds 15
             $null=Read-RetainedAuditNamespace $auditContext $auditStore
         }
@@ -246,6 +252,17 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
                 $meter.restores++
                 $inventories[$database]=Read-RetainedInventory $database
             }
+            if($null -ne $AuditStage -and $AuditStage.ContainsKey('GeneratedAdmissionFault') -and $AuditStage.GeneratedAdmissionFault){
+                if($AuditStage.GeneratedAdmissionExpiry){
+                    $meter.admissionExpiryMilliseconds=Wait-GeneratedRetainedServiceUseExpiry $AuditStage.AdmissionPeer
+                }else{Invoke-GeneratedRetainedServicePeerExit $AuditStage.AdmissionPeer}
+                $meter.admissionLossDispatches=$meter.nativeDispatches
+                try{Confirm-RetainedLiveWork;throw 'Generated dead admission accepted.'}catch{
+                    if($_.Exception.Message -notmatch 'service-peer-actual-owner'){throw}
+                }
+                $meter.admissionLossVerified=$true
+                throw [InvalidOperationException]::new('retained-service-admission-lost-native-refused')
+            }
             if($null -ne $AuditStage){
                 $auditArgs=@{Namespace=$auditContext;AuditStore=$auditStore;Material=$AuditStage.Material;Archive=$copy['audit-immudb'];
                     Snapshot=$copy['audit-export'];Nonce=$Payload.capture.nonce;Point=$AuditStage.Point;ImageContext=$AuditStage.ImageContext;Historical=$AuditStage.Historical}
@@ -280,7 +297,12 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
             }
         }
     }catch{
-        if($Flow -cin @('inflight-sql-exit','inflight-restore-exit')){
+        if($meter.ContainsKey('admissionLossVerified') -and $meter.admissionLossVerified){
+            Assert-ImmuData ($_.Exception.Message -ceq 'retained-service-admission-lost-native-refused' -and
+                $meter.restores -eq 2 -and $null -eq $auditProof -and $null -eq $serverProof -and
+                $meter.nativeDispatches -eq $meter.admissionLossDispatches -and
+                $AuditStage.AdmissionPeer.holder.HasExited -and $AuditStage.AdmissionPeer.holder.ExitCode -ne 0) 'retained-service-loss-no-late-work'
+        }elseif($Flow -cin @('inflight-sql-exit','inflight-restore-exit')){
             if($_.Exception.GetBaseException() -isnot [OperationCanceledException]){throw}
             Confirm-RetainedInterruptedNative
         }elseif($Flow -cne 'inspection-exit' -or -not $meter.controllerLossObserved -or $meter.nativeDispatches -ne 0 -or
@@ -306,6 +328,8 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
     Assert-ImmuData ($meter.removeReplayRefused-and$replay.calls-eq0-and$meter.remove-eq1) 'retained-pg-removal-replay'
     return @{schema='fleetory.retained-postgres-target.v1';flow=$Flow;verified=$true;coordinator=$proof;containerId=$store.Id;
         inputCaptureSha256=$capturePin;frozenFourInputsBound=$true;nativePgRestores=$meter.restores;inventories=$inventories;
+        admissionLossAfterPgRestoreVerified=($meter.ContainsKey('admissionLossVerified') -and $meter.admissionLossVerified);
+        admissionOriginalExpiryMilliseconds=$(if($meter.ContainsKey('admissionExpiryMilliseconds')){$meter.admissionExpiryMilliseconds}else{0});
         copiedClaimsRefused=$meter.copiedClaimsRefused;cleanupVerified=$true;ownRemovalCalls=$meter.remove;baseImageRemoved=$false;
         removalReplayRefusedBeforeNativeCall=$true;baseImageId=$context.ImageId;unknownCreateOutcomeRecoveryVerified=$false;
         independentCreatorDeathCleanupVerified=$false;runtimeLoginVerified=($null -ne $serverProof);nativeAuditRestored=($null -ne $auditProof);serverStarted=($null -ne $serverProof);server=$serverProof;

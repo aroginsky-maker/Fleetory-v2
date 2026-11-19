@@ -25,7 +25,10 @@ RETAINED = (
     ('NativeServerPair.Tests.ps1', '-Profile v2-retained-server'),
     ('NativeServerPair.Tests.ps1', '-Profile v2-retained-historical-server'),
     ('NativeServerPair.Tests.ps1', '-Profile v2-retained-inflight'),
-    ('NativeServerPair.Tests.ps1', '-Profile v2-retained-restore-inflight'))
+    ('NativeServerPair.Tests.ps1', '-Profile v2-retained-restore-inflight'),
+    ('NativeServerPair.Tests.ps1', '-Profile v2-retained-service-use'),
+    ('NativeServerPair.Tests.ps1', '-Profile v2-retained-service-use-loss'),
+    ('NativeServerPair.Tests.ps1', '-Profile v2-retained-service-use-expiry'))
 PAIR_ADMISSION = (
     '      - name: Verify coherent native Server pair restore and lifecycle\n'
     '        shell: pwsh\n'
@@ -632,7 +635,7 @@ class RecoveryCiLayoutTests(unittest.TestCase):
 
 
     def test_combined_server_gates_cannot_be_omitted_duplicated_or_softened(self):
-        for profile in ('v2-retained-server', 'v2-retained-historical-server', 'v2-retained-inflight', 'v2-retained-restore-inflight'):
+        for profile in ('v2-retained-server', 'v2-retained-historical-server', 'v2-retained-inflight', 'v2-retained-restore-inflight', 'v2-retained-service-use', 'v2-retained-service-use-loss', 'v2-retained-service-use-expiry'):
             command='./tests/Fleetory.Tools.Tests/NativeServerPair.Tests.ps1 -Profile '+profile+' -Python (Get-Command python3).Source'
             self.refused(self.text.replace(command,'omitted',1))
             self.refused(self.text.replace('run: '+command,'continue-on-error: true\n        run: '+command,1))

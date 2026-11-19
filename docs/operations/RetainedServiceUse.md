@@ -27,12 +27,45 @@ result. Local consumed records do not provide independent anti-rollback custody.
 The image/probe/configuration commitments are frozen plan fields, not proof that
 a native process actually used them.
 
-The next required adapter must keep this context alive through the exact fixed
+The native adapter must keep this context alive through the exact fixed
 native consumer, independently bind its process/private transport and measured
 image/configuration, and exercise that same route with generated data and the
 existing recovery targets before any original artifact read. This library does
 not yet make the original executor ready. Do not replace that work with an
 unrelated generated-only service scope or infer launch authority from a PASS.
+
+The `v2-retained-service-use` test route now connects the same generated four
+artifacts to the existing PostgreSQL/immudb/Server target through a private
+parent/child pipe. The actual PowerShell parent retains its original in-process
+Docker custody objects; no process or Docker ownership is adopted from JSON.
+The Python child holds the consumed-use context through transfer, live status,
+bounded result, context close and observed process exit. Before capture, the
+parent builds its owned public image and creates disposable configuration;
+their image/probe/configuration commitments enter the captured plan. The target
+reconstructs and compares the configuration pin before native allocation.
+Work checks include the admission peer; cleanup continues to use the original
+custody objects even when admission is lost. Removal is not gated on a live
+work channel. Four generated source paths are replaced after private transfer.
+
+This route uses explicitly generated CI/local-Sonar parser fixtures. Their PASS
+fields are not real run attestations or authenticated consent. It therefore
+keeps `gateOriginAuthenticated`, `nativeResultAuthenticated` and
+`originalExecutorReady` false. Its controller-loss and expiry cases, Linux
+native execution and current CI/local Sonar acceptance must be verified before
+this prototype can enter the original-data path. Unit transport success alone
+does not prove native cleanup after a controller failure.
+
+The `v2-retained-service-use-loss` route requests the child's own exit only
+after both PostgreSQL restores and inventory checks. A generated-only mode is
+accepted only under this repository's exact UUID fixture path. The held child
+must exit 37; the next live-work check must refuse before audit restoration or
+Server launch. The surviving PowerShell owner removes both target containers
+and its image using its original custody objects. No caller-selected PID is
+signalled. `v2-retained-service-use-expiry` instead waits for the original
+108-second admission timer and actual child exit. It never replaces the clock,
+shortens that deadline or renews a lease. These three profiles are mandatory in
+the existing 15-minute retained Linux CI job; its deadline and the six-job
+aggregate remain unchanged.
 
 Portable tests use only generated files. They require real own process identity,
 four-file capture, flushed pre-open consumption, frozen packets, refusal after
