@@ -39,7 +39,7 @@ Output keeps `executionAuthorized=false`, `artifactBytesVerified=false` and
 `filesystemContainmentVerified=false`. Historical use of locally saved signing
 material does not grant reuse. No source password, private key, provider token or
 original data body is returned. Selected relative paths and digests are private
-operator output and must remain outside Git/public CI. A future byte reader must
+operator output and must remain outside Git/public CI. Each byte reader must
 bind this exact selection to its permitted purpose and recheck containment,
 ordinary-file identity, size and digest at the actual open. It must preserve the
 existing descriptor/link guards rather than invoke the broad six-file verifier.
@@ -63,7 +63,11 @@ native/.NET suites and closed original recovery operations need not be rerun.
 The [bounded native observation](BoundedAuditObservation.md) now tests the
 reader protocol on generated four-key/five-transaction and five-key/five-transaction
 datasets, retaining extra raw entry kinds as unreviewed state. It has not read the
-selected original archive. The [audit-only byte adapter](AuditArchiveInput.md)
+selected original archive. The [PostgreSQL pair byte adapter](PostgreSqlPairCapture.md)
+opens only the two selected coherent database references and keeps both frozen
+in memory. It shares exact report decoding with the audit-only adapter; the
+selector itself still performs no file access. This closes their byte-admission
+boundary on synthetic inputs, not original service execution or native restore. The [audit-only byte adapter](AuditArchiveInput.md)
 now exercises the exact-open file boundary on synthetic files, opening only the
 selected audit reference and keeping frozen bytes in memory. Original execution
 is still unperformed. Next establish independent known-event value expectations

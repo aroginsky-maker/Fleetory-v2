@@ -14,6 +14,7 @@ KINDS = frozenset(FILE_KINDS)
 NATIVE = ('application-postgres', 'signer-postgres', 'audit-immudb')
 MAX_REPORT = 64 * 1024
 MAX_BODY = 300 * 1024
+MAX_SELECTION = 16 * 1024
 
 
 @dataclass(frozen=True)
@@ -66,6 +67,37 @@ def native_path_profile(entries):
     packet.require(re.fullmatch(r'coherent-postgres-[a-f0-9]{32}/fleetory\.dump', app) is not None)
     packet.require(signer == app.rpartition('/')[0] + '/fleetory_signer.dump')
     packet.require(re.fullmatch(r'immudb-restore-[a-f0-9]{32}/backup\.bin', audit) is not None)
+
+
+def decode_report(selection_bytes, expected_pin):
+    pin = packet.hex_value(expected_pin)
+    packet.require(type(selection_bytes) in (bytes, bytearray) and 0 < len(selection_bytes) <= MAX_SELECTION)
+    frozen = bytes(selection_bytes)
+    packet.require(packet.digest(frozen) == pin)
+    record = packet.strict_json(frozen, MAX_SELECTION)
+    packet.require(type(record) is dict)
+    packet.require(type(record.get('selected')) is list and len(record['selected']) == 3)
+    references, paths, digests = [], set(), set()
+    for kind, item in zip(NATIVE, record['selected']):
+        packet.keys(item, 'kind path bytes sha256')
+        packet.require(item['kind'] == kind)
+        path = '/'.join(relative_parts(item['path'])).casefold()
+        digest = packet.hex_value(item['sha256'])
+        packet.require(type(item['bytes']) is int and 0 < item['bytes'] <= (64 * 1024 * 1024))
+        packet.require(path not in paths and digest not in digests)
+        paths.add(path)
+        digests.add(digest)
+        references.append(ArtifactReference(**item))
+    entries = {item.kind: dict(path=item.path) for item in references}
+    native_path_profile(entries)
+    pins = record.get('metadataPins')
+    packet.keys(pins, 'manifest database audit')
+    metadata = tuple((name, packet.hex_value(pins[name])) for name in sorted(pins))
+    # Reconstruct the exact selector report, including all false authority/scope flags.
+    expected = Selection(tuple(references), metadata).report()
+    packet.require(json.dumps(record, sort_keys=True, allow_nan=False) ==
+                   json.dumps(expected, sort_keys=True, allow_nan=False))
+    return Selection(tuple(references), metadata), pin
 
 
 def select(packets, pins):

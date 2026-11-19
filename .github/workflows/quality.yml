@@ -264,6 +264,10 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/audit_archive_input_tests.py
 
+      - name: Verify selected PostgreSQL pair byte capture on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/postgres_pair_capture_tests.py
+
       - name: Verify scoped PostgreSQL expectation source on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/audit_expectation_source_tests.py
@@ -794,6 +798,10 @@ jobs:
       - name: Verify audit-only pinned byte capture
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/audit_archive_input_tests.py
+
+      - name: Verify selected PostgreSQL pair byte capture
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/postgres_pair_capture_tests.py
 
       - name: Verify scoped PostgreSQL expectation source
         shell: pwsh

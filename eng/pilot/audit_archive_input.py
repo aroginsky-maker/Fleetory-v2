@@ -9,7 +9,7 @@ import fresh_server_pair as packet
 import recovery_files as files
 import retained_input_selection as selection
 
-MAX_SELECTION = 16 * 1024
+MAX_SELECTION = selection.MAX_SELECTION
 MAX_CAPTURE = packet.MAX_ARTIFACT
 
 
@@ -34,33 +34,8 @@ class CapturedAudit:
 
 
 def audit_reference(selection_bytes, expected_pin):
-    pin = packet.hex_value(expected_pin)
-    packet.require(type(selection_bytes) in (bytes, bytearray) and 0 < len(selection_bytes) <= MAX_SELECTION)
-    frozen = bytes(selection_bytes)
-    packet.require(packet.digest(frozen) == pin)
-    record = packet.strict_json(frozen, MAX_SELECTION)
-    packet.require(type(record) is dict)
-    packet.require(type(record.get('selected')) is list and len(record['selected']) == 3)
-    references, paths, digests = [], set(), set()
-    for kind, item in zip(selection.NATIVE, record['selected']):
-        packet.keys(item, 'kind path bytes sha256')
-        packet.require(item['kind'] == kind)
-        path = '/'.join(files.relative_parts(item['path'])).casefold()
-        digest = packet.hex_value(item['sha256'])
-        packet.require(type(item['bytes']) is int and 0 < item['bytes'] <= files.MAX_ARTIFACT)
-        packet.require(path not in paths and digest not in digests)
-        paths.add(path)
-        digests.add(digest)
-        references.append(selection.ArtifactReference(**item))
-    entries = {item.kind: dict(path=item.path) for item in references}
-    selection.native_path_profile(entries)
-    pins = record.get('metadataPins')
-    packet.keys(pins, 'manifest database audit')
-    metadata = tuple((name, packet.hex_value(pins[name])) for name in sorted(pins))
-    # Reconstruct the exact selector report, including all false authority/scope flags.
-    expected = selection.Selection(tuple(references), metadata).report()
-    packet.require(json.dumps(record, sort_keys=True, allow_nan=False) ==
-                   json.dumps(expected, sort_keys=True, allow_nan=False))
+    decoded, pin = selection.decode_report(selection_bytes, expected_pin)
+    references = decoded.artifacts
     audit = references[2]
     packet.require(64 <= audit.bytes <= MAX_CAPTURE)
     return audit, pin
