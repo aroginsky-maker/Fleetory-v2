@@ -4,6 +4,10 @@ import hashlib
 import json
 import sys
 
+if __name__ == '__main__' and sys.flags.isolated and sys.flags.no_site:
+    from pathlib import Path
+    sys.path.append(str(Path(__file__).resolve().parent))
+
 import fresh_server_pair as packet
 
 SCHEMA = 'fleetory.audit-native-observation.v1'

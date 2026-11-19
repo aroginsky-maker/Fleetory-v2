@@ -240,6 +240,34 @@ class NativeResponseDiagnosticTests(unittest.TestCase):
         self.assertEqual(str(raised.exception), 'Historical create gate refused: native-stderr.')
         self.assertTrue(all(stream.closed for stream in (process.stdin, process.stdout, process.stderr)))
 
+    def test_daemon_exit_precedes_client_input_half_close(self):
+        from unittest.mock import patch
+        response = b'HTTP/1.1 200 OK\r\nAPI-Version: 1.48\r\n\r\n'
+        process = self.Process(response)
+        def exited_with_duplex_input_open(timeout):
+            self.assertEqual(3, timeout)
+            self.assertFalse(process.stdin.closed)
+            return 0
+        process.wait = exited_with_duplex_input_open
+        with patch('subprocess.Popen', return_value=process):
+            actual, _ = gate.daemon_exchange(['fixed-generated-test-command'], {}, 'HEAD', '/_ping', b'')
+        self.assertEqual(response, actual)
+        self.assertTrue(all(stream.closed for stream in (process.stdin, process.stdout, process.stderr)))
+
+    def test_known_stderr_shapes_still_refuse_without_exposing_contents(self):
+        from unittest.mock import patch
+        response = b'HTTP/1.1 200 OK\r\nAPI-Version: 1.48\r\n\r\n'
+        for error, category in ((b'error while CloseWrite (stdin to stream): private-canary', 'native-stderr-close'),
+                                (b'error while CloseRead (stream to stdout): private-canary', 'native-stderr-close'),
+                                (b'sudo: private-canary', 'native-stderr-sudo')):
+            with self.subTest(category=category):
+                process = self.Process(response, error)
+                with patch('subprocess.Popen', return_value=process), self.assertRaises(gate.GateRefusal) as raised:
+                    gate.daemon_exchange(['fixed-generated-test-command'], {}, 'HEAD', '/_ping', b'')
+                self.assertEqual('Historical create gate refused: ' + category + '.', str(raised.exception))
+                self.assertNotIn('private-canary', str(raised.exception))
+                self.assertTrue(all(stream.closed for stream in (process.stdin, process.stdout, process.stderr)))
+
 
 class LiveGateTests(unittest.TestCase):
     def exercise(self, release, bad_auth=False):

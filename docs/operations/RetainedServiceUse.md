@@ -121,3 +121,23 @@ These libraries and generated lifecycle tests do not yet supply the complete
 fixed trusted operator entry or transitive code/command/resource inventory.
 Original executor readiness and original recovery remain false. The four
 previously authorized original archives are not opened by these tests.
+
+Retained Python work starts with `-I -S -B`: isolated mode ignores Python
+environment overrides and the working directory, and no-site mode prevents
+user/site startup hooks. The transcript/observation script entries add only
+their own fixed source directory after that bootstrap. Preparation, private
+consumer, inventory and observation invocations all use this prefix. Tests
+first prove that an ambient `sitecustomize` hook executes without protection,
+then verify its absence under isolation, including an invalid `PYTHONHOME`.
+This closes an ambient bootstrap path; it does not establish the complete
+transitive source/runtime inventory or original-executor readiness.
+
+The historical create gate keeps the native client's duplex input open until
+its original daemon connection exits; `Connection: close` terminates that
+response stream. The existing three-second exit wait and all reply bounds stay
+unchanged. Every nonempty native stderr still refuses the operation. Fixed
+close/sudo diagnostic categories identify only a shape, without printing its
+contents or granting ownership. The existing coordinator-exit subset requires
+one create, held original response, requester death before release, refusal of
+adoption/late replay, witness-owned cleanup and independent absence. A passing
+subset does not stand in for the full mandatory Linux controller suite.

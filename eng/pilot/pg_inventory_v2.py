@@ -5,6 +5,10 @@ import json
 import re
 import sys
 
+if __name__ == '__main__' and sys.flags.isolated and sys.flags.no_site:
+    from pathlib import Path
+    sys.path.append(str(Path(__file__).resolve().parent))
+
 import audit_archive as audit
 import fresh_server_pair as packet
 from identity_backup import literal

@@ -119,10 +119,10 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
         return Invoke-Docker $Arguments $InputBytes 15 -AllowFailure:$AllowFailure -ObserveProcess ${function:Observe-RetainedNativeProcess}
     }
     function Read-RetainedInventory([ValidateSet('fleetory','fleetory_signer')][string]$database){
-        $sql=Invoke-NativeBytes $Python @('-B',(Join-Path $pilot 'pg_inventory_v2.py'),'sql','--database',$database) -TimeoutSeconds 10
+        $sql=Invoke-NativeBytes $Python @('-I','-S','-B',(Join-Path $pilot 'pg_inventory_v2.py'),'sql','--database',$database) -TimeoutSeconds 10
         Assert-ImmuData ($sql.ExitCode-eq0-and[string]::IsNullOrWhiteSpace($sql.Stderr)) 'retained-pg-readback-sql'
         $native=Pg-Sql $database $sql.Stdout
-        $decoded=Invoke-NativeBytes $Python @('-B',(Join-Path $pilot 'pg_inventory_v2.py'),'readback','--database',$database) $native.StdoutBytes 10
+        $decoded=Invoke-NativeBytes $Python @('-I','-S','-B',(Join-Path $pilot 'pg_inventory_v2.py'),'readback','--database',$database) $native.StdoutBytes 10
         Assert-ImmuData ($decoded.ExitCode-eq0-and[string]::IsNullOrWhiteSpace($decoded.Stderr)) 'retained-pg-readback-parser'
         $value=$decoded.Stdout|ConvertFrom-Json -AsHashtable -Depth 20
         foreach($field in @('inventorySha256','securitySha256')){

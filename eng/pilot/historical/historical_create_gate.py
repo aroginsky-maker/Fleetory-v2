@@ -23,7 +23,7 @@ HOST_DEFAULTS = frozenset('Binds ContainerIDFile PortBindings VolumeDriver Volum
 
 REFUSAL_CODES = frozenset('policy profile-required profile-optional profile-extra request-auth request-target '
     'request-framing response-status response-header response-chunk response-length response-json response-fields response-id '
-    'response-warnings response-deadline native-exit native-stderr native-trailing'.split())
+    'response-warnings response-deadline native-exit native-stderr native-stderr-close native-stderr-sudo native-trailing'.split())
 
 
 class GateRefusal(ValueError):
@@ -237,10 +237,18 @@ def daemon_exchange(command, environment, method, target, body):
                 raise error
             require(False, 'response-json')
         require('reply' in result, 'response-length')
-        process.stdin.close()
+        # Connection: close ends the daemon side of this duplex stream. Keep
+        # client stdin open until that exit; closing it here races the Docker
+        # copier's CloseWrite with the daemon's own connection shutdown.
         process.wait(timeout=3)
         require(process.returncode == 0, 'native-exit')
-        require(not process.stderr.read(1025), 'native-stderr')
+        native_error = process.stderr.read(1025)
+        category = 'native-stderr'
+        if b'error while CloseRead (' in native_error or b'error while CloseWrite (' in native_error:
+            category = 'native-stderr-close'
+        elif native_error.startswith(b'sudo:'):
+            category = 'native-stderr-sudo'
+        require(not native_error, category)  # All nonempty stderr remains refused; no contents escape.
         require(not process.stdout.read(1), 'native-trailing')
         return result['reply']
     finally:

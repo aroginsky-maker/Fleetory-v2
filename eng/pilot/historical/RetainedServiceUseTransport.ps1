@@ -37,7 +37,7 @@ function Open-RetainedServiceUsePeer([string]$Repository,[string]$Python,[string
     $oldDirectory=[Environment]::CurrentDirectory
     try{
         [Environment]::CurrentDirectory=$InputRoot
-        $prepared=Invoke-NativeBytes $Python @('-B',(Join-Path $PSScriptRoot 'retained_service_peer.py'),'--prepare') ([Text.Encoding]::UTF8.GetBytes(($request|ConvertTo-Json -Depth 8 -Compress))) 20
+        $prepared=Invoke-NativeBytes $Python @('-I','-S','-B',(Join-Path $PSScriptRoot 'retained_service_peer.py'),'--prepare') ([Text.Encoding]::UTF8.GetBytes(($request|ConvertTo-Json -Depth 8 -Compress))) 20
         $category='unclassified'
         foreach($stage in @('metadata','parent-runtime','parent-identity')){
             if($prepared.Stderr.TrimEnd() -ceq ('Retained service preparation refused at '+$stage+'; no input contents logged.')){$category=$stage}
@@ -58,7 +58,7 @@ function Open-RetainedServiceUsePeer([string]$Repository,[string]$Python,[string
     try{
         $start=New-HistoricalChildStart $Python
         $start.WorkingDirectory=$InputRoot
-        foreach($part in @('-B',(Join-Path $PSScriptRoot 'retained_service_peer.py'),'--header-sha256',$header.sha256)){$start.ArgumentList.Add($part)}
+        foreach($part in @('-I','-S','-B',(Join-Path $PSScriptRoot 'retained_service_peer.py'),'--header-sha256',$header.sha256)){$start.ArgumentList.Add($part)}
         $peer.holder=[Diagnostics.Process]::Start($start);$null=$peer.holder.Handle
         $sealed.holder=$peer.holder
         $peer.childBirth=Get-HistoricalNativeBirth $peer.holder
