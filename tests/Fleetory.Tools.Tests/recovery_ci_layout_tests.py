@@ -19,7 +19,8 @@ PROVIDER = (
     ('PilotProvisioning.Tests.ps1', ''), ('IdentityBackup.Tests.ps1', ''),
     ('OpenBaoRaftRecovery.Tests.ps1', ''), ('NativeSignerBackend.Tests.ps1', ''),
     ('NativeJournalBackend.Tests.ps1', ''), ('NativeServerPair.Tests.ps1', ''),
-    ('NativeServerPair.Tests.ps1', '-Profile v2'), ('NativeServerPair.Tests.ps1', '-Profile v2-retained'))
+    ('NativeServerPair.Tests.ps1', '-Profile v2'), ('NativeServerPair.Tests.ps1', '-Profile v2-retained'),
+    ('NativeRetainedNamespace.Tests.ps1', ''))
 PAIR_ADMISSION = (
     '      - name: Verify coherent native Server pair restore and lifecycle\n'
     '        shell: pwsh\n'

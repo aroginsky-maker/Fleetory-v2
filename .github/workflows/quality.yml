@@ -1082,6 +1082,10 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/NativeServerPair.Tests.ps1 -Profile v2-retained -Python (Get-Command python3).Source
 
+      - name: Verify retained audit namespace custody and parent-loss refusal
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativeRetainedNamespace.Tests.ps1
+
   quality-gate:
     name: Strict build, tests, coverage and Sonar
     runs-on: ubuntu-24.04

@@ -65,3 +65,8 @@ are not used by these tests. The substage grants no execution or new sensitive
 authority and does not renew consumed one-shot permissions. Independent custody,
 human/physical Agent and full RPO/RTO remain open. Phase 7 stays incomplete and
 PR #2 stays draft/unmerged.
+
+The separate [coupled audit namespace profile](RetainedAuditNamespace.md) now
+checks native resource custody and parent-loss refusal on empty containers. It
+is not yet connected to this restore workflow and does not close audit/Server
+recovery.
