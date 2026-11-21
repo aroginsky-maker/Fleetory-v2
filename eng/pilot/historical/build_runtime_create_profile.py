@@ -4,14 +4,14 @@ from historical import historical_create_gate as gate
 
 PURPOSE='retained-public-offline-build.v1'
 TMPFS={'/work':'rw,noexec,nosuid,nodev,size=1073741824,uid=65534,gid=65534,mode=0700',
-       '/tmp':'rw,noexec,nosuid,nodev,size=67108864,uid=65534,gid=65534,mode=0700'}
+       '/run/fleetory-build-tmp':'rw,noexec,nosuid,nodev,size=67108864,uid=65534,gid=65534,mode=0700'}
 COMMAND=['--signal=TERM','--kill-after=5s','300s','/bin/sh','/payload/control/build.sh']
 
 
 def definition(image,nonce,context_sha256):
     gate.require(type(context_sha256) is str and re.fullmatch('[a-f0-9]{64}',context_sha256))
     return {'Image':image,'User':'65534:65534','Entrypoint':['/usr/bin/timeout'],
-            'Cmd':list(COMMAND),'WorkingDir':'/work',
+            'Cmd':list(COMMAND),'WorkingDir':'/work','Env':['TMPDIR=/run/fleetory-build-tmp'],
             'Labels':{'fleetory.public-build.session':nonce,'fleetory.public-build.profile':PURPOSE,
                       'fleetory.public-build.context':context_sha256},
             'HostConfig':{'NetworkMode':'none','ReadonlyRootfs':True,'AutoRemove':False,

@@ -10,7 +10,8 @@ The SDK request fixes UID/GID 65534, network none, a read-only root, no added
 capabilities or privileges, two CPUs, 2 GiB memory and 128 PIDs. Only the fixed
 300-second timeout, five-second kill grace and build script can be requested.
 The work/tmp tmpfs slots have fixed sizes, ownership and noexec/nosuid/nodev.
-There are no host binds, devices, ports, environment overrides or API operations
+TMPDIR is fixed to the private /run/fleetory-build-tmp mount. There are no
+host binds, devices, ports, arbitrary environment overrides or API operations
 for start, exec or deletion. Invalid attempts cannot be repaired or replayed.
 
 AutoRemove is deliberately false in this separate request profile: a future

@@ -88,10 +88,15 @@ class BuildPolicyTests(unittest.TestCase):
         with self.assertRaises(old.gate.GateRefusal):create(policy(),request)
 
     def test_optional_empty_defaults_do_not_admit_values(self):
-        request=body();request['Env']=None;request['HostConfig']['Binds']=[]
+        request=body();request['Hostname']=None;request['HostConfig']['Binds']=[]
         self.assertEqual('create',create(policy(),request))
         request['HostConfig']['Binds']=['/tmp:/work']
         with self.assertRaises(old.gate.GateRefusal):create(policy(),request)
+
+    def test_private_tmp_environment_is_fixed(self):
+        for value in (None,[],['TMPDIR=/tmp'],['TMPDIR=/run/fleetory-build-tmp','TOKEN=expanded']):
+            request=body();request['Env']=value
+            with self.assertRaises(old.gate.GateRefusal):create(policy(),request)
 
     def test_create_body_cannot_add_ownership_or_root_claim(self):
         for key in ('cleanupAuthorized','owner','profile','root','command'):
