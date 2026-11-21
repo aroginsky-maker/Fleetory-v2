@@ -149,11 +149,14 @@ def validate(text):
         assert blocks[key].count(step) == 1
         assert text.count('./tests/Fleetory.Tools.Tests/RetainedDataHostBoundary.Tests.ps1') == 2
     for key, platform in (('windows-tls-chain', ' on Windows'), ('quality', '')):
-        step = ('      - name: Verify bounded public build source transport' + platform + '\n'
-                '        shell: pwsh\n'
-                '        run: ./tests/Fleetory.Tools.Tests/PublicBuildSourceTransport.Tests.ps1\n')
-        assert blocks[key].count(step) == 1
-        assert text.count('./tests/Fleetory.Tools.Tests/PublicBuildSourceTransport.Tests.ps1') == 2
+        for title,filename in (('bounded public build source transport','PublicBuildSourceTransport.Tests.ps1'),
+                ('live public build source transaction','PublicBuildSourceTransaction.Tests.ps1')):
+            command = './tests/Fleetory.Tools.Tests/' + filename
+            step = ('      - name: Verify ' + title + platform + '\n'
+                    '        shell: pwsh\n'
+                    '        run: ' + command + '\n')
+            assert blocks[key].count(step) == 1
+            assert text.count(command) == 2
     for key, platform, executable in (('windows-tls-chain', ' on Windows', 'python'), ('quality', '', 'python3')):
         for title, filename in (('held audit control namespace identity', 'audit_control_identity_tests.py'),
                 ('four frozen retained service inputs', 'retained_service_inputs_tests.py'),
@@ -761,11 +764,12 @@ class RecoveryCiLayoutTests(unittest.TestCase):
                 for option in ('if: false', 'continue-on-error: true'):
                     self.refused(self.text.replace('run: ' + command, option + '\n        run: ' + command, 1))
 
-        command = './tests/Fleetory.Tools.Tests/PublicBuildSourceTransport.Tests.ps1'
-        self.refused(self.text.replace(command, 'omitted', 1))
-        self.refused(self.text.replace(command, command + '\n          ' + command, 1))
-        for option in ('if: false', 'continue-on-error: true'):
-            self.refused(self.text.replace('run: ' + command, option + '\n        run: ' + command, 1))
+        for filename in ('PublicBuildSourceTransport.Tests.ps1','PublicBuildSourceTransaction.Tests.ps1'):
+            command = './tests/Fleetory.Tools.Tests/' + filename
+            self.refused(self.text.replace(command, 'omitted', 1))
+            self.refused(self.text.replace(command, command + '\n          ' + command, 1))
+            for option in ('if: false', 'continue-on-error: true'):
+                self.refused(self.text.replace('run: ' + command, option + '\n        run: ' + command, 1))
 
 
 if __name__ == '__main__':

@@ -317,6 +317,9 @@ jobs:
       - name: Verify bounded public build source transport on Windows
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/PublicBuildSourceTransport.Tests.ps1
+      - name: Verify live public build source transaction on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/PublicBuildSourceTransaction.Tests.ps1
 
       - name: Verify closed public SDK context on Windows
         shell: pwsh
@@ -922,6 +925,9 @@ jobs:
       - name: Verify bounded public build source transport
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/PublicBuildSourceTransport.Tests.ps1
+      - name: Verify live public build source transaction
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/PublicBuildSourceTransaction.Tests.ps1
 
       - name: Verify closed public SDK context
         shell: pwsh
