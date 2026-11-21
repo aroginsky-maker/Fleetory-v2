@@ -91,12 +91,27 @@ class IntakeTests(unittest.TestCase):
         self.assertFalse(thread.is_alive());self.assertEqual(['refused'],errors)
 
     def test_original_expiry_and_sdk_budget_are_not_renewed(self):
-        value=self.capture();started=intake._LIVE[value]['started'];value.take()
-        with patch.object(intake.time,'monotonic',return_value=started+115):
+        value=self.capture();started=intake._LIVE[value]['startedNs'];value.take()
+        with patch.object(intake.time,'monotonic_ns',return_value=started+115_000_000_000):
             with self.assertRaises(ValueError):value.check_before_sdk()
         self.assertTrue(value.report()['sdkAttempted']);self.assertFalse(value.report()['sdkAdmitted'])
         with self.assertRaises(ValueError):value.check_before_sdk()
-        with patch.object(intake.time,'monotonic',return_value=started+420):
+        with patch.object(intake.time,'monotonic_ns',return_value=started+420_000_000_000):
+            with self.assertRaises(ValueError):value.report()
+
+    def test_integer_nanosecond_deadline_boundaries_and_backwards_clock(self):
+        for boundary,action in ((420_000_000_000,'report'),(115_000_000_000,'check_before_sdk')):
+            for delta in (-1,0,1):
+                with self.subTest(boundary=boundary,delta=delta):
+                    value=self.capture();value.take();started=intake._LIVE[value]['startedNs']
+                    self.assertIs(type(started),int)
+                    with patch.object(intake.time,'monotonic_ns',return_value=started+boundary+delta):
+                        if delta<0:getattr(value,action)()
+                        else:
+                            with self.assertRaises(ValueError):getattr(value,action)()
+                    self.assertEqual(started,intake._LIVE[value]['startedNs'])
+        value=self.capture();started=intake._LIVE[value]['startedNs']
+        with patch.object(intake.time,'monotonic_ns',return_value=started-1):
             with self.assertRaises(ValueError):value.report()
 
     def test_crl_freshness_is_rechecked_immediately_before_sdk(self):
