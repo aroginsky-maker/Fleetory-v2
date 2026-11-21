@@ -295,6 +295,9 @@ jobs:
       - name: Verify live retained service use on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/retained_service_use_tests.py
+      - name: Verify distinct original four-input purpose on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/original_four_use_tests.py
 
       - name: Verify original inventory metadata mapping on Windows
         shell: pwsh
@@ -903,6 +906,9 @@ jobs:
       - name: Verify live retained service use
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/retained_service_use_tests.py
+      - name: Verify distinct original four-input purpose
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/original_four_use_tests.py
 
       - name: Verify original inventory metadata mapping
         shell: pwsh
