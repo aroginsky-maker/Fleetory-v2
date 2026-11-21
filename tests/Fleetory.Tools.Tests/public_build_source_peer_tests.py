@@ -28,7 +28,7 @@ class PeerTests(unittest.TestCase):
         self.expected=self.fixture.capture().take()
 
     def start(self,mode='normal'):
-        process=subprocess.Popen([sys.executable,'-I','-S','-B',str(Path(__file__).with_name('PublicBuildSourceFixture.py')),str(self.root),mode],
+        process=subprocess.Popen([sys.executable,'-I','-S','-B',str(Path(__file__).with_name('PublicBuildSourceFixture.py')),str(self.root.resolve(strict=True)),mode],
             stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE)
         self.addCleanup(self.close,process)
         return process
@@ -49,17 +49,23 @@ class PeerTests(unittest.TestCase):
 
     def test_actual_child_transfers_exact_frame_and_closes_without_sdk_permit(self):
         p=self.start();raw,error=p.communicate(input=b'',timeout=10)
-        self.assertEqual(0,p.returncode);self.assertEqual(b'',error);self.assertEqual(b'',self.check(raw))
+        self.assertEqual(0,p.returncode,error.decode('utf-8','replace')[:2048]);self.assertEqual(b'',error);self.assertEqual(b'',self.check(raw))
+
+    def test_parent_canonicalizes_owned_root_before_child_scope_check(self):
+        self.root=self.root/'source'/'..'
+        p=self.start();raw,error=p.communicate(input=b'',timeout=10)
+        self.assertEqual(0,p.returncode,error.decode('utf-8','replace')[:2048])
+        self.assertEqual(b'',error);self.assertEqual(b'',self.check(raw))
 
     def test_one_request_emits_one_permit_from_live_capsule(self):
         p=self.start();raw,error=p.communicate(input=peer.REQUEST,timeout=10)
-        self.assertEqual(0,p.returncode);self.assertEqual(b'',error);self.assertEqual(peer.PERMIT,self.check(raw))
+        self.assertEqual(0,p.returncode,error.decode('utf-8','replace')[:2048]);self.assertEqual(b'',error);self.assertEqual(peer.PERMIT,self.check(raw))
 
     def test_unknown_or_replayed_control_is_refused(self):
         for message in (b'X',b'SS',b'SX'):
             with self.subTest(message=repr(message)):
                 p=self.start();raw,error=p.communicate(input=message,timeout=10)
-                self.assertEqual(37,p.returncode)
+                self.assertEqual(37,p.returncode,error.decode('utf-8','replace')[:2048])
                 self.assertIn(self.check(raw),(b'',peer.PERMIT))
                 self.assertEqual(b'Public input fixture refused; no contents logged.\n',error)
 
