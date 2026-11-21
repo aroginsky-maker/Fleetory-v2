@@ -18,7 +18,8 @@ class CatalogTests(unittest.TestCase):
         self.temp=tempfile.TemporaryDirectory(prefix='fleetory-code-catalog-')
         self.addCleanup(self.temp.cleanup);self.root=Path(self.temp.name)
         names=(*catalog.lease.prep.ROOTS,*('tests/Fleetory.Tools.Tests/'+n for n in catalog.HELPERS),
-               'eng/pilot/helper.py','eng/pilot/.gitattributes','src/Product/Product.csproj','src/Product/Code.cs')
+               'eng/pilot/helper.py','eng/pilot/.gitattributes','eng/pilot/public_build/context.py',
+               'eng/pilot/public_build/trust.py','src/Product/Product.csproj','src/Product/Code.cs')
         self.snapshot=dict(schema='fleetory.historical-code-snapshot.v2',revision='1'*40,sourcePins={})
         for name in names:
             path=self.root/name;path.parent.mkdir(parents=True,exist_ok=True)
@@ -32,6 +33,13 @@ class CatalogTests(unittest.TestCase):
         with catalog.lease.hold(self.root,plan,H(plan),names) as lease:
             self.assertEqual(len(names),lease.report()['files'])
             self.assertFalse(lease.report()['originalDataUseAuthorized'])
+
+    def test_unsupported_source_basename_is_refused_before_content_or_lease_open(self):
+        path=self.root/'eng/pilot/public_build/__init__.py'
+        path.write_bytes(b'generated namespace marker')
+        with patch.object(Path,'read_bytes') as read,patch.object(catalog.lease,'_HeldCode') as held:
+            with self.assertRaises(REFUSALS):catalog.names(self.root)
+            read.assert_not_called();held.assert_not_called()
 
     def test_unlisted_filesystem_code_cannot_enter_a_git_snapshot_plan(self):
         unexpected=self.root/'src/Product/unlisted.json';unexpected.write_bytes(b'generated-canary')

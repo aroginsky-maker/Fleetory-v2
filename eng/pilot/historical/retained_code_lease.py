@@ -30,6 +30,10 @@ def _name(value):
     packet.require(re.fullmatch(r'(?:eng|src|tests/Fleetory\.Tools\.Tests)/[A-Za-z0-9_./-]+', value)
                    and not any(part in ('', '.', '..') for part in value.split('/'))
                    and (Path(value).suffix in EXTENSIONS or Path(value).name == '.gitattributes'))
+    # Match the actual held-file reader before emitting a plan. Namespace-only
+    # directories need no __init__.py; unsupported basenames must fail preflight.
+    if Path(value).name != '.gitattributes':
+        files.relative_parts(Path(value).name)
     return value
 
 

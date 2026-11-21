@@ -308,6 +308,10 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/retained_code_catalog_tests.py
 
+      - name: Verify live public build input capture on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/public_build_intake_tests.py
+
       - name: Verify closed public SDK context on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/public_build_context_tests.py
@@ -902,6 +906,10 @@ jobs:
       - name: Verify fixed retained source catalog
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/retained_code_catalog_tests.py
+
+      - name: Verify live public build input capture
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/public_build_intake_tests.py
 
       - name: Verify closed public SDK context
         shell: pwsh
