@@ -100,7 +100,7 @@ build artifacts, operator paths and one-use records are not repository inputs.
 
 ## Closed public context byte policy
 
-`public_build_context.py` renders the no-RUN Dockerfile and fixed serial offline
+`public_build/context.py` renders the no-RUN Dockerfile and fixed serial offline
 restore/publish script, FIFO output handoff and strict NuGet trust configuration.
 The SDK reference is a fixed digest. Source, package and public CRL byte sets
 must exactly match the expected pins; the rendered tar is deterministic USTAR.
@@ -108,7 +108,7 @@ Validation compares the entire canonical archive, refusing changed controls,
 extra headers, links, case aliases and appended bytes. Source/package counts,
 individual sizes and the separate 64-MiB build-context ceiling are bounded.
 
-`public_build_trust.py` fixes signatureValidationMode=require, the local-only
+`public_build/trust.py` fixes signatureValidationMode=require, the local-only
 package source, reviewed repository signer fingerprints and owner set, with
 allowUntrustedRoot=false. Public fingerprints carry no private key material.
 CRL windows must be timezone-aware and retain more than 420 seconds of validity
@@ -122,3 +122,7 @@ grant. A supplied manifest and matching archive cannot authenticate source
 origin or authorize a build. Portable synthetic tests cover deterministic bytes,
 control/trust changes, mismatched pins, stale/future CRLs and case aliases on
 both CI platforms. They do not qualify original releases or restored services.
+
+The SDK byte policies live in the `public_build` package. They do not extend the
+legacy public cleanup controller's fixed 63-file source inventory or its command
+namespace. The retained source catalog records this package independently.

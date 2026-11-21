@@ -9,7 +9,7 @@ import re
 import tarfile
 
 import hashlib
-import public_build_trust as trust
+from . import trust
 
 SDK = 'mcr.microsoft.com/dotnet/sdk@sha256:8dd1a57fe6b7b8b1b357635db67e272c2f9e9d76d1dd0a32711c4c33c57d7b43'
 PROJECT = 'eng/ServerBackendProbe/ServerBackendProbe.csproj'
