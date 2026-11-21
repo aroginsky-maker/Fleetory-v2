@@ -112,6 +112,18 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/AuditDataResourceOwnership.Tests.ps1
 
+      - name: Verify public SDK lifecycle policies on Windows
+        shell: pwsh
+        run: |
+          ./tests/Fleetory.Tools.Tests/PublicBuildImageTransaction.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Public SDK lifecycle policy failed.' }
+          ./tests/Fleetory.Tools.Tests/PublicBuildSdkTransaction.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Public SDK lifecycle policy failed.' }
+          ./tests/Fleetory.Tools.Tests/PublicBuildSdkClient.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Public SDK lifecycle policy failed.' }
+          ./tests/Fleetory.Tools.Tests/PublicBuildNativeEnvironment.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Public SDK lifecycle policy failed.' }
+
       - name: Verify held audit control namespace identity on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/audit_control_identity_tests.py
@@ -686,6 +698,18 @@ jobs:
       - name: Verify audit resource ownership
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/AuditDataResourceOwnership.Tests.ps1
+
+      - name: Verify public SDK lifecycle policies
+        shell: pwsh
+        run: |
+          ./tests/Fleetory.Tools.Tests/PublicBuildImageTransaction.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Public SDK lifecycle policy failed.' }
+          ./tests/Fleetory.Tools.Tests/PublicBuildSdkTransaction.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Public SDK lifecycle policy failed.' }
+          ./tests/Fleetory.Tools.Tests/PublicBuildSdkClient.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Public SDK lifecycle policy failed.' }
+          ./tests/Fleetory.Tools.Tests/PublicBuildNativeEnvironment.Tests.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Public SDK lifecycle policy failed.' }
 
       - name: Verify held audit control namespace identity
         shell: pwsh

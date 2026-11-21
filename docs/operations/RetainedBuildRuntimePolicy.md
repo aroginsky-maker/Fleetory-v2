@@ -61,3 +61,38 @@ refusal and consumed unknown outcomes. These are synthetic native replies.
 They do not prove an actual SDK build or independent cleanup after creator loss.
 The independent worker that owns image build and the entire SDK lifecycle is
 still required before native execution can be enabled.
+
+
+## Trusted worker lifecycle APIs
+
+The image transaction and SDK transaction now provide trusted in-process worker
+APIs. The native client pins and holds its executable, creates an exclusive empty
+Docker config, fixes the local endpoint, and uses an opt-in clean classic-builder
+environment. It captures the actual policy and native function objects when
+constructed; later ambient function replacement cannot redirect those callbacks.
+Existing native-process callers keep their original environment.
+The SDK client can bind once to the actual live public-image context and client.
+It fixes create arguments, consumes creation/start/release/removal attempts and
+refuses unknown IDs, arbitrary exec, foreign paths and repaired create requests.
+
+SDK output lives in tmpfs. After publish, the fixed control script must mark
+`/work/publish.ready` and wait on `/work/release`. The same worker reads only that
+marker, captures `tar` bytes from `/work/output`, releases the FIFO once, observes
+exit zero, and closes the container claim before the enclosing image transaction
+closes its image claim. Unsupported Docker cp access to tmpfs is not exposed.
+Both transactions retain their full native replies and use the original objects;
+metadata and names cannot reconstruct those claims after the worker dies.
+
+These APIs do not create a public native command entry point. A future launcher
+must validate a closed no-RUN Dockerfile, fixed controls, bounded source/package
+and trust inputs, freshness, and a trusted live byte intake before any build.
+An arbitrary archive plus its supplied hash cannot authorize native work.
+The independently surviving process and original-purpose admission still require
+their own integration. General creator, daemon or host death is not covered.
+
+Local prototypes exercised real offline publish and controller EOF/death/expiry
+cleanup with pinned public inputs and strict signed-package/revocation checks.
+Those operator records are separate from this commit's portable model tests.
+They do not establish original release provenance, original-data execution,
+production approvals or completion of Phase 7. Public vendor CRLs, certificates,
+build artifacts, operator paths and one-use records are not repository inputs.

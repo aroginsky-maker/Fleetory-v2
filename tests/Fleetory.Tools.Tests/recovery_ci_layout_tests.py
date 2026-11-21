@@ -130,6 +130,19 @@ def validate(text):
     assert provider.count('dotnet restore ./eng/ServerBackendProbe/ServerBackendProbe.csproj') == 1
     assert text.count('python3 -B ./tests/Fleetory.Tools.Tests/fresh_server_pair_tests.py') == 1
     for key, platform in (('windows-tls-chain', ' on Windows'), ('quality', '')):
+        step = ('      - name: Verify public SDK lifecycle policies' + platform + '\n'
+                '        shell: pwsh\n'
+                '        run: |\n')
+        for filename in ('PublicBuildImageTransaction', 'PublicBuildSdkTransaction',
+                         'PublicBuildSdkClient', 'PublicBuildNativeEnvironment'):
+            step += ('          ./tests/Fleetory.Tools.Tests/' + filename + '.Tests.ps1\n'
+                     "          if ($LASTEXITCODE -ne 0) { throw 'Public SDK lifecycle policy failed.' }\n")
+        block = blocks[key]
+        assert block.count(step) == 1
+        start = block.index(step)
+        end = block.find('      - name:', start + len(step))
+        assert block[start:end if end >= 0 else len(block)].strip() == step.strip()
+    for key, platform in (('windows-tls-chain', ' on Windows'), ('quality', '')):
         step = ('      - name: Verify generated data host callback boundary' + platform + '\n'
                 '        shell: pwsh\n'
                 '        run: ./tests/Fleetory.Tools.Tests/RetainedDataHostBoundary.Tests.ps1\n')
@@ -713,6 +726,20 @@ class RecoveryCiLayoutTests(unittest.TestCase):
             self.refused(self.text.replace(command,command+'\n          '+command,1))
             for option in ('if: false','continue-on-error: true'):
                 self.refused(self.text.replace('        run: '+command,'        '+option+'\n        run: '+command,1))
+
+
+
+    def test_public_sdk_lifecycle_gates_are_required_once_without_soft_failure(self):
+        for key in ('windows-tls-chain', 'quality'):
+            block = jobs(self.text)[key]
+            for filename in ('PublicBuildImageTransaction', 'PublicBuildSdkTransaction',
+                             'PublicBuildSdkClient', 'PublicBuildNativeEnvironment'):
+                command = './tests/Fleetory.Tools.Tests/' + filename + '.Tests.ps1'
+                self.refused(self.text.replace(block, block.replace(command, 'omitted', 1)))
+                self.refused(self.text.replace(block, block.replace(command, command + '\n          ' + command, 1)))
+            marker = '        run: |\n          ./tests/Fleetory.Tools.Tests/PublicBuildImageTransaction'
+            for option in ('if: false', 'continue-on-error: true'):
+                self.refused(self.text.replace(block, block.replace(marker, '        ' + option + '\n' + marker, 1)))
 
 
 if __name__ == '__main__':

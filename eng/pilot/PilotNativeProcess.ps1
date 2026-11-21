@@ -1,7 +1,7 @@
 #requires -Version 7.3
 # Bounded binary stdin/stdout; callers must keep credentials out of Arguments.
 . (Join-Path $PSScriptRoot 'PilotCaptureStream.ps1')
-function Invoke-NativeBytes([string] $Executable, [string[]] $Arguments, [byte[]] $InputBytes = $null, [int] $TimeoutSeconds = 90, [scriptblock] $ObserveProcess = $null) {
+function Invoke-NativeBytes([string] $Executable, [string[]] $Arguments, [byte[]] $InputBytes = $null, [int] $TimeoutSeconds = 90, [scriptblock] $ObserveProcess = $null, [switch] $ClassicDockerEnvironment) {
     $start = [Diagnostics.ProcessStartInfo]::new()
     $start.FileName = $Executable
     $start.UseShellExecute = $false
@@ -11,6 +11,11 @@ function Invoke-NativeBytes([string] $Executable, [string[]] $Arguments, [byte[]
     $start.RedirectStandardInput = $true
     if ($TimeoutSeconds -lt 1 -or $TimeoutSeconds -gt 120) { throw 'Native process timeout is outside bounds.' }
     if ($null -ne $InputBytes -and $InputBytes.Length -gt 67108864) { throw 'Native process input is outside bounds.' }
+    if ($ClassicDockerEnvironment) {
+        $start.Environment.Clear()
+        if ($IsWindows) { $start.Environment['SystemRoot'] = [Environment]::GetEnvironmentVariable('SystemRoot') }
+        $start.Environment['DOCKER_BUILDKIT'] = '0'
+    }
     foreach ($name in @('DOCKER_HOST','DOCKER_CONTEXT','DOCKER_TLS_VERIFY','DOCKER_CERT_PATH')) {
         $null = $start.Environment.Remove($name)
     }
