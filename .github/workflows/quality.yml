@@ -296,6 +296,10 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/retained_code_catalog_tests.py
 
+      - name: Verify separate public build create policy on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/build_runtime_create_profile_tests.py
+
       - name: Verify retained source-only entry points on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/retained_source_bootstrap_tests.py
@@ -870,6 +874,10 @@ jobs:
       - name: Verify fixed retained source catalog
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/retained_code_catalog_tests.py
+
+      - name: Verify separate public build create policy
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/build_runtime_create_profile_tests.py
 
       - name: Verify retained source-only entry points
         shell: pwsh

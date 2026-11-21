@@ -143,6 +143,7 @@ def validate(text):
                 ('original inventory metadata mapping', 'retained_expected_inventory_tests.py'),
                 ('held retained source handles', 'retained_code_lease_tests.py'),
                 ('fixed retained source catalog', 'retained_code_catalog_tests.py'),
+                ('separate public build create policy', 'build_runtime_create_profile_tests.py'),
                 ('retained source-only entry points', 'retained_source_bootstrap_tests.py'),
                 ('isolated retained Python bootstrap', 'retained_python_isolation_tests.py'),
                 ('owned process identity and lifetime fence', 'audit_process_fence_tests.py'),
@@ -384,6 +385,13 @@ class RecoveryCiLayoutTests(unittest.TestCase):
                 self.refused(self.text.replace(command, 'omitted', 1))
                 self.refused(self.text.replace(command, command + '\n          ' + command, 1))
                 self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
+
+    def test_separate_build_create_policy_gate_cannot_be_softened(self):
+        for executable in ('python','python3'):
+            command=executable+' -B ./tests/Fleetory.Tools.Tests/build_runtime_create_profile_tests.py'
+            self.refused(self.text.replace(command,'omitted',1))
+            self.refused(self.text.replace(command,command+'\n          '+command,1))
+            self.refused(self.text.replace('run: '+command,'continue-on-error: true\n        run: '+command,1))
 
     def test_source_only_entry_gate_cannot_be_omitted_duplicated_or_softened(self):
         for executable in ('python', 'python3'):

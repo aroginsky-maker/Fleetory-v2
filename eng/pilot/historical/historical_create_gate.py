@@ -137,13 +137,18 @@ def select_api_version(server, client):
 
 class CreateGatePolicy:
     """An invalid mutation consumes this instance too; it can never be repaired or retried."""
+    _name_prefix = 'fleetory-immu-store-'
+
+    def _validate_body(self, body):
+        validate_create(body, self.image, self.nonce)
+
     def __init__(self, image, nonce, token, version):
         require(type(image) is str and re.fullmatch(r'sha256:[a-f0-9]{64}', image) is not None)
         require(type(nonce) is str and str(uuid.UUID(nonce)) == nonce and uuid.UUID(nonce).int != 0)
         require(type(token) is str and re.fullmatch(r'[a-f0-9]{64}', token) is not None)
         require(type(version) is str and re.fullmatch(r'1\.[0-9]{2}', version) is not None)
         self.image, self.nonce, self.token, self.version = image, nonce, token, version
-        self.name = 'fleetory-immu-store-' + nonce.replace('-', '')
+        self.name = self._name_prefix + nonce.replace('-', '')
         self.attempted = False
         self.pings = 0
 
@@ -160,7 +165,7 @@ class CreateGatePolicy:
         require(method == 'POST' and
                 target == '/v' + self.version + '/containers/create?name=' + self.name, 'request-target')
         require(headers.get('content-type') == 'application/json')
-        validate_create(body, self.image, self.nonce)
+        self._validate_body(body)
         return 'create'
 
 

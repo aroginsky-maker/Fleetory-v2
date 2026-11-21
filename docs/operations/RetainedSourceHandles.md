@@ -58,3 +58,8 @@ packages, or source execution provenance, and does not move the pre-admission
 image/probe build under the source lease. Complete execution closure and the
 fixed original-purpose operator remain open; source-only loading grants no
 new data, secret, PKI or native-resource authority.
+
+The [separate public build create policy](RetainedBuildRuntimePolicy.md) checks
+only a closed SDK request. It does not supply live builder/witness custody or
+prove SDK execution, offline publication, controller-loss cleanup or original
+use. Historical/public-v1 limits and the default native gate remain fixed.
