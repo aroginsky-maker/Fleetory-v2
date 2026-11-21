@@ -163,6 +163,7 @@ def validate(text):
                 ('private frozen service payload', 'retained_service_payload_tests.py'),
                 ('live retained service use', 'retained_service_use_tests.py'),
                 ('distinct original four-input purpose', 'original_four_use_tests.py'),
+                ('fixed retained private exchange', 'retained_private_session_tests.py'),
                 ('original inventory metadata mapping', 'retained_expected_inventory_tests.py'),
                 ('held retained source handles', 'retained_code_lease_tests.py'),
                 ('fixed retained source catalog', 'retained_code_catalog_tests.py'),
@@ -774,11 +775,12 @@ class RecoveryCiLayoutTests(unittest.TestCase):
 
     def test_original_four_input_purpose_gates_cannot_be_omitted_duplicated_or_softened(self):
         for executable in ('python','python3'):
-            command=executable+' -B ./tests/Fleetory.Tools.Tests/original_four_use_tests.py'
-            self.refused(self.text.replace(command,'omitted',1))
-            self.refused(self.text.replace(command,command+'\n          '+command,1))
-            for option in ('if: false','continue-on-error: true'):
-                self.refused(self.text.replace('run: '+command,option+'\n        run: '+command,1))
+            for filename in ('original_four_use_tests.py','retained_private_session_tests.py'):
+                command=executable+' -B ./tests/Fleetory.Tools.Tests/'+filename
+                self.refused(self.text.replace(command,'omitted',1))
+                self.refused(self.text.replace(command,command+'\n          '+command,1))
+                for option in ('if: false','continue-on-error: true'):
+                    self.refused(self.text.replace('run: '+command,option+'\n        run: '+command,1))
 
 
 if __name__ == '__main__':

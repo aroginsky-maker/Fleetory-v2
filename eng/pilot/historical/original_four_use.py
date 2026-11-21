@@ -92,7 +92,7 @@ class LiveOriginalFour:
         packet.require(state['parent'].snapshot()['state']=='live')
         state['attempt'].check();state['policy'].check()
         packet.require(state['inventory_check']() is True)
-        state['inner'].report()
+        return state['inner'].report()
 
     def capture(self):
         state = self._registered()
@@ -114,9 +114,10 @@ class LiveOriginalFour:
         return result
 
     def report(self):
-        state = self._registered();self._check(state)
+        state = self._registered();inner=self._check(state)
         return dict(schema='fleetory.original-four-use.v1',purpose=PURPOSE,nonce=state['nonce'],stage=state['stage'],
                     exactFourArtifactsPinned=True,actualParentIdentityBound=True,distinctAttemptFlushed=True,
+                    heldProcessIdentity=inner['heldProcessIdentity'],
                     existingDataConsentAuthenticated=False,executionInventoryOriginAuthenticated=False,
                     nativeResultAuthenticated=False,nativeLaunchAuthorized=False,executionAuthorized=False,
                     fullSystemRecoveryVerified=False,phase7Complete=False)

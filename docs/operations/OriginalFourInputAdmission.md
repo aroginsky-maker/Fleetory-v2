@@ -13,3 +13,10 @@ This library does not authenticate session consent, execution-inventory origin o
 The required Windows/Linux gate rehearses ten cases on generated inputs with an actual read-only held parent and real exclusive records. It checks pre-open refusals and exact frozen-packet transfer; it starts no native service and reads no original backups. The private native-consumer bridge, its exact generated native-target rehearsal, current accepted CI/source/probe/image/configuration binding and the protected original four-file execution plan remain required before opening the already-authorized originals. No original root, artifact names or byte pins are embedded in repository code.
 
 Provider/identity inputs, original credentials or private PKI, live issuers and production tokens are excluded. Independent WORM/custody and real external actors, accepted original release/configuration continuity and full-system RPO/RTO remain separate open Baseline requirements. This purpose does not complete Phase7.
+
+
+## Fixed private exchange integration
+
+`retained_private_session.serve` owns the common capture/status/result/close exchange. The existing retained peer now uses this shared loop with its original factory; its header, four modes, command set, frame bounds and 256-status ceiling remain unchanged. A wire message cannot select a factory or new purpose. Only trusted host code supplies the use factory, actual held parent, source check and private I/O functions.
+
+The distinct-purpose context now exposes its inner reader's actual held identity for the same bound frame. Six exchange tests exercise both use factories with real generated admission and an actual held parent; private packet bytes stay in memory. The tests enforce unchanged frame schemas, exact four-packet transfer, nonce checks and refusal of factory selectors, status replay and result mismatch. This shared loop is not yet a new original-data peer entry point or a completed native-consumer bridge; neither generated exchange tests nor legacy wire compatibility authorize original input reads.

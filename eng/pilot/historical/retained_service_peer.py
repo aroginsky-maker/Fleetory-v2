@@ -12,6 +12,7 @@ import threading
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from historical import retained_service_use as use
 from historical import retained_code_catalog as code_catalog
+from historical import retained_private_session as session
 
 packet, C, H, identity = use.packet, use.C, use.H, use.identity
 HEADER = 'fleetory.retained-service-peer-header.v1'
@@ -177,62 +178,20 @@ def run(expected):
         extra = [held.enter_context(identity.process.PinnedFile(
             REPO/'eng/pilot'/name, header['sources'][name])) for name in EXTRA]
         reader = _Reader()
-        count = 0
-        def check():
+        def check_source():
             try:
                 packet.require(code_catalog.names(REPO) == code_names)
                 code_lease.check()
             except Exception:
                 _send(C(dict(kind='code-refused',nonce=declared['nonce'],codePlanSha256=header['codePlanSha256'])))
                 raise
-            packet.require(parent.snapshot()['state'] == 'live')
-            for source in extra:
-                source.check()
-            current.report()
-        def consume(payload):
-            nonlocal count
-            check()
-            _send(C(dict(kind='payload',nonce=declared['nonce'],planSha256=H(plan),
-                         payloadSha256=H(payload),payloadBytes=len(payload),consumer=parent.snapshot()['identity'])))
-            _send(payload)
-            if mode == 'exit-after-release':
-                os._exit(37)
-            while True:
-                message = packet.strict_json(reader.next(check), MAX_CONTROL)
-                packet.require(message.get('nonce') == declared['nonce'])
-                if mode == 'exit-on-request' and message.get('kind') == 'generated-fault-exit':
-                    packet.keys(message, 'kind nonce payloadSha256')
-                    packet.require(message['payloadSha256'] == H(payload))
-                    os._exit(37)
-                if message.get('kind') == 'status':
-                    packet.keys(message, 'kind nonce sequence payloadSha256')
-                    count += 1
-                    packet.require(count <= 256 and type(message['sequence']) is int and message['sequence'] == count
-                                   and message['payloadSha256'] == H(payload))
-                    _send(C(dict(kind='live',nonce=declared['nonce'],sequence=count,payloadSha256=H(payload))))
-                else:
-                    packet.keys(message, 'kind nonce resultSha256')
-                    packet.require(message['kind'] == 'result')
-                    result = reader.next(check)
-                    packet.require(H(result) == packet.hex_value(message['resultSha256']))
-                    return result
-        with use.use(Path.cwd().resolve().parent/'operator', Path.cwd().resolve(), REPO,
-                     plan, header['planSha256'], metadata, consume) as current:
-            _send(C(dict(kind='bound',nonce=declared['nonce'],headerSha256=H(raw),
-                         planSha256=H(plan),consumer=parent.snapshot()['identity'],owner=current.report()['heldProcessIdentity'],
-                         codePlanSha256=header['codePlanSha256'],codeFiles=code_report['files'])))
-            start = packet.strict_json(reader.next(check), 512)
-            packet.keys(start, 'kind nonce')
-            packet.require(start == dict(kind='capture',nonce=declared['nonce']))
-            current.capture()
-            result = current.dispatch()
-            _send(C(dict(kind='receipt',nonce=declared['nonce'],resultSha256=H(result),
-                         planSha256=H(plan),statusChecks=count,actualParentIdentityBound=True,
-                         nativeResultAuthenticated=False,executionAuthorized=False,phase7Complete=False,
-                         codePlanSha256=header['codePlanSha256'],codeFiles=code_report['files'])))
-            stop = packet.strict_json(reader.next(check), 512)
-            packet.require(stop == dict(kind='close',nonce=declared['nonce']))
-        _send(C(dict(kind='closed',nonce=declared['nonce'],phase7Complete=False)))
+            for source in extra:source.check()
+        def factory(consume):
+            return use.use(Path.cwd().resolve().parent/'operator',Path.cwd().resolve(),REPO,
+                           plan,header['planSha256'],metadata,consume)
+        session.serve(reader,_send,check_source,factory,parent,declared['nonce'],H(plan),H(raw),
+                      header['codePlanSha256'],code_report['files'],mode)
+
 
 
 if __name__ == '__main__':
