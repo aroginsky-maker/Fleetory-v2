@@ -1,0 +1,33 @@
+{
+  "command": [
+    "-c",
+    "exec /bin/sleep 660"
+  ],
+  "entrypoint": [
+    "/bin/sh"
+  ],
+  "environment": [
+    "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+    "APP_UID=1654",
+    "ASPNETCORE_HTTP_PORTS=8080",
+    "DOTNET_RUNNING_IN_CONTAINER=true",
+    "DOTNET_VERSION=10.0.14",
+    "ASPNET_VERSION=10.0.14"
+  ],
+  "memoryBytes": 402653184,
+  "nanoCpus": 1000000000,
+  "pidsLimit": 128,
+  "schema": "fleetory.probe-runtime-profile.v1",
+  "tmpfs": {
+    "/data": "rw,noexec,nosuid,nodev,size=256m,uid=3322,gid=3322,mode=0700",
+    "/tmp": "rw,noexec,nosuid,nodev,size=32m,uid=3322,gid=3322,mode=0700"
+  },
+  "ulimits": [
+    {
+      "Hard": 0,
+      "Name": "core",
+      "Soft": 0
+    }
+  ],
+  "user": "3322:3322"
+}

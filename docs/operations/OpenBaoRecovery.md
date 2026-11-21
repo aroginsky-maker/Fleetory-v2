@@ -1,0 +1,448 @@
+# OpenBao Raft recovery acceptance
+
+Baseline section 17 includes secret-provider recovery material in the backup
+scope. The pilot uses pinned OpenBao 2.7.1 with Integrated Storage (Raft) at
+`/openbao/data`. Its existing dev-mode Transit lab is not a persistent-storage
+recovery test. Keep actual pilot acceptance separate from synthetic fixtures.
+
+## Snapshot and custody boundaries
+
+A native Raft snapshot contains barrier-encrypted provider state, including
+Transit keys and point-in-time authentication/authorization state. It does not
+replace the server configuration, TLS/PKI material, original seal recovery
+material or separately retained audit logs.
+
+The pilot's declarative file audit writes `/openbao/data/audit.log`. That file is
+outside the storage barrier encryption and is not an encrypted Raft snapshot.
+Do not package the whole directory as though every file were encrypted.
+
+Keep plaintext recovery shares, credentials and TLS private keys separate from
+the snapshot. Losing the original Shamir material can make the encrypted copy
+unusable. The pilot's approved temporary 1-of-1 local custody does not establish
+independent production custody, recovery quorum, retention or immutable audit.
+An encrypted snapshot is still sensitive; its destination and custody need
+explicit approval. Never export the Transit private key or enable its
+`exportable`/`allow_plaintext_backup` settings to simplify recovery.
+
+Original provider material must be recovered inside the approved provider/DR
+service boundary. Do not unseal a real provider copy on an operator workstation.
+Synthetic test keys are confined to disposable test environments.
+
+## Point-in-time authorization matters
+
+Revoke temporary administrative credentials **before** capture, then take the
+snapshot using a separate short-lived read-only orphan snapshot credential.
+Create it through the supported orphan-token endpoint or independent issuer;
+a normal child can be revoked along with its parent root.
+A later revocation on the original does not edit an existing snapshot.
+
+A restore must preserve the original token creation/expiry times and revoked
+state. It must not silently renew tokens or extend signer/certificate/grant
+deadlines. Before exposing a real recovered provider, reconcile credentials
+revoked after the backup with the current independently retained change record.
+A restored old snapshot is not authority to resurrect those credentials.
+
+## Fresh-cluster restore
+
+A fresh initialized cluster has its own seal keys. A normal snapshot restore
+checks compatibility with those keys and should reject a snapshot from another
+Shamir initialization. The pinned OpenBao 2.7.1 CLI documents `-force` as the
+override for that compatibility check.
+
+For a disaster-recovery test this override is limited to a verifier-created,
+fresh, isolated target after checking the independently retained source
+snapshot hash and expected source identity. It is not an option to apply an
+unknown snapshot to an existing deployment.
+
+The acceptance sequence must show all of the following:
+
+1. The normal restore rejects the different bootstrap seal and leaves that
+   bootstrap state usable.
+2. The target is the fresh instance created by the test, with the pinned image,
+   a unique ownership/session label and no path to the source service.
+3. The retained snapshot bytes match the trusted capture reference before the
+   override is used.
+4. After recovery the bootstrap share cannot unseal the restored state; the
+   original fixture share can. Never run a second `init` or create a replacement
+   Transit key after restoring.
+5. The expected source cluster identity, public SPKI, key version and
+   nonexportable/plaintext-backup-disabled settings are preserved.
+6. A new synthetic signature verifies under the previously retained public key.
+   The known source credential revoked before capture and the target bootstrap
+   root remain denied; this does not test erased historical root credentials.
+   Signer management remains denied and original token lifetime is preserved.
+
+This establishes the tested recovery properties only. It does not authenticate
+independent human approval or establish production recovery acceptance.
+
+## Synthetic regression fixture
+
+Run the disposable test with PowerShell 7.3 or later and Docker:
+
+```powershell
+./tests/Fleetory.Tools.Tests/OpenBaoRaftRecovery.Tests.ps1
+```
+
+The fixture creates its own non-dev source and fresh restore node from the
+pinned image, with distinct node IDs and no published ports, host mounts or
+network access. Synthetic TLS material is generated in memory and transferred
+only into the owned tmpfs; the CLI validates that CA without skipping TLS
+checks. No real provider, recovery share or operator credentials are inputs.
+
+Both configurations include the file-audit device. Its runtime log and server
+configuration have separate recovery/retention scope from the native snapshot.
+
+Acceptance compares the original public key and version/settings, cluster
+identity, known root/management denials, a fresh signature and the retained
+token lifetime metadata. The summary may retain only public fingerprints,
+hashes, status and stated limitations. A passing fixture is not an actual pilot
+snapshot or recovery-quorum, independent-custody, audit-retention or full-system
+acceptance record. It does not establish post-expiry behavior across arbitrary
+production downtime.
+
+### Expired credentials and target-only replacement
+
+The synthetic fixture also captures a live, nonrenewable 20-second signer
+credential and tests its read/renewal denials after expiry on the restored node.
+It then rehearses a fresh restricted credential without renewing that captured
+identity. Both node IDs, the retained signing public key/version/settings and
+the original one-hour token expiry references remain checked.
+
+The Docker-free `OpenBaoTargetCredential.Tests.ps1` contract runs on Windows and
+Linux: two valid leases and nine refusals, including a lifetime one tick above
+300 seconds, excess/default policy, renewable/non-orphan credentials and a
+source/unrestored target. Duration uses the precise `issue_time`/`expire_time`
+pair: provider processing can shorten the effective lifetime, while any amount
+above 300 seconds is rejected. Integer-second `creation_time` is not an exact
+duration reference.
+
+Legacy root generation is disabled on both nodes initially. The fixture rejects
+the source role/ID as a recovery-window target. Only its already-restored owned
+target can temporarily enable `disable_unauthed_generate_root_endpoints=false`
+on its loopback TLS listener. The generated fixture share completes one root
+attempt; OTP, share and token values stay in bounded process I/O/memory rather
+than arguments or result JSON. The decoder follows the
+[version-pinned OpenBao encoding](https://github.com/openbao/openbao/blob/v2.7.1/sdk/helper/roottoken/decode.go).
+
+The target root creates a five-minute, nonrenewable orphan with no default
+policy: the fixed Transit key read/sign paths, self lookup and self revocation.
+Root revocation must return an explicit 403 before restricted use. A restart
+closes the recovery window, restores the default 405 and preserves the new
+token's identity, creation/absolute expiry and decreasing TTL. Key/policy/token
+management and renewal remain denied. The token verifies the unchanged key and
+one non-command signature, is denied on the synthetic source, then is revoked
+and must return 403. The recovered root is also denied on that source. Public
+results are checked against generated credential canaries; owned targets are
+removed even on failure.
+
+OpenBao 2.7.1 exposes separate
+[legacy and authenticated root-generation APIs](https://github.com/openbao/openbao/blob/v2.7.1/website/content/docs/api/system/generate-root.mdx);
+the [listener guard](https://openbao.org/docs/configuration/listener/tcp/)
+defaults to closed. This test is not a production recovery controller or
+permission to change a real listener. An actual provider plan still needs exact
+artifact/share scope, approved provider/DR placement, revocation reconciliation,
+bounded target administration/token issuance and explicit current consent.
+Never unseal real provider state on the operator workstation or repeat the
+completed source-root recovery under this fixture's synthetic scope.
+
+## Transport preparation for a future provider target
+
+`eng/pilot/ProviderRecoveryTransport.ps1` renders public arguments; it does not
+connect to a host or execute a recovery. The SSH model checks a bounded,
+single-entry Ed25519 host ledger against both an independently retained file
+hash and host fingerprint. It accepts a canonical IPv4 destination and explicit
+identity path. It disables ambient SSH configuration, proxies, agent forwarding,
+password authentication, connection sharing and automatic host-key updates.
+An offline `ssh -G` test checks how the installed OpenSSH parses these options,
+including a ledger path containing spaces. No identity file is needed for that
+test. See the primary [OpenSSH client reference](https://man.openbsd.org/ssh)
+and [configuration reference](https://man.openbsd.org/ssh_config).
+
+The remote command quotes every public argument as a literal POSIX shell word
+and selects `/usr/bin/docker --host unix:///var/run/docker.sock` explicitly.
+Only public arguments belong in this renderer: it cannot determine whether a
+caller has mistakenly put a secret in an argument. Tokens, shares, TLS keys and
+snapshot bytes must travel through bounded binary stdin. The shared native
+process helper rejects input above 64 MiB, limits stdout to 64 MiB and stderr to
+1 MiB, enforces a 1–120 second per-process deadline, kills the local process tree
+on failure and clears Docker endpoint/context/TLS environment overrides in the
+child. It emits no raw response on a transport failure.
+
+The generated-only Raft fixture exercises the same argument model through a
+real POSIX shell on Linux, and an explicit Docker Desktop Linux context on
+Windows. Its source and restore containers now use `--rm` with a PID 1 lifetime
+of 3,300 seconds. Their independent 55-minute expiry does not rely on the
+operator remaining connected. Runtime inspection verifies this command,
+automatic removal and the existing network-none, no-port, no-host-mount,
+non-root, read-only and resource restrictions. Normal ownership-checked cleanup
+still runs immediately. Portable tests cover literal shell metacharacters on
+Linux, offline SSH options, malformed or changed host pins, binary stdin,
+timeouts and both output limits. All data is newly generated for the fixture.
+
+Rendering an SSH request is not authority to execute it. The renderer does not
+enforce the recovery operation policy; use the controller below. The real
+snapshot/share operation still needs its own explicit grant, and original state
+must remain inside the approved provider/DR boundary.
+
+## Closed remote recovery controller
+
+`eng/pilot/Invoke-ProviderRecovery.ps1` is the real-operation entry point. It
+accepts only a reviewed absolute plan path, its SHA-256 and a separate current
+grant file. It provides no local-original or synthetic-mode switch. Original
+provider state is supported only from the Windows operator over pinned SSH to
+the approved provider/DR host. Linux CI invokes the same controller engine with
+newly generated inputs and a fixture transport; it never invokes this real
+entry point, reads operator state or connects to the VPS.
+
+The approved plan fixes the host ledger/fingerprint, SSH identity path, exact
+snapshot/share references, cluster/SPKI/key, audit profile, state directory,
+operation UUID and nine executable source-file hashes. The grant must bind that
+plan hash, UUID, scope and exact one-target permission, with an explicit user
+decision reference and a validity period no longer than one hour. The controller
+checks this record; it does not independently authenticate a human decision or
+create permission. The operator must record an actual scoped user approval.
+Local preparation checks every original input's owner/ACL, ordinary path,
+size and retained share mtime without opening its content stream. The real
+entry repeats those metadata checks before creating any target or attempt
+journal. Windows `OWNER RIGHTS` (`S-1-3-4`) is resolved to an independently
+trusted object owner; it is never accepted for an untrusted owner or used to
+waive another account's write access. See Microsoft's
+[Owner Rights definition](https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-special-identities-groups#owner-rights).
+The original provider files' ACLs are inspected, not rewritten.
+The real entry holds Windows read locks on plan, grant, executable files and
+host ledger, checks operator write ACLs and rechecks code hashes before loading
+the frozen runtime. These locks are not a defense against a compromised
+administrator or independent custody evidence.
+
+Before any original read, it durably consumes a `CreateNew` attempt journal in
+the plan's fixed state directory, checks host clock/capacity and the already
+available pinned image, rejects an existing target name, creates one fresh
+target, and verifies its ID, UUID labels, image, creation window and isolation.
+The state directory is part of the approved plan; copying the plan to another
+directory cannot silently reset the attempt. Failed attempts remain consumed.
+There is no retry/reset option, source-container adoption or image pull.
+Remote Docker calls use an empty disposable CLI configuration, an explicit
+local Unix socket and cleared endpoint/TLS/API overrides. The provider host's
+existing noninteractive `sudo -n -- /usr/bin/docker` access is used for that
+binary only. No host group, sudo policy or socket permission is changed. A
+password/TTY requirement fails rather than consuming credential stdin or
+falling back to an interactive shell. No source provider
+API, environment, configuration or mounted data is read.
+
+The command allowlist permits only the fixed bootstrap, restore, target root,
+restricted probe and cleanup sequence. Snapshot and share are each read once;
+`snapshotReads`/`shareReads` count slots claimed before the input callback,
+while `snapshotInputLoads`/`shareInputLoads` count completed callback loads.
+An ACL denial can consume a read slot without opening the file or loading its
+content. Do not report that slot as a verified byte read.
+The snapshot is hash-checked before and after transfer. Normal foreign-seal
+restore must deny with 400 before the one force restore. The original share has
+at most four submissions to this same target: initial restored unseal, restart
+into the temporary loopback-only recovery window, one root quorum update, and
+restart back to the closed window. It is never an argument or journal value.
+Fresh target TLS is generated in memory; no original CA/client/server private
+key is copied. The original audit profile uses `pilot-file` with a private
+`/openbao/data/audit.log`, matching the retained historical DR procedure.
+Incompatibility or changed public/key references fail the attempt.
+
+Exactly one nonrenewable orphan probe token has no default policy and at most
+300 seconds of explicit lifetime. Its temporary `fixture-recovered-signer`
+policy allows only the retained Transit key read/sign and self lookup/revoke.
+Root must be revoked and denied with 403 before the restricted probe. The
+recovery endpoint must return 405 after restart; token identity and absolute
+expiry must survive that restart without extension. Management/renewal denials,
+retained public key/version/flags, one fixed domain-separated **non-command**
+signature and final token revocation must pass. No Fleetory command envelope
+or production authentication token is issued.
+
+Work stops after 3,240 seconds, with bounded cleanup allowed through 3,540
+seconds and never beyond grant expiry. Every process also has its own bounded
+deadline. Creation requires at least 3,480 seconds of remaining grant validity,
+including allowance for a delayed run response. The target's PID 1 still
+expires independently after 3,300 seconds and auto-removes its tmpfs. Cleanup
+may inspect only the unique target name and remove only the exact ID whose
+name/image/UUID/creation metadata match. Lost responses do not authorize a
+second restore or root attempt. Unconfirmed cleanup is reported as failure,
+with the attempt retained; it is never promoted to verified recovery.
+Grant, file, container and lease timestamps preserve typed UTC/local instants
+from PowerShell JSON parsing; wire strings require an explicit ISO-8601 zone
+and invariant parsing. Ambiguous strings or unspecified `DateTime` values fail.
+Tests cover Russian and US cultures, JSON `Z`/offset/nanosecond forms and typed
+UTC values, including a grant deserialized from JSON.
+
+Recovery-window restarts observe the owned target's old `bao` process exiting
+before rewriting configuration or starting its replacement. The read-only
+`pidof bao` probe is allowed only in the restored target's credential phase;
+shutdown has a monotonic 30-second limit and bounded individual requests.
+An unparseable result, transport error or deadline aborts before another start
+or share submission. This replaces a fixed 300ms sleep, which could start the
+replacement while the old server still held its listener or Raft storage lock.
+The generated shutdown contract reproduces that ordering failure and checks
+delayed exit plus seven refusal cases without Docker or original material.
+
+Portable tests exercise malformed/expired/mismatched grants and code/host pins,
+durable/repeated attempts, unsafe commands, source/unowned IDs, container
+mutations, one-use force/root/probe/signature rules, share-use bounds,
+insufficient memory/time and disconnected cleanup. The generated-only native
+fixture executes the controller against real OpenBao and injects response loss
+after actual restored-fixture unseal, then verifies deletion of its owned
+target. This simulates a lost transport response; it is not a real VPS SSH
+failure test. The separately approved retained-material operation is recorded
+below. Current revocations, real service backend authentication,
+common-point/VPS-loss recovery and full-system RPO/RTO remain separate
+acceptance work.
+
+Before requesting a real one-shot grant, verify the existing SSH identity's
+Windows permissions and the pinned public host/Docker metadata commands.
+The 4 November pilot attempt stopped at host preflight because the supplied
+identity inherited a non-owner sandbox-group read rule; no original snapshot
+or share was read and no target/root/probe was created. Narrowing only that
+file's ACL, with rollback SDDL retained outside Git, restored SSH access.
+Read-only diagnostics also confirmed that this VPS requires its existing
+noninteractive sudo path for Docker. The consumed attempt remains retained;
+these prerequisite repairs do not authorize replaying it or reusing its grant.
+The next attempt reached a fresh bootstrap target but rejected a legitimate
+Windows OWNER RIGHTS ACE before opening the snapshot. Its claimed snapshot
+read slot was not a completed content load; the share was not read. The empty
+target was removed and that grant remained consumed. Correcting owner-aware
+ACL validation and preflighting all local input metadata did not change the
+original snapshot/share ACLs. A third, separately approved operation used a new
+plan hash and UUID; its result is recorded below.
+
+## Actual pilot operations
+
+Prepare and review the executable fixture and recovery evidence before
+requesting an actual provider operation. The completed Keycloak and
+application/signer database restore checks do not authorize copying OpenBao
+state or using its real recovery share.
+
+An actual operation needs concrete consent covering the recovery-quorum use,
+any temporary administrative credential/listener and required restart window,
+snapshot scope and destination, original share use in the isolated provider
+restore target, and the restricted signature-probe credential.
+The pilot's original root was revoked; an earlier one-time root-recovery
+approval for initial Transit setup is not standing authorization for a new
+administrative recovery session.
+
+Use the supported native Raft snapshot API/CLI. An online atomic Raft snapshot
+does not itself require stopping the provider. Avoid concurrent upgrades,
+seal/key migrations or structural system operations during capture.
+Do not improvise a hot copy of Raft files or migrate the live storage backend.
+
+Use an existing still-valid restricted probe credential or an explicitly
+approved short-lived probe credential created before capture. Expiry does not
+authorize renewal or a new clone root. The signature challenge must be
+synthetic data that cannot be accepted as a Fleetory command envelope.
+
+Create only the temporary capabilities required for capture. Record and revoke
+the temporary root before capture; revoke the snapshot credential on the source
+after transfer. Retain its absolute expiry because that final revocation does
+not retroactively modify the snapshot. Restore testing must retain strict
+network isolation and cannot expose a copied production issuer or signing
+service.
+
+Record the source version/image, backend, capture time, cluster identity,
+snapshot hash, public-key/version reference, actual custody and actor evidence,
+restore result, cleanup and remaining limitations. No token, share or private
+key belongs in Git, chat or CI artifacts.
+
+A full deployment exercise must also prove recovery of configuration, PKI and
+revocations, audit/checkpoints, application/signer histories and physical Agent
+trust. RPO/RTO and retention belong to the deployment profile. Keep Phase 7 and
+its PR open until the remaining Baseline controls have actual evidence.
+
+## Verified actual pilot acceptance - 1 November 2026 UTC
+
+This is a historical record of an explicitly approved operation, not a current
+provider-health assertion or standing authority for another root session.
+The retained protected capture and restore records were independently rechecked
+before adding this summary. Neither the encrypted backup nor private operator
+files are published here.
+
+The native barrier-encrypted snapshot contained 27,161 bytes, SHA-256
+e94f5c8457e0d56671a40ef2a3f8a25c73698fa0dfd332f54f2c64cdba268094.
+The one-time source root was revoked before capture, permanent configuration
+and health were restored, and the source maintenance window was 24.812 seconds.
+Temporary source credentials were revoked. The offline copy remains in the
+approved protected local destination outside Git.
+
+The same snapshot was restored in a fresh, same-VPS provider target with
+network none, no published ports or host mounts, a read-only root and tmpfs.
+The normal foreign-seal restore and fresh bootstrap share were rejected with
+HTTP 400; the original approved share unsealed the restored state. Cluster/key
+continuity and Transit P-256 version 1 were retained, with nonexportable key and
+plaintext backup disabled. Public SPKI SHA-256 was
+84f39cbc722afb27d0943ef09ecd25daf4c39b5fa70a2da617c86f3518171206.
+A new domain-separated non-command signature verified under that public key.
+Fresh bootstrap root and signer management returned 403, clone root generation
+returned 405, and audit mode/owner was 600:100:1000. The target was removed
+and source health checked after cleanup.
+
+The restore continuation used no second source-root recovery, token issuance
+or renewal. Existing signer self-lookup was denied on source and clone, so the
+clone credential's identity/expiry was **not independently introspected**.
+The retained original deadline is administrative metadata, not a verified new
+lease or proof of post-expiry behavior.
+
+This establishes same-VPS logical provider-key recovery. Independent production
+custody/quorum, separate-host/VPS-loss recovery, full configuration/PKI and
+revocation reconciliation, critical audit retention and physical-Agent trust
+remain open. Phase 7 and PR #2 remain incomplete.
+
+## Verified actual target-credential recovery - 4 November 2026 UTC
+
+One newly approved operation used controller revision
+`7b72988c161616b7da2a42352ce2984f0a88ab5c`, immutable plan SHA-256
+`b9ea08cce2aca2fac05aad96743010ca63ede5420d9c99671f2c7228debcbffa`
+and operation `4619ed85-fbde-4406-9bc6-a121219f309e`. It completed in
+153.197 seconds on the existing VPS, within its one-hour grant. The prior
+failed attempts and their journals were preserved; none was reset or replayed.
+
+The same retained barrier-encrypted snapshot was loaded once and hash-checked
+locally and after transfer. The original share was loaded once and submitted
+exactly four times to the new owned target. Both completed input-load counters
+were one. Normal restore was rejected before the approved force restore; the
+fresh bootstrap share was rejected before original-share unseal. The historical
+cluster, public signing key and nonexportable Transit version 1 were retained.
+
+The target-only recovery window produced one recovered administrative root and
+one restricted orphan probe token with a maximum 300-second, nonrenewable
+lease and no default policy. The root was revoked and denied with 403 before
+the signature probe. After restarting out of the recovery window, the root
+endpoint returned 405; probe self-lookup preserved token ID, accessor, creation
+time and absolute expiry, with no TTL increase. Four management/renewal attempts
+were denied with 403. One domain-separated non-command signature verified
+against the retained public-key pin. The probe was then revoked and denied
+with 403. These checks do not claim to have waited for its natural expiry or
+validated an old source credential.
+
+The inherited audit profile wrote only to target tmpfs with mode/owner
+`600:100:1000`. The network-none target had no published ports or host mounts;
+its 3,300-second independent lifetime and auto-removal remained in force.
+Immediate deletion and subsequent target absence were verified before success.
+The journal contains, in order, attempt-consumed, target-created,
+acceptance-passed and cleanup-verified. Source provider API calls were zero;
+source-root recovery, original PKI use and production-token issuance were
+excluded. This operation's one-shot permission is now consumed.
+
+Protected execution proof SHA-256:
+`3cd76430d9e257ab1b551251f992c3147028be7806f623249f35c639e45fbe1f`.
+Protected journal SHA-256:
+`ac2ea5b2607680bed9ed1e52410b40dd6f7dc420f79ae8b6f74525d8cea70039`.
+The original files, grant and proof remain outside Git; no private material or
+raw provider response is published here.
+
+This closes the bounded retained-provider target-credential recovery check.
+Actual Signer/Server backend authentication, current admission/revocation
+reconciliation, a common recovery point, VPS-loss recovery, independent
+WORM/custody/approvals, physical Agent trust and full RPO/RTO remain open.
+The 1 November observation about its old credential remains historical; this
+new target token does not retroactively introspect that credential. Phase 7
+and PR #2 remain incomplete.
+
+References: [OpenBao storage/backups](https://openbao.org/docs/concepts/storage/),
+[Integrated Storage](https://openbao.org/docs/internals/integrated-storage/),
+[Raft snapshot commands](https://openbao.org/docs/commands/operator/raft/) and
+[documented restore API semantics](https://openbao.org/docs/2.6.x/api/system/storage/raft/).
+The API reference is the published 2.6.x page; confirm the relevant flags and
+behavior against the pinned 2.7.1 executable before accepting a test.

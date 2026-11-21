@@ -12,6 +12,7 @@ public sealed class HealthEndpointTests
 {
     private static readonly string[] ServerArguments =
     [
+        "--environment=Development",
         "--ConnectionStrings:Fleetory=Host=127.0.0.1;Port=1;Database=fleetory_phase6_unit_test;Username=fleetory;Timeout=1;Command Timeout=1"
     ];
 

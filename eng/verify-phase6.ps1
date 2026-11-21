@@ -107,19 +107,39 @@ function Invoke-PublishedServerSmokeTest([string] $RuntimeDirectory) {
     $stderr = Join-Path $ArtifactRoot 'phase6-smoke.stderr.log'
     Remove-Item -Force $stdout, $stderr -ErrorAction SilentlyContinue
 
+    $secretDirectory = Join-Path $ArtifactRoot 'phase6-smoke-secrets'
+    New-Item -ItemType Directory -Path $secretDirectory -Force | Out-Null
+    $secretFile = Join-Path $secretDirectory 'fleetory-postgresql'
+    [System.IO.File]::WriteAllText($secretFile, $smokeConnectionString, $Utf8Encoding)
+    if ($env:OS -ne 'Windows_NT') {
+        & chmod 600 $secretFile
+    }
+
     $previousEnvironment = $env:ASPNETCORE_ENVIRONMENT
     $previousConnectionString = $env:FLEETORY_ConnectionStrings__Fleetory
+    $previousSecretDirectory = $env:FLEETORY_Fleetory__Secrets__Directory
     $env:ASPNETCORE_ENVIRONMENT = 'Production'
-    $env:FLEETORY_ConnectionStrings__Fleetory = $smokeConnectionString
+    Remove-Item Env:FLEETORY_ConnectionStrings__Fleetory -ErrorAction SilentlyContinue
+    $env:FLEETORY_Fleetory__Secrets__Directory = $secretDirectory
 
     try {
-        $process = Start-Process `
-            -FilePath 'dotnet' `
-            -ArgumentList @(("`"{0}`"" -f $entry), '--urls', $baseUrl) `
-            -WorkingDirectory $RuntimeDirectory `
-            -RedirectStandardOutput $stdout `
-            -RedirectStandardError $stderr `
-            -PassThru
+        $startArguments = @{
+            FilePath = 'dotnet'
+            ArgumentList = @(("`"{0}`"" -f $entry), '--urls', $baseUrl)
+            WorkingDirectory = $RuntimeDirectory
+            RedirectStandardOutput = $stdout
+            RedirectStandardError = $stderr
+            PassThru = $true
+        }
+        if ($env:OS -eq 'Windows_NT') {
+            $startArguments.WindowStyle = 'Hidden'
+        }
+        $process = Start-Process @startArguments
+    }
+    catch {
+        Remove-Item -LiteralPath $secretFile -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $secretDirectory -ErrorAction SilentlyContinue
+        throw
     }
     finally {
         if ($null -eq $previousEnvironment) {
@@ -134,6 +154,13 @@ function Invoke-PublishedServerSmokeTest([string] $RuntimeDirectory) {
         }
         else {
             $env:FLEETORY_ConnectionStrings__Fleetory = $previousConnectionString
+        }
+
+        if ($null -eq $previousSecretDirectory) {
+            Remove-Item Env:FLEETORY_Fleetory__Secrets__Directory -ErrorAction SilentlyContinue
+        }
+        else {
+            $env:FLEETORY_Fleetory__Secrets__Directory = $previousSecretDirectory
         }
     }
 
@@ -180,6 +207,8 @@ function Invoke-PublishedServerSmokeTest([string] $RuntimeDirectory) {
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
             $process.WaitForExit()
         }
+        Remove-Item -LiteralPath $secretFile -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $secretDirectory -ErrorAction SilentlyContinue
     }
 }
 
