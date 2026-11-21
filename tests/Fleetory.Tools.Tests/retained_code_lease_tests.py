@@ -187,6 +187,7 @@ class CodeLeaseTests(unittest.TestCase):
 
     def test_distinct_ctime_views_are_each_bound_without_tolerance(self):
         source=self.root/self.names[0];original=Path.lstat;offset=[1000];changed=False
+        source_info=original(source);identity=(source_info.st_dev,source_info.st_ino);hits=[]
         class View:
             def __init__(self,value):self.value=value
             def __getattr__(self,name):return getattr(self.value,name)
@@ -194,10 +195,14 @@ class CodeLeaseTests(unittest.TestCase):
             def st_ctime_ns(self):return self.value.st_ctime_ns+offset[0]
         def lstat(path,*args,**kwargs):
             value=original(path,*args,**kwargs)
-            return View(value) if path==source else value
+            if (value.st_dev,value.st_ino)==identity:
+                hits.append(offset[0])
+                return View(value)
+            return value
         try:
             with patch.object(Path,'lstat',lstat),self.opened() as lease:
                 lease.check()
+                self.assertTrue(hits, 'Source ctime view was not exercised')
                 offset[0]+=1;changed=True
                 with self.assertRaises(REFUSALS):
                     lease.check()
