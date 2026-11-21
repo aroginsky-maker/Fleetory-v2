@@ -96,3 +96,29 @@ Those operator records are separate from this commit's portable model tests.
 They do not establish original release provenance, original-data execution,
 production approvals or completion of Phase 7. Public vendor CRLs, certificates,
 build artifacts, operator paths and one-use records are not repository inputs.
+
+
+## Closed public context byte policy
+
+`public_build_context.py` renders the no-RUN Dockerfile and fixed serial offline
+restore/publish script, FIFO output handoff and strict NuGet trust configuration.
+The SDK reference is a fixed digest. Source, package and public CRL byte sets
+must exactly match the expected pins; the rendered tar is deterministic USTAR.
+Validation compares the entire canonical archive, refusing changed controls,
+extra headers, links, case aliases and appended bytes. Source/package counts,
+individual sizes and the separate 64-MiB build-context ceiling are bounded.
+
+`public_build_trust.py` fixes signatureValidationMode=require, the local-only
+package source, reviewed repository signer fingerprints and owner set, with
+allowUntrustedRoot=false. Public fingerprints carry no private key material.
+CRL windows must be timezone-aware and retain more than 420 seconds of validity
+at admission. This byte policy performs no cryptographic signature verification;
+expected pins and verified CRL windows must come from trusted live intake.
+The launcher must recheck freshness immediately before SDK start and enforce
+its deadline independently. Those integrations remain required.
+
+These are library APIs with no native commands, filesystem reader or execution
+grant. A supplied manifest and matching archive cannot authenticate source
+origin or authorize a build. Portable synthetic tests cover deterministic bytes,
+control/trust changes, mismatched pins, stale/future CRLs and case aliases on
+both CI platforms. They do not qualify original releases or restored services.

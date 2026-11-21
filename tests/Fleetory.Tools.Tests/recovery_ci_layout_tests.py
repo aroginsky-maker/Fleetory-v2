@@ -156,6 +156,7 @@ def validate(text):
                 ('original inventory metadata mapping', 'retained_expected_inventory_tests.py'),
                 ('held retained source handles', 'retained_code_lease_tests.py'),
                 ('fixed retained source catalog', 'retained_code_catalog_tests.py'),
+                ('closed public SDK context', 'public_build_context_tests.py'),
                 ('separate public build create policy', 'build_runtime_create_profile_tests.py'),
                 ('retained source-only entry points', 'retained_source_bootstrap_tests.py'),
                 ('isolated retained Python bootstrap', 'retained_python_isolation_tests.py'),
@@ -740,6 +741,16 @@ class RecoveryCiLayoutTests(unittest.TestCase):
             marker = '        run: |\n          ./tests/Fleetory.Tools.Tests/PublicBuildImageTransaction'
             for option in ('if: false', 'continue-on-error: true'):
                 self.refused(self.text.replace(block, block.replace(marker, '        ' + option + '\n' + marker, 1)))
+
+
+
+    def test_closed_sdk_context_gate_cannot_be_omitted_duplicated_or_softened(self):
+        for executable in ('python', 'python3'):
+            command = executable + ' -B ./tests/Fleetory.Tools.Tests/public_build_context_tests.py'
+            self.refused(self.text.replace(command, 'omitted', 1))
+            self.refused(self.text.replace(command, command + '\n          ' + command, 1))
+            for option in ('if: false', 'continue-on-error: true'):
+                self.refused(self.text.replace('run: ' + command, option + '\n        run: ' + command, 1))
 
 
 if __name__ == '__main__':
