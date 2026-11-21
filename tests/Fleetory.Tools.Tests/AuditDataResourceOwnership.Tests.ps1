@@ -457,6 +457,60 @@ try{
     for($n=0;$n -lt 64;$n++){$null=Invoke-HistoricalProfileModel $m}
     Refused {Invoke-HistoricalProfileModel $m} 'historical-native-call-count-bound'
     Check ($m.Calls -eq 64) 'historical-count-bound-before-native'
+    function Test-SeparateBuildImageCustody {
+        function Context {return @{Fixture='fixture';Root='root';ImageName='image';ProbeHash='probe';SourceContextSha256=('a'*64);SdkImage=('sha256:'+('b'*64));ImageId=$null;ImageClaimed=$false}}
+        $id='sha256:'+('c'*64)
+        $create=[Func[Tuple[int,byte[],byte[]]]]{[Tuple]::Create(0,[Text.Encoding]::ASCII.GetBytes($id+"`n"),[byte[]]@())}
+        $remove=[Func[Tuple[int,byte[],byte[]]]]{[Tuple]::Create(0,[Text.Encoding]::ASCII.GetBytes('Deleted: '+$id+"`n"),[byte[]]@())}
+        $absent=[Func[Tuple[int,byte[],byte[]]]]{[Tuple]::Create(1,[byte[]]@(),[Text.Encoding]::ASCII.GetBytes('Error: no such image: '+$id+"`n"))}
+        $client=[object]::new()
+        foreach($type in @([Fleetory.Pilot.AuditImageCustody],[Fleetory.Pilot.PublicBuildImageCustody])){
+            $c=Context
+            Check ($type::Build($c,$client,[byte[]]@(1,2,3),$create) -ceq $id) 'original-create'
+            Check ($type::Id($c,$client) -ceq $id) 'same-live-identity'
+            Refused {$type::Id($c,[object]::new())} 'different-client'
+            Refused {$type::Id($c.Clone(),$client)} 'copied-context'
+            $other=if($type -eq [Fleetory.Pilot.AuditImageCustody]){[Fleetory.Pilot.PublicBuildImageCustody]}else{[Fleetory.Pilot.AuditImageCustody]}
+            Refused {$other::Id($c,$client)} 'other-facade-no-authority'
+            $c.Root='changed';Refused {$type::Id($c,$client)} 'mutated-context';$c.Root='root'
+            Refused {$type::Build($c,$client,[byte[]]@(1),$create)} 'create-replay'
+            $type::Remove($c,$client,$remove)
+            Refused {$type::Remove($c,$client,$remove)} 'remove-replay'
+            $type::ConfirmRemoval($c,$client,$absent)
+            Check ($type::Closed($c,$client)) 'complete-absence'
+            Refused {$type::Id($c,$client)} 'closed-id-refused'
+            $bad=Context
+            $unknown=[Func[Tuple[int,byte[],byte[]]]]{[Tuple]::Create(0,[Text.Encoding]::ASCII.GetBytes('truncated'),[byte[]]@())}
+            Refused {$type::Build($bad,$client,[byte[]]@(1),$unknown)} 'unknown-result'
+            Check ($type::Attempted($bad)) 'unknown-consumed'
+            Refused {$type::Build($bad,$client,[byte[]]@(1),$create)} 'unknown-no-retry'
+        }
+        $large=[byte[]]::new(16777217)
+        $legacy=Context;Refused {[Fleetory.Pilot.AuditImageCustody]::Build($legacy,$client,$large,$create)} 'historical-16m-bound'
+        Check (-not [Fleetory.Pilot.AuditImageCustody]::Attempted($legacy)) 'historical-invalid-before-attempt'
+        $sdk=Context
+        Check ([Fleetory.Pilot.PublicBuildImageCustody]::Build($sdk,$client,$large,$create) -ceq $id) 'separate-sdk-context-bound'
+        $sdk.SourceContextSha256='changed';Refused {[Fleetory.Pilot.PublicBuildImageCustody]::Id($sdk,$client)} 'sdk-context-pin-mutation'
+        $sdk.SourceContextSha256='a'*64
+        [Fleetory.Pilot.PublicBuildImageCustody]::Remove($sdk,$client,$remove)
+        [Fleetory.Pilot.PublicBuildImageCustody]::ConfirmRemoval($sdk,$client,$absent)
+        $maximum=[byte[]]::new(67108864)
+        $atLimit=Context
+        Check ([Fleetory.Pilot.PublicBuildImageCustody]::Build($atLimit,$client,$maximum,$create) -ceq $id) 'sdk-exact-64m'
+        [Fleetory.Pilot.PublicBuildImageCustody]::Remove($atLimit,$client,$remove)
+        [Fleetory.Pilot.PublicBuildImageCustody]::ConfirmRemoval($atLimit,$client,$absent)
+        $tooLarge=[byte[]]::new(67108865)
+        $over=Context
+        Refused {[Fleetory.Pilot.PublicBuildImageCustody]::Build($over,$client,$tooLarge,$create)} 'sdk-over-64m'
+        Check (-not [Fleetory.Pilot.PublicBuildImageCustody]::Attempted($over)) 'sdk-over-limit-no-attempt'
+        $mutated=Context
+        $bytes=[byte[]]@(1,2,3)
+        $change=[Func[Tuple[int,byte[],byte[]]]]{ $bytes[0]=9; [Tuple]::Create(0,[Text.Encoding]::ASCII.GetBytes($id+"`n"),[byte[]]@()) }
+        Refused {[Fleetory.Pilot.PublicBuildImageCustody]::Build($mutated,$client,$bytes,$change)} 'archive-mutated-during-build'
+        Check ([Fleetory.Pilot.PublicBuildImageCustody]::Attempted($mutated)) 'mutated-build-consumed'
+        Refused {[Fleetory.Pilot.PublicBuildImageCustody]::Id($mutated,$client)} 'mutated-build-no-authority'
+    }
+    Test-SeparateBuildImageCustody
     $script:imageModel=$null
     $script:custodyModel=$null
 }finally{

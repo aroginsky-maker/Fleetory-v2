@@ -38,3 +38,26 @@ with a pinned SDK and no Dockerfile RUN step. That preparation did not create
 an SDK container or publish an assembly. Source-origin authentication, the full
 runtime/command/build inventory, the original-purpose owner and all external
 Phase 7 requirements remain open. No original archives or service PKI were read.
+
+
+## Separate live image custody
+
+`PublicBuildImageCustody` retains a separate in-process claim table for public
+build images, with an archive ceiling of exactly 64 MiB. `AuditImageCustody`
+keeps its historical 16-MiB ceiling and public API. Both use the same internal
+implementation; neither facade can retrieve or remove the other's live claim.
+The SDK facade also binds the source context digest and pinned SDK reference
+to the exact original context object and native client identity.
+
+A build attempt is consumed before invoking the native operation. The complete
+reply and a private copy of the input archive remain in the live claim. Changed
+input, an incomplete ID response, copied objects and replay do not create new
+authority. Removal is one attempt followed by exact native absence validation;
+saved metadata cannot reconstruct ownership after process death.
+
+The existing ownership regression exercises both facades, exact SDK archive
+size and overflow, input mutation, foreign-client/context refusal, cross-facade
+refusal and consumed unknown outcomes. These are synthetic native replies.
+They do not prove an actual SDK build or independent cleanup after creator loss.
+The independent worker that owns image build and the entire SDK lifecycle is
+still required before native execution can be enabled.

@@ -34,8 +34,8 @@ namespace Fleetory.Pilot {
             return output=="" || output=="[]\n" || output=="[]\r\n";
         }
     }
-    // Fixed historical image creator only; no import or dead-owner recovery API.
-    public static class AuditImageCustody {
+    // Separate facade instances retain independent live claims; no import API.
+    internal sealed class AuditImageCustodyCore {
         private sealed class Claim {
             internal readonly System.Collections.IDictionary Context;
             internal readonly object Client;
@@ -46,25 +46,27 @@ namespace Fleetory.Pilot {
             internal Tuple<int,byte[],byte[]> Creation, Inspection, Removal;
             internal string Id;
             internal int State;
-            internal Claim(System.Collections.IDictionary context, object client, byte[] archive) {
-                Context=context; Client=client; Values=AuditNativeReply.Values(context,Keys); Archive=(byte[])archive.Clone();
+            internal Claim(System.Collections.IDictionary context, object client, byte[] archive, string[] keys) {
+                Context=context; Client=client; Values=AuditNativeReply.Values(context,keys); Archive=(byte[])archive.Clone();
             }
         }
-        private static readonly string[] Keys={"Fixture","Root","ImageName","ProbeHash"};
-        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<object,Claim> Claims=new();
+        private readonly string[] Keys;
+        private readonly int MaximumArchiveBytes;
+        internal AuditImageCustodyCore(int maximumArchiveBytes, string[] keys) { MaximumArchiveBytes=maximumArchiveBytes; Keys=(string[])keys.Clone(); }
+        private readonly System.Runtime.CompilerServices.ConditionalWeakTable<object,Claim> Claims=new();
         private static InvalidOperationException Refused() => new("Audit image live custody refused.");
-        private static Claim Get(System.Collections.IDictionary context, object client, bool live=true) {
+        private Claim Get(System.Collections.IDictionary context, object client, bool live=true) {
             if(!Claims.TryGetValue(context,out var claim) || !ReferenceEquals(context,claim.Context) || !ReferenceEquals(client,claim.Client) ||
                 claim.Process!=Environment.ProcessId || !AuditNativeReply.Same(AuditNativeReply.Values(context,Keys),claim.Values) ||
                 !Equals(context["ImageId"],claim.Id) || !Equals(context["ImageClaimed"],true) ||
                 (live && System.Threading.Volatile.Read(ref claim.State)!=1)) throw Refused();
             return claim;
         }
-        public static bool Attempted(System.Collections.IDictionary context) => Claims.TryGetValue(context,out _);
-        public static string Build(System.Collections.IDictionary context, object client, byte[] archive, Func<Tuple<int,byte[],byte[]>> operation) {
-            if(client==null || operation==null || archive==null || archive.Length==0 || archive.Length>16777216 ||
+        internal bool Attempted(System.Collections.IDictionary context) => Claims.TryGetValue(context,out _);
+        internal string Build(System.Collections.IDictionary context, object client, byte[] archive, Func<Tuple<int,byte[],byte[]>> operation) {
+            if(client==null || operation==null || archive==null || archive.Length==0 || archive.Length>MaximumArchiveBytes ||
                 context["ImageId"]!=null || !Equals(context["ImageClaimed"],false)) throw Refused();
-            var claim=new Claim(context,client,archive);
+            var claim=new Claim(context,client,archive,Keys);
             Claims.Add(context,claim);
             context["ImageClaimed"]=true; // Consumed before invoking the actual fixed native build.
             claim.Creation=AuditNativeReply.Hold(operation());
@@ -73,19 +75,19 @@ namespace Fleetory.Pilot {
             context["ImageId"]=claim.Id;claim.State=1;
             return Get(context,client).Id;
         }
-        public static string Id(System.Collections.IDictionary context, object client) => Get(context,client).Id;
-        public static DateTimeOffset Started(System.Collections.IDictionary context, object client) => Get(context,client).Started;
-        public static bool Closed(System.Collections.IDictionary context, object client) {
+        internal string Id(System.Collections.IDictionary context, object client) => Get(context,client).Id;
+        internal DateTimeOffset Started(System.Collections.IDictionary context, object client) => Get(context,client).Started;
+        internal bool Closed(System.Collections.IDictionary context, object client) {
             var claim=Get(context,client,false);return System.Threading.Volatile.Read(ref claim.State)==3;
         }
-        public static Tuple<int,byte[],byte[]> Inspect(System.Collections.IDictionary context, object client, Func<Tuple<int,byte[],byte[]>> operation) {
+        internal Tuple<int,byte[],byte[]> Inspect(System.Collections.IDictionary context, object client, Func<Tuple<int,byte[],byte[]>> operation) {
             var claim=Get(context,client);claim.Inspection=AuditNativeReply.Hold(operation());return AuditNativeReply.Hold(claim.Inspection);
         }
         private static void FullRemoval(Claim claim) {
             string text=System.Text.Encoding.UTF8.GetString(claim.Removal.Item2);
             if(claim.Removal.Item1!=0 || (text!="Deleted: "+claim.Id+"\n" && text!="Deleted: "+claim.Id+"\r\n")) throw Refused();
         }
-        public static void Remove(System.Collections.IDictionary context, object client, Func<Tuple<int,byte[],byte[]>> operation) {
+        internal void Remove(System.Collections.IDictionary context, object client, Func<Tuple<int,byte[],byte[]>> operation) {
             var claim=Get(context,client);
             if(System.Threading.Interlocked.CompareExchange(ref claim.State,2,1)!=1) throw Refused();
             claim.Removal=AuditNativeReply.Hold(operation());FullRemoval(claim);
@@ -97,12 +99,36 @@ namespace Fleetory.Pilot {
                 System.Text.RegularExpressions.RegexOptions.IgnoreCase)) throw Refused();
             if(System.Threading.Interlocked.CompareExchange(ref claim.State,3,expected)!=expected) throw Refused();
         }
-        public static void Absent(System.Collections.IDictionary context, object client) => Absence(Get(context,client),1);
-        public static void ConfirmRemoval(System.Collections.IDictionary context, object client, Func<Tuple<int,byte[],byte[]>> operation) {
+        internal void Absent(System.Collections.IDictionary context, object client) => Absence(Get(context,client),1);
+        internal void ConfirmRemoval(System.Collections.IDictionary context, object client, Func<Tuple<int,byte[],byte[]>> operation) {
             var claim=Get(context,client,false);
             if(System.Threading.Volatile.Read(ref claim.State)!=2 || claim.Removal==null) throw Refused();
             FullRemoval(claim);claim.Inspection=AuditNativeReply.Hold(operation());Absence(claim,2);
         }
+    }
+    public static class AuditImageCustody {
+        private static readonly AuditImageCustodyCore Core=new(16777216,new string[] {"Fixture","Root","ImageName","ProbeHash"});
+        public static bool Attempted(System.Collections.IDictionary context) => Core.Attempted(context);
+        public static string Build(System.Collections.IDictionary context, object client, byte[] archive, Func<Tuple<int,byte[],byte[]>> operation) => Core.Build(context,client,archive,operation);
+        public static string Id(System.Collections.IDictionary context, object client) => Core.Id(context,client);
+        public static DateTimeOffset Started(System.Collections.IDictionary context, object client) => Core.Started(context,client);
+        public static bool Closed(System.Collections.IDictionary context, object client) => Core.Closed(context,client);
+        public static Tuple<int,byte[],byte[]> Inspect(System.Collections.IDictionary context, object client, Func<Tuple<int,byte[],byte[]>> operation) => Core.Inspect(context,client,operation);
+        public static void Remove(System.Collections.IDictionary context, object client, Func<Tuple<int,byte[],byte[]>> operation) => Core.Remove(context,client,operation);
+        public static void Absent(System.Collections.IDictionary context, object client) => Core.Absent(context,client);
+        public static void ConfirmRemoval(System.Collections.IDictionary context, object client, Func<Tuple<int,byte[],byte[]>> operation) => Core.ConfirmRemoval(context,client,operation);
+    }
+    public static class PublicBuildImageCustody {
+        private static readonly AuditImageCustodyCore Core=new(67108864,new string[] {"Fixture","Root","ImageName","SourceContextSha256","SdkImage"});
+        public static bool Attempted(System.Collections.IDictionary context) => Core.Attempted(context);
+        public static string Build(System.Collections.IDictionary context, object client, byte[] archive, Func<Tuple<int,byte[],byte[]>> operation) => Core.Build(context,client,archive,operation);
+        public static string Id(System.Collections.IDictionary context, object client) => Core.Id(context,client);
+        public static DateTimeOffset Started(System.Collections.IDictionary context, object client) => Core.Started(context,client);
+        public static bool Closed(System.Collections.IDictionary context, object client) => Core.Closed(context,client);
+        public static Tuple<int,byte[],byte[]> Inspect(System.Collections.IDictionary context, object client, Func<Tuple<int,byte[],byte[]>> operation) => Core.Inspect(context,client,operation);
+        public static void Remove(System.Collections.IDictionary context, object client, Func<Tuple<int,byte[],byte[]>> operation) => Core.Remove(context,client,operation);
+        public static void Absent(System.Collections.IDictionary context, object client) => Core.Absent(context,client);
+        public static void ConfirmRemoval(System.Collections.IDictionary context, object client, Func<Tuple<int,byte[],byte[]>> operation) => Core.ConfirmRemoval(context,client,operation);
     }
     // Live trusted caller only. No import, serialization or cross-process recovery API.
     public static class AuditContainerCustody {
