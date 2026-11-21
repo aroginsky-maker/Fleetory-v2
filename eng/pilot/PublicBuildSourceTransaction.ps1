@@ -23,7 +23,7 @@ function Invoke-PublicBuildSourceTransaction(
         }.GetNewClosure()
         $use={param($Context,$Client)
             $Source.RequestBeforeSdk()
-            return & $UseImage $Context $Client
+            return & $UseImage $Context $Client $alive
         }.GetNewClosure()
         return Invoke-PublicBuildImageTransaction $bytes $ExpectedContextSha256 $Native $alive $use
     }finally{
