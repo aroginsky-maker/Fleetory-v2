@@ -174,4 +174,6 @@ class OriginalFourTests(unittest.TestCase):
             raw.assert_not_called()
 
 
-if __name__=='__main__':unittest.main()
+if __name__=='__main__':
+    from held_parent_test_runner import main
+    main()

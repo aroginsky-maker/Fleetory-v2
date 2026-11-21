@@ -84,4 +84,6 @@ class SessionTests(unittest.TestCase):
         self.assertEqual(4,len(self.sent))
 
 
-if __name__=='__main__':unittest.main()
+if __name__=='__main__':
+    from held_parent_test_runner import main
+    main()
