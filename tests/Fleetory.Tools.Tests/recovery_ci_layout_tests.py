@@ -148,6 +148,12 @@ def validate(text):
                 '        run: ./tests/Fleetory.Tools.Tests/RetainedDataHostBoundary.Tests.ps1\n')
         assert blocks[key].count(step) == 1
         assert text.count('./tests/Fleetory.Tools.Tests/RetainedDataHostBoundary.Tests.ps1') == 2
+    for key, platform in (('windows-tls-chain', ' on Windows'), ('quality', '')):
+        step = ('      - name: Verify bounded public build source transport' + platform + '\n'
+                '        shell: pwsh\n'
+                '        run: ./tests/Fleetory.Tools.Tests/PublicBuildSourceTransport.Tests.ps1\n')
+        assert blocks[key].count(step) == 1
+        assert text.count('./tests/Fleetory.Tools.Tests/PublicBuildSourceTransport.Tests.ps1') == 2
     for key, platform, executable in (('windows-tls-chain', ' on Windows', 'python'), ('quality', '', 'python3')):
         for title, filename in (('held audit control namespace identity', 'audit_control_identity_tests.py'),
                 ('four frozen retained service inputs', 'retained_service_inputs_tests.py'),
@@ -157,6 +163,7 @@ def validate(text):
                 ('held retained source handles', 'retained_code_lease_tests.py'),
                 ('fixed retained source catalog', 'retained_code_catalog_tests.py'),
                 ('live public build input capture', 'public_build_intake_tests.py'),
+                ('private public build source peer', 'public_build_source_peer_tests.py'),
                 ('closed public SDK context', 'public_build_context_tests.py'),
                 ('separate public build create policy', 'build_runtime_create_profile_tests.py'),
                 ('retained source-only entry points', 'retained_source_bootstrap_tests.py'),
@@ -747,12 +754,18 @@ class RecoveryCiLayoutTests(unittest.TestCase):
 
     def test_public_build_policy_gates_cannot_be_omitted_duplicated_or_softened(self):
         for executable in ('python', 'python3'):
-            for filename in ('public_build_context_tests.py','public_build_intake_tests.py'):
+            for filename in ('public_build_context_tests.py','public_build_intake_tests.py','public_build_source_peer_tests.py'):
                 command = executable + ' -B ./tests/Fleetory.Tools.Tests/' + filename
                 self.refused(self.text.replace(command, 'omitted', 1))
                 self.refused(self.text.replace(command, command + '\n          ' + command, 1))
                 for option in ('if: false', 'continue-on-error: true'):
                     self.refused(self.text.replace('run: ' + command, option + '\n        run: ' + command, 1))
+
+        command = './tests/Fleetory.Tools.Tests/PublicBuildSourceTransport.Tests.ps1'
+        self.refused(self.text.replace(command, 'omitted', 1))
+        self.refused(self.text.replace(command, command + '\n          ' + command, 1))
+        for option in ('if: false', 'continue-on-error: true'):
+            self.refused(self.text.replace('run: ' + command, option + '\n        run: ' + command, 1))
 
 
 if __name__ == '__main__':

@@ -159,3 +159,14 @@ objects, another thread, original expiry, consumed failed attempts, CRL freshnes
 and the exact previously admitted SDK bytes. Private byte/control handoff to the
 surviving SDK worker still needs integration; a report or successful check alone
 cannot start a restored service or authenticate an original release.
+
+
+### Live source transport boundary
+
+`public_build.peer.serve_capture` consumes an actual captured public-input object before writing a fixed 60-byte frame header and at most 64 MiB of immutable context bytes. A private one-byte request consumes the sole pre-SDK freshness attempt; replay, unknown commands, source expiry and broken output refuse the operation. No CLI accepts a report or hash as a permission grant.
+
+`PublicBuildSourceTransport` receives that frame from an actual source-only Process under the original caller stopwatch (at most 420 seconds), checks the expected digest before allocating the context body, verifies the body, and consumes a single permit request. After the permit, an outstanding read detects EOF or unexpected source output. Failed frame capture cannot request a permit. Disposal closes the private input and, when needed, stops only this source-only child. This API never terminates a resource-owning worker and never adopts Docker resources.
+
+Required Windows/Linux gates run five actual Python peer tests and seven actual child transport cases, including size/magic/digest/truncation refusals, deadline, permit refusal and replay. The transport gate uses a generated PowerShell byte peer on both operating systems. The retained source filename rules and legacy Python source inventory remain unchanged.
+
+These libraries do not authenticate the original release or bind the complete Python runtime. The private surviving-owner integration and full native SDK handoff remain open. Windows-only held-file and controller/source/owner prototypes were tested separately on generated inputs with synthetic Docker replies; those results are not native recovery evidence. No original dumps, private PKI, live issuer or production tokens are admitted by this transport.
