@@ -16,7 +16,8 @@ from historical import retained_code_catalog as code_catalog
 packet, C, H, identity = use.packet, use.C, use.H, use.identity
 HEADER = 'fleetory.retained-service-peer-header.v1'
 MAX_CONTROL, MAX_PRIVATE = 184320, 25165824
-EXTRA = ('historical/retained_service_peer.py', 'historical/RetainedServiceUseTransport.ps1')
+EXTRA = ('historical/retained_service_peer.py', 'historical/RetainedServiceUseTransport.ps1',
+         'historical/retained_source_bootstrap.py')
 REPO = Path(__file__).resolve().parents[3]
 
 

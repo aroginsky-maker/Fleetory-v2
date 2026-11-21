@@ -66,7 +66,7 @@ function Invoke-RetainedCoupledAudit($Namespace,$AuditStore,$Material,[byte[]]$A
         $valueBytes=[Text.Encoding]::UTF8.GetBytes(($values|ConvertTo-Json -Depth 10 -Compress))
         $body=@{sourceBase64=[Convert]::ToBase64String($valueBytes);sourceSha256=(Get-ImmuDataHash $valueBytes);nonce=$Nonce;
             point=$expected.point;producer=$expected.producer}
-        $built=Invoke-NativeBytes $comparisonPython @('-I','-S','-B',(Join-Path $pilot 'historical_audit_observation.py'),'build') ([Text.Encoding]::UTF8.GetBytes(($body|ConvertTo-Json -Depth 10 -Compress))) 10
+        $built=Invoke-NativeBytes $comparisonPython @('-I','-S','-B',(Join-Path $pilot 'historical/retained_source_bootstrap.py'),'historical-observation','build') ([Text.Encoding]::UTF8.GetBytes(($body|ConvertTo-Json -Depth 10 -Compress))) 10
         Assert-ImmuData ($built.ExitCode -eq 0 -and [string]::IsNullOrWhiteSpace($built.Stderr)) 'retained-historical-frame'
         $expected=$built.Stdout|ConvertFrom-Json -AsHashtable -Depth 14
     }
@@ -80,7 +80,7 @@ function Invoke-RetainedCoupledAudit($Namespace,$AuditStore,$Material,[byte[]]$A
     $expectedBytes=[Text.Encoding]::UTF8.GetBytes(($expected|ConvertTo-Json -Depth 10 -Compress))
     $frame=@{expectedBase64=[Convert]::ToBase64String($expectedBytes);expectedSha256=(Get-ImmuDataHash $expectedBytes);
         observedBase64=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(($native|ConvertTo-Json -Depth 16 -Compress)))}
-    $arguments=if($Historical){@('-I','-S','-B',(Join-Path $pilot 'historical_audit_observation.py'),'observe')}else{@('-I','-S','-B',(Join-Path $pilot 'audit_observation.py'))}
+    $arguments=if($Historical){@('-I','-S','-B',(Join-Path $pilot 'historical/retained_source_bootstrap.py'),'historical-observation','observe')}else{@('-I','-S','-B',(Join-Path $pilot 'historical/retained_source_bootstrap.py'),'observation')}
     $parsed=Invoke-NativeBytes $comparisonPython $arguments ([Text.Encoding]::UTF8.GetBytes(($frame|ConvertTo-Json -Compress))) 10
     Assert-ImmuData ($parsed.ExitCode -eq 0 -and [string]::IsNullOrWhiteSpace($parsed.Stderr)) 'retained-coupled-audit-comparison'
     $report=$parsed.Stdout|ConvertFrom-Json -AsHashtable

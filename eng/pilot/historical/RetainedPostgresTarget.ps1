@@ -52,7 +52,7 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
     function New-IndependentControllerStart([string]$ModeFlow,[string]$Mode){
         $start=New-HistoricalChildStart $comparisonPython
         $start.WorkingDirectory=$pilot
-        foreach($part in @('-I','-S','-B',(Join-Path $pilot 'historical_audit_observation.py'),$Mode,$ModeFlow,
+        foreach($part in @('-I','-S','-B',(Join-Path $pilot 'historical/retained_source_bootstrap.py'),'historical-observation',$Mode,$ModeFlow,
             $plan.nonce,$comparisonPythonHash,$codeSnapshot.comparisonSourcePins)){$start.ArgumentList.Add($part)}
         return $start
     }
@@ -119,10 +119,10 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
         return Invoke-Docker $Arguments $InputBytes 15 -AllowFailure:$AllowFailure -ObserveProcess ${function:Observe-RetainedNativeProcess}
     }
     function Read-RetainedInventory([ValidateSet('fleetory','fleetory_signer')][string]$database){
-        $sql=Invoke-NativeBytes $Python @('-I','-S','-B',(Join-Path $pilot 'pg_inventory_v2.py'),'sql','--database',$database) -TimeoutSeconds 10
+        $sql=Invoke-NativeBytes $Python @('-I','-S','-B',(Join-Path $pilot 'historical/retained_source_bootstrap.py'),'inventory','sql','--database',$database) -TimeoutSeconds 10
         Assert-ImmuData ($sql.ExitCode-eq0-and[string]::IsNullOrWhiteSpace($sql.Stderr)) 'retained-pg-readback-sql'
         $native=Pg-Sql $database $sql.Stdout
-        $decoded=Invoke-NativeBytes $Python @('-I','-S','-B',(Join-Path $pilot 'pg_inventory_v2.py'),'readback','--database',$database) $native.StdoutBytes 10
+        $decoded=Invoke-NativeBytes $Python @('-I','-S','-B',(Join-Path $pilot 'historical/retained_source_bootstrap.py'),'inventory','readback','--database',$database) $native.StdoutBytes 10
         Assert-ImmuData ($decoded.ExitCode-eq0-and[string]::IsNullOrWhiteSpace($decoded.Stderr)) 'retained-pg-readback-parser'
         $value=$decoded.Stdout|ConvertFrom-Json -AsHashtable -Depth 20
         foreach($field in @('inventorySha256','securitySha256')){

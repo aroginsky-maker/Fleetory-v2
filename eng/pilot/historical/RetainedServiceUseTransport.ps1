@@ -29,7 +29,7 @@ function Open-RetainedServiceUsePeer([string]$Repository,[string]$Python,[string
     . (Join-Path $PSScriptRoot '../HistoricalAuditInputPins.ps1')
     $sourceSnapshot=Get-HistoricalAuditCodeSnapshot $Repository -IncludeSourcePins
     $codeBody=[Text.Encoding]::UTF8.GetBytes((@{snapshot=$sourceSnapshot;nonce=$Commitments.nonce}|ConvertTo-Json -Depth 10 -Compress))
-    $codeReply=Invoke-NativeBytes $Python @('-I','-S','-B',(Join-Path $PSScriptRoot 'retained_code_catalog.py')) $codeBody 20
+    $codeReply=Invoke-NativeBytes $Python @('-I','-S','-B',(Join-Path $PSScriptRoot 'retained_source_bootstrap.py'),'catalog') $codeBody 20
     Assert-ImmuData ($codeReply.ExitCode -eq 0 -and [string]::IsNullOrWhiteSpace($codeReply.Stderr)) 'service-peer-code-catalog'
     $code=$codeReply.Stdout|ConvertFrom-Json -AsHashtable
     $request=@{metadata=@{};nonce=$Commitments.nonce;revision=$Commitments.revision;imageId=$Commitments.imageId;
@@ -43,7 +43,7 @@ function Open-RetainedServiceUsePeer([string]$Repository,[string]$Python,[string
     $oldDirectory=[Environment]::CurrentDirectory
     try{
         [Environment]::CurrentDirectory=$InputRoot
-        $prepared=Invoke-NativeBytes $Python @('-I','-S','-B',(Join-Path $PSScriptRoot 'retained_service_peer.py'),'--prepare') ([Text.Encoding]::UTF8.GetBytes(($request|ConvertTo-Json -Depth 8 -Compress))) 20
+        $prepared=Invoke-NativeBytes $Python @('-I','-S','-B',(Join-Path $PSScriptRoot 'retained_source_bootstrap.py'),'peer','--prepare') ([Text.Encoding]::UTF8.GetBytes(($request|ConvertTo-Json -Depth 8 -Compress))) 20
         $category='unclassified'
         foreach($stage in @('metadata','parent-runtime','parent-identity')){
             if($prepared.Stderr.TrimEnd() -ceq ('Retained service preparation refused at '+$stage+'; no input contents logged.')){$category=$stage}
@@ -64,7 +64,7 @@ function Open-RetainedServiceUsePeer([string]$Repository,[string]$Python,[string
     try{
         $start=New-HistoricalChildStart $Python
         $start.WorkingDirectory=$InputRoot
-        foreach($part in @('-I','-S','-B',(Join-Path $PSScriptRoot 'retained_service_peer.py'),'--header-sha256',$header.sha256)){$start.ArgumentList.Add($part)}
+        foreach($part in @('-I','-S','-B',(Join-Path $PSScriptRoot 'retained_source_bootstrap.py'),'peer','--header-sha256',$header.sha256)){$start.ArgumentList.Add($part)}
         $peer.holder=[Diagnostics.Process]::Start($start);$null=$peer.holder.Handle
         $sealed.holder=$peer.holder
         $peer.childBirth=Get-HistoricalNativeBirth $peer.holder

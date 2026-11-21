@@ -47,7 +47,7 @@ function Invoke-RetainedServerStage($Namespace,$AuditStore,$Material,[byte[]]$Sn
                 $sourceBytes=[Text.Encoding]::UTF8.GetBytes(($derived|ConvertTo-Json -Depth 10 -Compress))
                 $body=@{sourceBase64=[Convert]::ToBase64String($sourceBytes);sourceSha256=(Get-ImmuDataHash $sourceBytes);nonce=$Nonce;
                     point=$AuditExpectation.point;producer=$AuditExpectation.producer}
-                $built=Invoke-NativeBytes $comparisonPython @('-I','-S','-B',(Join-Path $pilot 'historical_audit_observation.py'),'build') ([Text.Encoding]::UTF8.GetBytes(($body|ConvertTo-Json -Depth 10 -Compress))) 10
+                $built=Invoke-NativeBytes $comparisonPython @('-I','-S','-B',(Join-Path $pilot 'historical/retained_source_bootstrap.py'),'historical-observation','build') ([Text.Encoding]::UTF8.GetBytes(($body|ConvertTo-Json -Depth 10 -Compress))) 10
                 Assert-ImmuData ($built.ExitCode -eq 0 -and [string]::IsNullOrWhiteSpace($built.Stderr)) 'retained-historical-negative-consistent-frame'
                 $bad.observation=$built.Stdout|ConvertFrom-Json -AsHashtable -Depth 14
             }

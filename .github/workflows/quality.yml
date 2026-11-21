@@ -296,6 +296,10 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/retained_code_catalog_tests.py
 
+      - name: Verify retained source-only entry points on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/retained_source_bootstrap_tests.py
+
       - name: Verify isolated retained Python bootstrap on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/retained_python_isolation_tests.py
@@ -866,6 +870,10 @@ jobs:
       - name: Verify fixed retained source catalog
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/retained_code_catalog_tests.py
+
+      - name: Verify retained source-only entry points
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/retained_source_bootstrap_tests.py
 
       - name: Verify isolated retained Python bootstrap
         shell: pwsh
