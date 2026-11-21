@@ -11,6 +11,7 @@ import threading
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from historical import retained_service_use as use
+from historical import retained_code_catalog as code_catalog
 
 packet, C, H, identity = use.packet, use.C, use.H, use.identity
 HEADER = 'fleetory.retained-service-peer-header.v1'
@@ -67,9 +68,12 @@ def _mode(value):
 
 def prepare(raw):
     value = packet.strict_json(raw, MAX_CONTROL)
-    packet.keys(value, 'metadata nonce revision imageId probeSha256 configurationSha256 mode')
+    packet.keys(value, 'metadata nonce revision imageId probeSha256 configurationSha256 mode codePlan codePlanSha256')
     packet.keys(value['metadata'], 'selection manifest checkpoint ci local')
     metadata = {n: packet.decode(v, 524288) for n, v in value['metadata'].items()}
+    code_plan = packet.decode(value['codePlan'], code_catalog.lease.MAX_PLAN)
+    code_info = code_catalog.lease._plan(code_plan, value['codePlanSha256'], code_catalog.names(REPO))
+    packet.require(code_info[1] == value['nonce'])
     root = Path.cwd().resolve(strict=True)
     plan = dict(schema=use.SCHEMA, purpose=use.PURPOSE, nonce=value['nonce'], revision=value['revision'],
                 root=str(root), pins={n:H(v) for n,v in metadata.items()},
@@ -93,7 +97,8 @@ def prepare(raw):
             raise PreparationRefused('parent-identity') from None
     header = dict(schema=HEADER, plan=base64.b64encode(frozen).decode('ascii'), planSha256=H(frozen),
                   metadata=value['metadata'], parent=parent, mode=_mode(value['mode']),
-                  sources={n:H((REPO/'eng/pilot'/n).read_bytes()) for n in EXTRA})
+                  sources={n:H((REPO/'eng/pilot'/n).read_bytes()) for n in EXTRA},
+                  codePlan=value['codePlan'], codePlanSha256=value['codePlanSha256'])
     data = C(header)
     packet.require(len(data) <= MAX_CONTROL)
     return dict(header=base64.b64encode(data).decode('ascii'), sha256=H(data), nonce=plan['nonce'], parent=parent)
@@ -152,7 +157,7 @@ def run(expected):
     raw = _receive()
     packet.require(H(raw) == packet.hex_value(expected))
     header = packet.strict_json(raw, MAX_CONTROL)
-    packet.keys(header, 'schema plan planSha256 metadata parent mode sources')
+    packet.keys(header, 'schema plan planSha256 metadata parent mode sources codePlan codePlanSha256')
     packet.require(header['schema'] == HEADER)
     mode = _mode(header['mode'])
     packet.keys(header['metadata'], 'selection manifest checkpoint ci local')
@@ -161,6 +166,11 @@ def run(expected):
     declared = packet.strict_json(plan, use.MAX_PLAN)
     packet.keys(header['sources'], ' '.join(EXTRA))
     with ExitStack() as held:
+        code_names = code_catalog.names(REPO)
+        code_lease = held.enter_context(code_catalog.lease.hold(REPO,
+            packet.decode(header['codePlan'], code_catalog.lease.MAX_PLAN), header['codePlanSha256'], code_names))
+        code_report = code_lease.report()
+        packet.require(code_report['nonce'] == declared['nonce'])
         pinned = held.enter_context(identity.process.PinnedFile(_parent_path(), header['parent']['executableSha256'], True))
         parent = held.enter_context(identity.HeldLocalPeer('parent', pinned, header['parent']))
         extra = [held.enter_context(identity.process.PinnedFile(
@@ -168,6 +178,12 @@ def run(expected):
         reader = _Reader()
         count = 0
         def check():
+            try:
+                packet.require(code_catalog.names(REPO) == code_names)
+                code_lease.check()
+            except Exception:
+                _send(C(dict(kind='code-refused',nonce=declared['nonce'],codePlanSha256=header['codePlanSha256'])))
+                raise
             packet.require(parent.snapshot()['state'] == 'live')
             for source in extra:
                 source.check()
@@ -202,7 +218,8 @@ def run(expected):
         with use.use(Path.cwd().resolve().parent/'operator', Path.cwd().resolve(), REPO,
                      plan, header['planSha256'], metadata, consume) as current:
             _send(C(dict(kind='bound',nonce=declared['nonce'],headerSha256=H(raw),
-                         planSha256=H(plan),consumer=parent.snapshot()['identity'],owner=current.report()['heldProcessIdentity'])))
+                         planSha256=H(plan),consumer=parent.snapshot()['identity'],owner=current.report()['heldProcessIdentity'],
+                         codePlanSha256=header['codePlanSha256'],codeFiles=code_report['files'])))
             start = packet.strict_json(reader.next(check), 512)
             packet.keys(start, 'kind nonce')
             packet.require(start == dict(kind='capture',nonce=declared['nonce']))
@@ -210,7 +227,8 @@ def run(expected):
             result = current.dispatch()
             _send(C(dict(kind='receipt',nonce=declared['nonce'],resultSha256=H(result),
                          planSha256=H(plan),statusChecks=count,actualParentIdentityBound=True,
-                         nativeResultAuthenticated=False,executionAuthorized=False,phase7Complete=False)))
+                         nativeResultAuthenticated=False,executionAuthorized=False,phase7Complete=False,
+                         codePlanSha256=header['codePlanSha256'],codeFiles=code_report['files'])))
             stop = packet.strict_json(reader.next(check), 512)
             packet.require(stop == dict(kind='close',nonce=declared['nonce']))
         _send(C(dict(kind='closed',nonce=declared['nonce'],phase7Complete=False)))

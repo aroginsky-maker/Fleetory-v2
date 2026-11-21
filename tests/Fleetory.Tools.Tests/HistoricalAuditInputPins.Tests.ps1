@@ -46,6 +46,17 @@ try{
         try{[IO.File]::Delete($path);Refused {Get-HistoricalAuditCodeSnapshot $repo}}finally{[IO.File]::WriteAllBytes($path,$bytes)}
     }
     Git-Fixture @('commit','--allow-empty','--quiet','-m','Same files new revision')
+    $withSources=Get-HistoricalAuditCodeSnapshot $repo -IncludeSourcePins
+    $withoutSources=Get-HistoricalAuditCodeSnapshot $repo
+    Check (-not $withoutSources.ContainsKey('sourcePins'))
+    Check ($withSources.sha256 -ceq $withoutSources.sha256 -and $withSources.files -eq $withSources.sourcePins.Count)
+    [long]$sourceBytes=0
+    foreach($entry in $withSources.sourcePins.GetEnumerator()){
+        $actual=Get-HistoricalInputFileHash (Join-Path $repo $entry.Key) 1048576
+        Check ($entry.Value.bytes -eq $actual.bytes -and $entry.Value.sha256 -ceq $actual.sha256)
+        $sourceBytes+=$entry.Value.bytes
+    }
+    Check ($sourceBytes -eq $withSources.bytes -and -not $withSources.executionContinuityVerified -and -not $withSources.softwareOriginAuthenticated)
     $second=Get-HistoricalAuditCodeSnapshot $repo
     Check ($second.sha256 -cne $pin.sha256 -and $second.revision -cne $pin.revision)
     $probeFiles=@('ServerBackendProbe.dll','ServerBackendProbe.deps.json','ServerBackendProbe.runtimeconfig.json','dependency.dll','probe.pdb','nested/resource.dll')

@@ -20,6 +20,7 @@ function Invoke-RetainedDataStageHost([string]$Repository,[string]$Python,[strin
         $payload=Receive-RetainedServicePayload $admission
         Confirm-RetainedServiceUseLive $admission $admission.cancel.Token
         if($null -ne $GeneratedAfterCapture){$null=& $GeneratedAfterCapture}
+        Confirm-RetainedServiceUseLive $admission $admission.cancel.Token
         $auditStage=@{ImageContext=$ImageContext;Material=$Material;Point=$AuditPoint;ServerEnabled=$true;Historical=$true;
             AdmissionPeer=$admission;ExpectedConfigurationSha256=$Commitments.configurationSha256;
             GeneratedAdmissionFault=$loss;GeneratedAdmissionExpiry=$expiry}
@@ -41,6 +42,8 @@ function Invoke-RetainedDataStageHost([string]$Repository,[string]$Python,[strin
         return @{schema='fleetory.retained-native-data-host.v1';verified=$true;case=$result;
             measuredImageId=$Commitments.imageId;probeSha256=$Commitments.probeSha256;configurationSha256=$Commitments.configurationSha256;
             privateFourPacketTransferVerified=$true;statusChecks=$admission.statusChecks;
+            heldCodeFiles=$admission.codeFiles;heldCodePlanSha256=$admission.codePlanSha256;
+            codeLeaseHandoffBound=$true;fullTransitiveExecutionVerified=$false;
             actualChildExitVerified=($admission.closed -or ($loss -and $admission.holder.HasExited -and $admission.holder.ExitCode -ne 0));
             admissionLossAfterPgRestoreVerified=$loss;
             admissionOriginalExpiryVerified=($expiry -and $result.admissionOriginalExpiryMilliseconds -ge 108000);

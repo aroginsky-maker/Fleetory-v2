@@ -10,7 +10,7 @@ import uuid
 import retained_service_use_tests as fixture
 
 
-def main(powershell, fault=False):
+def main(powershell, fault=False, code_drift=False):
     test = fixture.ServiceUseTests('runTest')
     test.setUp()
     generated = None
@@ -45,6 +45,8 @@ def main(powershell, fault=False):
                 '-Python',sys.executable,'-InputRoot',str(offline)]
         if fault:
             args.append('-ExitAfterRelease')
+        if code_drift:
+            args.append('-InjectCodeName')
         result = subprocess.run(args,capture_output=True,text=True,timeout=125,
                                 **({'creationflags':subprocess.CREATE_NO_WINDOW} if sys.platform=='win32' else {}))
         if result.returncode:
@@ -63,4 +65,4 @@ def main(powershell, fault=False):
 
 
 if __name__=='__main__':
-    sys.exit(main(sys.argv[1], fault='--exit-after-release' in sys.argv[2:]))
+    sys.exit(main(sys.argv[1], fault='--exit-after-release' in sys.argv[2:], code_drift='--code-drift' in sys.argv[2:]))

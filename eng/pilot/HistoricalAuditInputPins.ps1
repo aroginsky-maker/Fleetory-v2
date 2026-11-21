@@ -24,7 +24,7 @@ function Get-HistoricalInputFileHash([string]$Path,[long]$Limit){
         return @{bytes=$count;sha256=[Convert]::ToHexString($hash.GetHashAndReset()).ToLowerInvariant()}
     }finally{if($null -ne $hash){$hash.Dispose()};if($null -ne $stream){$stream.Dispose()}}
 }
-function Get-HistoricalAuditCodeSnapshot([string]$Repository,[string]$Git='git',[switch]$IncludeComparisonWorkerPins){
+function Get-HistoricalAuditCodeSnapshot([string]$Repository,[string]$Git='git',[switch]$IncludeComparisonWorkerPins,[switch]$IncludeSourcePins){
     $root=Get-ProviderOrdinaryItem $Repository
     Assert-ImmuData ($root.PSIsContainer -and $root.FullName -ceq $Repository) 'controller-code-root'
     $revision=Get-HistoricalAuditRevision $Repository $Git
@@ -48,11 +48,13 @@ function Get-HistoricalAuditCodeSnapshot([string]$Repository,[string]$Git='git',
         'eng/pilot/recovery_files.py','eng/pilot/fresh_server_pair.py',
         'eng/pilot/audit_archive.py')
     $selected=@{}
+    $sourcePins=@{}
     [long]$total=0
     foreach($name in $ordered){
         $path=[IO.Path]::GetFullPath((Join-Path $Repository $name))
         Assert-ImmuData ($path.StartsWith($Repository+[IO.Path]::DirectorySeparatorChar,[StringComparison]::Ordinal)) 'controller-code-containment'
         $file=Get-HistoricalInputFileHash $path 1048576
+        if($IncludeSourcePins){$sourcePins[$name]=@{bytes=$file.bytes;sha256=$file.sha256}}
         if($IncludeComparisonWorkerPins -and $name -cin $comparisonSources){$selected[$name]=$file.sha256}
         $total+=$file.bytes;Assert-ImmuData ($total -le 67108864) 'controller-code-total'
         $null=$lines.Append($name).Append("`n").Append($file.bytes.ToString([Globalization.CultureInfo]::InvariantCulture)).Append("`n").Append($file.sha256).Append("`n")
@@ -65,6 +67,7 @@ function Get-HistoricalAuditCodeSnapshot([string]$Repository,[string]$Git='git',
         Assert-ImmuData ($selected.Count -eq $comparisonSources.Count) 'controller-worker-source-set'
         $snapshot.comparisonSourcePins=($comparisonSources|ForEach-Object {$selected[$_]}) -join ','
     }
+    if($IncludeSourcePins){$snapshot.sourcePins=$sourcePins}
     return $snapshot
 }
 function Get-HistoricalProbeBundle([string]$Directory){

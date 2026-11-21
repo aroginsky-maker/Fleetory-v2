@@ -26,8 +26,14 @@ function Open-RetainedServiceUsePeer([string]$Repository,[string]$Python,[string
     [ValidateSet('normal','exit-after-release','exit-on-request','expire-after-restore')][string]$Mode='normal'){
     $expected=Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent
     Assert-ImmuData ($Repository -ceq $expected -and $Metadata.Count -eq 5) 'service-peer-repository'
+    . (Join-Path $PSScriptRoot '../HistoricalAuditInputPins.ps1')
+    $sourceSnapshot=Get-HistoricalAuditCodeSnapshot $Repository -IncludeSourcePins
+    $codeBody=[Text.Encoding]::UTF8.GetBytes((@{snapshot=$sourceSnapshot;nonce=$Commitments.nonce}|ConvertTo-Json -Depth 10 -Compress))
+    $codeReply=Invoke-NativeBytes $Python @('-I','-S','-B',(Join-Path $PSScriptRoot 'retained_code_catalog.py')) $codeBody 20
+    Assert-ImmuData ($codeReply.ExitCode -eq 0 -and [string]::IsNullOrWhiteSpace($codeReply.Stderr)) 'service-peer-code-catalog'
+    $code=$codeReply.Stdout|ConvertFrom-Json -AsHashtable
     $request=@{metadata=@{};nonce=$Commitments.nonce;revision=$Commitments.revision;imageId=$Commitments.imageId;
-        probeSha256=$Commitments.probeSha256;configurationSha256=$Commitments.configurationSha256;mode=$Mode}
+        probeSha256=$Commitments.probeSha256;configurationSha256=$Commitments.configurationSha256;mode=$Mode;codePlan=$code.plan;codePlanSha256=$code.sha256}
     foreach($name in @('selection','manifest','checkpoint','ci','local')){
         Assert-ImmuData ($Metadata.ContainsKey($name) -and $Metadata[$name] -is [byte[]]) 'service-peer-metadata'
         $request.metadata[$name]=[Convert]::ToBase64String($Metadata[$name])
@@ -52,7 +58,7 @@ function Open-RetainedServiceUsePeer([string]$Repository,[string]$Python,[string
     $originalClock=[Diagnostics.Stopwatch]::StartNew()
     $peer=@{holder=$null;owner=$self;ownerBirth=$selfBirth;childBirth=$null;originalClock=$originalClock;cancel=[Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds(108));
         input=$null;output=$null;nonce=$Commitments.nonce;headerSha256=$header.sha256;planSha256=$null;payloadSha256=$null;
-        mode=$Mode;statusChecks=0;result=$false;closed=$false;errorStream=[Fleetory.Tests.PilotCaptureStream]::new(4096);errorDrain=$null}
+        mode=$Mode;codePlanSha256=$code.sha256;codeFiles=$code.files;statusChecks=0;result=$false;closed=$false;errorStream=[Fleetory.Tests.PilotCaptureStream]::new(4096);errorDrain=$null}
     $sealed=@{owner=$peer.owner;holder=$null;cancel=$peer.cancel;errorStream=$peer.errorStream}
     $script:RetainedServicePeers.Add($peer,$sealed)
     try{
@@ -66,7 +72,7 @@ function Open-RetainedServiceUsePeer([string]$Repository,[string]$Python,[string
         $peer.errorDrain=$peer.holder.StandardError.BaseStream.CopyToAsync($peer.errorStream)
         Send-IndependentFrame $peer.input ([Convert]::FromBase64String($header.header)) $peer.cancel.Token
         $bound=Read-RetainedServiceMessage $peer
-        Assert-ImmuData ($bound.Count -eq 6 -and $bound.kind -ceq 'bound' -and $bound.nonce -ceq $peer.nonce -and
+        Assert-ImmuData ($bound.Count -eq 8 -and $bound.codePlanSha256 -ceq $Peer.codePlanSha256 -and $bound.codeFiles -eq $Peer.codeFiles -and $bound.kind -ceq 'bound' -and $bound.nonce -ceq $peer.nonce -and
             $bound.headerSha256 -ceq $peer.headerSha256 -and $bound.owner.pid -eq $peer.holder.Id -and
             $bound.owner.birthKind -ceq $peer.childBirth.kind -and $bound.owner.birthToken -ceq $peer.childBirth.token -and
             $bound.consumer.pid -eq $PID -and $bound.consumer.birthToken -ceq $peer.ownerBirth.token) 'service-peer-bound'
@@ -110,7 +116,7 @@ function Complete-RetainedServiceUse($Peer,[byte[]]$Result){
     Send-RetainedServiceMessage $Peer @{kind='result';nonce=$Peer.nonce;resultSha256=$digest}
     Send-IndependentFrame $Peer.input $Result $Peer.cancel.Token
     $receipt=Read-RetainedServiceMessage $Peer
-    Assert-ImmuData ($receipt.Count -eq 9 -and $receipt.kind -ceq 'receipt' -and $receipt.nonce -ceq $Peer.nonce -and
+    Assert-ImmuData ($receipt.Count -eq 11 -and $receipt.codePlanSha256 -ceq $Peer.codePlanSha256 -and $receipt.codeFiles -eq $Peer.codeFiles -and $receipt.kind -ceq 'receipt' -and $receipt.nonce -ceq $Peer.nonce -and
         $receipt.planSha256 -ceq $Peer.planSha256 -and $receipt.resultSha256 -ceq $digest -and
         $receipt.statusChecks -eq $Peer.statusChecks -and $receipt.actualParentIdentityBound -eq $true -and
         $receipt.nativeResultAuthenticated -eq $false -and $receipt.executionAuthorized -eq $false -and $receipt.phase7Complete -eq $false) 'service-peer-result-receipt'

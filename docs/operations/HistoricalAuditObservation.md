@@ -1,6 +1,6 @@
 # Historical audit observation
 
-Baseline §17 requires historical comparison scope to survive native recovery
+Baseline В§17 requires historical comparison scope to survive native recovery
 observation. The explicit profile `historical-one-null-member-readonly.v1`
 accepts the separate historical expectation producer's four known hashes with
 exactly one preserved null context member. It cannot establish current writer
@@ -84,3 +84,7 @@ trust pins, applicable data authority and a fresh one-use purpose record.
 `additionalStateReviewed`, `wholeKeyspaceVerified`, `executionAuthorized` and
 `fullSystemRecoveryVerified` remain false. Phase 7 stays open and PR #2 stays
 draft and unmerged.
+
+The [retained public source handle boundary](RetainedSourceHandles.md) binds
+current source bytes during generated service admission; runtime/cache/build
+closure and the original-purpose executor remain separate open controls.

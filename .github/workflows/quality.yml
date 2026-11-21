@@ -288,6 +288,14 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/retained_expected_inventory_tests.py
 
+      - name: Verify held retained source handles on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/retained_code_lease_tests.py
+
+      - name: Verify fixed retained source catalog on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/retained_code_catalog_tests.py
+
       - name: Verify isolated retained Python bootstrap on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/retained_python_isolation_tests.py
@@ -850,6 +858,14 @@ jobs:
       - name: Verify original inventory metadata mapping
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/retained_expected_inventory_tests.py
+
+      - name: Verify held retained source handles
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/retained_code_lease_tests.py
+
+      - name: Verify fixed retained source catalog
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/retained_code_catalog_tests.py
 
       - name: Verify isolated retained Python bootstrap
         shell: pwsh

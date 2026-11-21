@@ -1,5 +1,5 @@
 #requires -Version 7.3
-param([Parameter(Mandatory)][string]$Python,[Parameter(Mandatory)][string]$InputRoot,[switch]$ExitAfterRelease)
+param([Parameter(Mandatory)][string]$Python,[Parameter(Mandatory)][string]$InputRoot,[switch]$ExitAfterRelease,[switch]$InjectCodeName)
 $ErrorActionPreference='Stop';Set-StrictMode -Version Latest
 $repo=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 foreach($name in @('PilotNativeProcess.ps1','ProviderRecoveryTransport.ps1','ProviderRecoveryPolicy.ps1','ImmuDataRoundtripPolicy.ps1',
@@ -9,7 +9,7 @@ foreach($name in @('PilotNativeProcess.ps1','ProviderRecoveryTransport.ps1','Pro
 $request=Get-Content -Raw -LiteralPath (Join-Path $InputRoot 'generated-peer-metadata.json')|ConvertFrom-Json -AsHashtable -Depth 20
 $metadata=@{}
 foreach($name in @('selection','manifest','checkpoint','ci','local')){$metadata[$name]=[Convert]::FromBase64String($request.metadata[$name])}
-$peer=$null
+$peer=$null;$canary=$null;$canaryOwned=$false
 try{
     $mode=if($ExitAfterRelease){'exit-after-release'}else{'normal'}
     $peer=Open-RetainedServiceUsePeer $repo $Python $InputRoot $metadata $request.commitments -Mode $mode
@@ -48,6 +48,18 @@ try{
     }finally{$peer.holder.Dispose();$peer.holder=$originalHolder}
     $payload=Receive-RetainedServicePayload $peer
     Assert-ImmuData ($payload.capture.verifiedArtifacts -eq 4 -and $payload.packets.Count -eq 4 -and $payload.executionAuthorized -eq $false) 'prototype-four-packets'
+    if($InjectCodeName){
+        $canary=Join-Path $repo ('eng/pilot/generated-code-canary-'+[Guid]::NewGuid().ToString('N')+'.py')
+        $writer=[IO.FileStream]::new($canary,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+        try{$canaryOwned=$true;$bytes=[Text.Encoding]::ASCII.GetBytes('# generated namespace canary');$writer.Write($bytes)}finally{$writer.Dispose()}
+        $refused=Read-RetainedServiceMessage $peer
+        Assert-ImmuData ($refused.Count -eq 3 -and $refused.kind -ceq 'code-refused' -and $refused.nonce -ceq $peer.nonce -and
+            $refused.codePlanSha256 -ceq $peer.codePlanSha256 -and $peer.holder.WaitForExit(3500) -and $peer.holder.ExitCode -eq 1) 'prototype-code-namespace-refusal'
+        @{schema='fleetory.retained-code-namespace-refusal.v1';verified=$true;packets=4;
+            heldCodeFiles=$peer.codeFiles;typedCodeRefusalBeforeNativeTarget=$true;actualChildExitVerified=$true;
+            nativeTargetInvoked=$false;originalInputsRead=$false;originalExecutorReady=$false;phase7Complete=$false}|ConvertTo-Json -Compress
+        return
+    }
     Confirm-RetainedServiceUseLive $peer $peer.cancel.Token
     Confirm-RetainedServiceUseLive $peer $peer.cancel.Token
     $receipt=Complete-RetainedServiceUse $peer ([Text.Encoding]::UTF8.GetBytes('generated-native-consumer-result'))
@@ -55,4 +67,11 @@ try{
     @{schema='fleetory.retained-service-parent-transport-prototype.v1';verified=$true;packets=4;statusChecks=2;
         actualPowerShellParentBound=$true;actualChildExitVerified=$true;copiedOrReplacedPeersRejected=$rejected;nativeTargetInvoked=$false;originalInputsRead=$false;
         nativeResultAuthenticated=$false;originalExecutorReady=$false;phase7Complete=$false}|ConvertTo-Json -Compress
-}finally{Close-RetainedServiceUsePeer $peer}
+}finally{
+    try{Close-RetainedServiceUsePeer $peer}finally{
+        if($canaryOwned){
+            Assert-ImmuData ([IO.File]::ReadAllText($canary) -ceq '# generated namespace canary') 'prototype-owned-canary-content'
+            [IO.File]::Delete($canary)
+        }
+    }
+}
