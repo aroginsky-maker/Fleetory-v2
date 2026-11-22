@@ -141,3 +141,26 @@ foreach($argv in $immuCatalog){
 }
 Require ($immuCatalog.Count -eq 5 -and $immuRefusals -eq 75) 'observed-immudb-catalog'
 Write-Output 'OBSERVED IMMUDB CATALOG PASS:5 actual-builder profiles and 75 argument mutations refused; no Docker invocation.'
+
+$probePrefix=@('exec','-i','-e','SSL_CERT_FILE=/tmp/ca.pem','-e','SSL_CERT_DIR=/tmp/empty-ca-dir',$id,'dotnet','/tool/ServerBackendProbe.dll')
+$probePositives=0;$probeRefusals=0;$bad=@()
+foreach($mode in @('audit-health','history-users','observation-read','observation-history-read','retained-runtime','retained-readonly-host','pair-closed')){
+    Assert-RetainedObservedWorkArguments ($probePrefix+@($mode));$probePositives++
+    $bad+=,@($probePrefix+@($mode,'extra'));$bad+=,@($probePrefix+@('history-seed'))
+}
+foreach($mode in @('audit-expectations','audit-history-expectations')){
+    $valid=$probePrefix+@($mode,('b'*64),'01234567-89ab-cdef-0123-456789abcdef')
+    Assert-RetainedObservedWorkArguments $valid;$probePositives++
+    $bad+=,@($valid[0..10]);$bad+=,@($valid+'extra')
+    $changed=[string[]]$valid.Clone();$changed[10]='bad-pin';$bad+=,$changed
+    $changed=[string[]]$valid.Clone();$changed[11]='bad-nonce';$bad+=,$changed
+    $changed=[string[]]$valid.Clone();$changed[9]='pair-publish';$bad+=,$changed
+}
+foreach($argv in $bad){
+    try{Assert-RetainedObservedWorkArguments $argv;throw 'Unlisted probe mode or extra arguments accepted.'}catch{
+        if($_.Exception.GetBaseException().Message -cne 'Audit data fixture refused: observed-client-probe-mode'){throw}
+        $probeRefusals++
+    }
+}
+Require ($probePositives -eq 9 -and $probeRefusals -eq 24) 'observed-probe-mode-catalog'
+Write-Output 'OBSERVED PROBE CATALOG PASS:9 recovery modes and 24 mode/pin/nonce/extra-argument refusals; no Docker invocation.'

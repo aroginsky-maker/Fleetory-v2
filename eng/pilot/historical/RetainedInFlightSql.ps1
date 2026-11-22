@@ -93,6 +93,21 @@ function Assert-RetainedObservedWorkArguments([string[]]$Arguments,[string]$Expe
         }
         Assert-ImmuData $matched 'observed-client-immudb-purpose'
     }
+    if($program -ceq 'dotnet'){
+        $prefix=@('exec','-i','-e','SSL_CERT_FILE=/tmp/ca.pem','-e','SSL_CERT_DIR=/tmp/empty-ca-dir',
+            $Arguments[$index-1],'dotnet','/tool/ServerBackendProbe.dll')
+        Assert-ImmuData ($index -eq 7 -and $Arguments.Count -ge 10 -and
+            ($Arguments[0..8] -join "`0") -ceq ($prefix -join "`0")) 'observed-client-probe-prefix'
+        $mode=$Arguments[9]
+        $plain=$mode -cin @('audit-health','history-users','observation-read','observation-history-read','retained-runtime','retained-readonly-host','pair-closed')
+        $expectation=$mode -cin @('audit-expectations','audit-history-expectations')
+        $allowed=($plain -and $Arguments.Count -eq 10)
+        if($expectation -and $Arguments.Count -eq 12){
+            $allowed=$Arguments[10] -cmatch '^[a-f0-9]{64}\z' -and
+                $Arguments[11] -cmatch '^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\z'
+        }
+        Assert-ImmuData $allowed 'observed-client-probe-mode'
+    }
     # This is a command-shape boundary, never resource custody or full argv/runtime provenance.
 
 }
