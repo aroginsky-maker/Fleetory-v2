@@ -45,3 +45,18 @@ Require ($environmentRefusals -eq 8) 'observed-environment-purpose-refusals'
 
 
 Write-Output 'OBSERVED COMMAND PURPOSE PASS:8 real-builder positives,6 command refusals,8 environment refusals; no Docker invocation.'
+
+# The expected ID comes from the live owner, never from the argument packet.
+Assert-RetainedObservedWorkArguments @('exec',$id,'pg_isready','-q','-U','postgres') -ExpectedIdentifier $id
+Assert-RetainedObservedWorkArguments @('exec','-i','-e','PGCLIENTENCODING=UTF8',$id,'psql','-XqAt') -ExpectedIdentifier $id
+$foreign='b'*64;$ownedTargetRefusals=0
+foreach($arguments in @(@('exec',$foreign,'psql','-XqAt','-v',$id),@('exec','-i',$foreign,'psql',$id),
+    @('exec','-e',('PGAPPNAME='+$id),$foreign,'psql'),@('exec',$foreign,'dotnet','/tool/ServerBackendProbe.dll',$id))){
+    Require ($arguments -ccontains $id -or $arguments -ccontains ('PGAPPNAME='+$id)) 'owned-id-reproduction'
+    try{Assert-RetainedObservedWorkArguments $arguments -ExpectedIdentifier $id;throw 'Foreign target with owned ID elsewhere accepted.'}catch{
+        if($_.Exception.GetBaseException().Message -cne 'Audit data fixture refused: observed-client-owned-target'){throw}
+        $ownedTargetRefusals++
+    }
+}
+Require ($ownedTargetRefusals -eq 4) 'observed-owned-target-refusals'
+Write-Output 'OBSERVED OWNED TARGET PASS:2 exact-target positives and 4 misplaced-owned-ID refusals; no Docker invocation.'

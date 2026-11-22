@@ -1,6 +1,6 @@
 #requires -Version 7.3
 # Private functions run in the live retained owner's scope. No serialized process/resource claim is accepted.
-function Assert-RetainedObservedWorkArguments([string[]]$Arguments){
+function Assert-RetainedObservedWorkArguments([string[]]$Arguments,[string]$ExpectedIdentifier=''){
     Assert-ImmuData ($null -ne $Arguments -and $Arguments.Count -ge 3 -and $Arguments[0] -ceq 'exec') 'observed-client-exec-only'
     $index=1;$environments=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     while($index -lt $Arguments.Count -and $Arguments[$index].StartsWith('-',[StringComparison]::Ordinal)){
@@ -17,6 +17,9 @@ function Assert-RetainedObservedWorkArguments([string[]]$Arguments){
         }else{Assert-ImmuData ($option -cin @('-i','-d')) 'observed-client-option'}
     }
     Assert-ImmuData ($index+1 -lt $Arguments.Count -and $Arguments[$index] -cmatch '^[a-f0-9]{64}\z') 'observed-client-target-shape'
+    if($ExpectedIdentifier){
+        Assert-ImmuData ($ExpectedIdentifier -cmatch '^[a-f0-9]{64}\z' -and $Arguments[$index] -ceq $ExpectedIdentifier) 'observed-client-owned-target'
+    }
     $index++;$program=$Arguments[$index]
     Assert-ImmuData ($program -cin @('postgres','pg_isready','psql','pg_restore','initdb','pg_ctl','dotnet','sha256sum',
         '/bin/mkdir','/bin/cat','/bin/kill','/usr/sbin/immudb','/usr/local/bin/immuadmin','/bin/sh')) 'observed-client-program'

@@ -90,7 +90,7 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
         $identifier=Read-RetainedPg
         $meter.workInspections++
         Confirm-RetainedLiveWork
-        Assert-ImmuData ($Arguments.Count -ge 2 -and $Arguments[0] -ceq 'exec' -and $Arguments -ccontains $identifier) 'retained-pg-own-command'
+        Assert-RetainedObservedWorkArguments $Arguments -ExpectedIdentifier $identifier
         $meter.nativeDispatches++
         return Invoke-Docker $Arguments $InputBytes 15 -AllowFailure:$AllowFailure -ObserveProcess ${function:Observe-RetainedNativeProcess}
     }
@@ -114,7 +114,7 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
         $auditId=Read-RetainedAuditNamespace $auditContext $auditStore
         $meter.workInspections++
         Confirm-RetainedLiveWork
-        Assert-ImmuData ($Arguments.Count -ge 2 -and $Arguments[0] -ceq 'exec' -and $Arguments -ccontains $auditId) 'retained-audit-own-command'
+        Assert-RetainedObservedWorkArguments $Arguments -ExpectedIdentifier $auditId
         $meter.nativeDispatches++
         return Invoke-Docker $Arguments $InputBytes 15 -AllowFailure:$AllowFailure -ObserveProcess ${function:Observe-RetainedNativeProcess}
     }
