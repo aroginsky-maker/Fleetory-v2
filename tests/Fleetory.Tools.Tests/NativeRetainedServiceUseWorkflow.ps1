@@ -32,8 +32,26 @@ function Invoke-NativeRetainedServiceUseWorkflow([string]$InputRoot,[hashtable]$
                 [IO.File]::WriteAllText($path,'generated path replaced after private transfer')
             }
         }
-        $result=Invoke-RetainedDataStageHost $repo $Python $InputRoot $raw $commitments $Expected $AuditPoint $imageContext $material -Mode $mode -GeneratedAfterCapture $afterCapture
+        $hostOptions=@{}
+        if($OriginalPurpose){
+            Assert-Pair ($Metadata.generatedFixtureOnly -and $gates.generatedFixtureOnly) 'original-native-generated-scope'
+            . (Join-Path $repo 'eng/pilot/HistoricalAuditInputPins.ps1')
+            $snapshot=Get-HistoricalAuditCodeSnapshot $repo -IncludeSourcePins
+            $bundle=Get-HistoricalProbeBundle (Join-Path $root 'publish')
+            $manifest=[Text.Encoding]::UTF8.GetString($raw.manifest)|ConvertFrom-Json -AsHashtable
+            $references=@{}
+            foreach($kind in @('application-postgres','signer-postgres','audit-immudb','audit-export')){$references[$kind]=$manifest.artifacts[$kind]}
+            $measured=[ordered]@{schema='fleetory.generated-original-native-binding.v1';source=$snapshot;probe=$bundle;
+                imageId=$imageContext.ImageId;configurationSha256=$configuration.Sha256;scope='generated native rehearsal; full runtime/command/resource inventory remains unverified'}
+            $inventoryPin=Get-ImmuDataHash ([Text.Encoding]::UTF8.GetBytes(($measured|ConvertTo-Json -Depth 16 -Compress)))
+            $policyPin=Get-HistoricalInputFileHash (Join-Path $repo 'eng/pilot/historical/original_four_use.py') 1048576
+            $hostOptions.OriginalExpected=@{root=$InputRoot;artifacts=$references;revision=$commitments.revision;
+                imageId=$commitments.imageId;probeSha256=$commitments.probeSha256;configurationSha256=$commitments.configurationSha256;
+                executionInventorySha256=$inventoryPin;policySha256=$policyPin.sha256}
+        }
+        $result=Invoke-RetainedDataStageHost $repo $Python $InputRoot $raw $commitments $Expected $AuditPoint $imageContext $material -Mode $mode -GeneratedAfterCapture $afterCapture @hostOptions
         $result.schema='fleetory.native-retained-service-use-stage.v1'
+        if($OriginalPurpose){$result.schema='fleetory.native-original-four-service-use-stage.v1';$result.generatedBindingSha256=$inventoryPin;$result.fullRuntimeCommandResourceInventoryVerified=$false}
         $result.allFourGeneratedPathsReplacedAfterCapture=$true
         $result.sourceOriginalFilesRead=$false
         return $result

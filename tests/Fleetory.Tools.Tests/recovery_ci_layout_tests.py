@@ -29,6 +29,7 @@ RETAINED = (
     ('NativeServerPair.Tests.ps1', '-Profile v2-retained-service-use'),
     ('NativeServerPair.Tests.ps1', '-Profile v2-retained-service-use-loss'),
     ('NativeServerPair.Tests.ps1', '-Profile v2-retained-service-use-expiry'))
+ORIGINAL = tuple(('NativeServerPair.Tests.ps1','-Profile '+profile+' -OriginalPurpose') for profile in ('v2-retained-service-use','v2-retained-service-use-loss','v2-retained-service-use-expiry'))
 PAIR_ADMISSION = (
     '      - name: Verify coherent native Server pair restore and lifecycle\n'
     '        shell: pwsh\n'
@@ -72,7 +73,7 @@ def jobs(text):
 
 def validate(text):
     blocks = jobs(text)
-    assert set(blocks) == {'windows-tls-chain', 'windows-policy', 'quality', 'native-data-recovery', 'native-provider-recovery', 'native-retained-recovery', 'quality-gate'}
+    assert set(blocks) == {'windows-tls-chain', 'windows-policy', 'quality', 'native-data-recovery', 'native-provider-recovery', 'native-retained-recovery', 'native-original-recovery', 'quality-gate'}
     policy = blocks['windows-policy']
     assert '    runs-on: windows-latest\n' in policy and '    timeout-minutes: 10\n' in policy
     assert '    permissions:\n      contents: read\n' in policy
@@ -91,10 +92,10 @@ def validate(text):
             assert command not in blocks['windows-tls-chain']
     policy_commands = re.findall(r'^\s*(?:run: )?(\./tests/Fleetory.Tools.Tests/[^\n]+)', policy, re.MULTILINE)
     assert Counter(policy_commands) == Counter(c for item in WINDOWS_POLICY for c in item[2])
-    expected = Counter(name for name, _ in DATA + PROVIDER + RETAINED)
+    expected = Counter(name for name, _ in DATA + PROVIDER + RETAINED + ORIGINAL)
     found = Counter(re.findall(r'\./tests/Fleetory.Tools.Tests/([A-Za-z0-9]+\.Tests\.ps1)', text))
     assert all(found[name] == count for name, count in expected.items())
-    for key, cases, minutes in (('native-data-recovery', DATA, 20), ('native-provider-recovery', PROVIDER, 15), ('native-retained-recovery', RETAINED, 15)):
+    for key, cases, minutes in (('native-data-recovery', DATA, 20), ('native-provider-recovery', PROVIDER, 15), ('native-retained-recovery', RETAINED, 15), ('native-original-recovery', ORIGINAL, 15)):
         block = blocks[key]
         assert '    runs-on: ubuntu-24.04\n' in block and f'    timeout-minutes: {minutes}\n' in block
         assert not re.search(r'^\s*(if:|needs:|continue-on-error:|SONAR_|env:)', block, re.MULTILINE)
@@ -105,7 +106,7 @@ def validate(text):
         assert 'dotnet restore Fleetory.sln --force -warnaserror -p:FleetoryRequireDependencyAudit=true -p:NuGetAudit=true -p:NuGetAuditMode=all -p:NuGetAuditLevel=low -p:RestoreUseStaticGraphEvaluation=false\n' in block
         assert 'dotnet build Fleetory.sln -c Release --no-restore --disable-build-servers --warnaserror\n' in block
         bootstrap = block.split('      - name: Verify ', 1)[0]
-        assert bootstrap.count('if ($LASTEXITCODE -ne 0)') == (4 if key == 'native-retained-recovery' else 3)
+        assert bootstrap.count('if ($LASTEXITCODE -ne 0)') == (4 if key in ('native-retained-recovery','native-original-recovery') else 3)
         commands = re.findall(r'^\s*(?:run: )?(\./tests/Fleetory.Tools.Tests/[^\n]+)', block, re.MULTILINE)
         for name, profile in cases:
             prefix = './tests/Fleetory.Tools.Tests/' + name + (' ' + profile if profile else '')
@@ -337,7 +338,7 @@ def validate(text):
         assert block[start:end if end>=0 else len(block)].strip()==step.strip()
     aggregate = blocks['quality-gate']
     assert '    name: Strict build, tests, coverage and Sonar\n' in aggregate
-    assert '    needs: [quality, windows-tls-chain, windows-policy, native-data-recovery, native-provider-recovery, native-retained-recovery]\n' in aggregate
+    assert '    needs: [quality, windows-tls-chain, windows-policy, native-data-recovery, native-provider-recovery, native-retained-recovery, native-original-recovery]\n' in aggregate
     assert '    if: always()\n' in aggregate and 'continue-on-error:' not in aggregate
     assert '    name: Strict build, tests, coverage and Sonar execution\n' in blocks['quality']
     return True
@@ -379,7 +380,7 @@ class RecoveryCiLayoutTests(unittest.TestCase):
         self.assertTrue(validate(self.text))
 
     def test_missing_duplicated_or_changed_native_command_refused(self):
-        for name, profile in DATA + PROVIDER + RETAINED:
+        for name, profile in DATA + PROVIDER + RETAINED + ORIGINAL:
             needle = './tests/Fleetory.Tools.Tests/' + name + (' ' + profile if profile else '')
             self.refused(self.text.replace(needle, './tests/Fleetory.Tools.Tests/omitted.ps1', 1))
         self.refused(self.text + '\n      - name: Duplicate\n        run: ./tests/Fleetory.Tools.Tests/NativeJournalBackend.Tests.ps1\n')
@@ -651,7 +652,7 @@ class RecoveryCiLayoutTests(unittest.TestCase):
         script = '\n'.join(line[10:] for line in block.split('        run: |\n', 1)[1].splitlines())
         executable = shutil.which('pwsh')
         self.assertIsNotNone(executable)
-        names = ('quality', 'windows-tls-chain', 'windows-policy', 'native-data-recovery', 'native-provider-recovery', 'native-retained-recovery')
+        names = ('quality', 'windows-tls-chain', 'windows-policy', 'native-data-recovery', 'native-provider-recovery', 'native-retained-recovery', 'native-original-recovery')
         success = {name: {'result': 'success', 'outputs': {}} for name in names}
         cases = [(success, True), ({}, False), ({**success, 'extra': {'result': 'success'}}, False)]
         for name in names:
@@ -800,6 +801,19 @@ class RecoveryCiLayoutTests(unittest.TestCase):
                 self.refused(self.text.replace(command,command+'\n          '+command,1))
                 for option in ('if: false','continue-on-error: true'):
                     self.refused(self.text.replace('run: '+command,option+'\n        run: '+command,1))
+
+
+    def test_original_native_job_cannot_be_removed_or_softened(self):
+        block=jobs(self.text)['native-original-recovery']
+        self.refused(self.text.replace(block,''))
+        for option in ('    if: false\n','    continue-on-error: true\n','    needs: quality\n'):
+            self.refused(self.text.replace('  native-original-recovery:\n','  native-original-recovery:\n'+option))
+        for minutes in (10,20):
+            self.refused(self.text.replace(block,block.replace('timeout-minutes: 15','timeout-minutes: '+str(minutes),1)))
+        for name,profile in ORIGINAL:
+            command='./tests/Fleetory.Tools.Tests/'+name+' '+profile+' -Python (Get-Command python3).Source'
+            self.refused(self.text.replace(command,'omitted',1))
+            self.refused(self.text.replace(command,command+'\n          '+command,1))
 
 
 if __name__ == '__main__':

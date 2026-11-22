@@ -1,10 +1,12 @@
 #requires -Version 7.3
-param([string]$Python='',[ValidateSet('none','after-stores')][string]$FailurePoint='none',[ValidateSet('legacy','v2','v2-retained','v2-retained-coupled','v2-retained-server','v2-retained-historical-server','v2-retained-inflight','v2-retained-restore-inflight','v2-retained-service-use','v2-retained-service-use-loss','v2-retained-service-use-expiry')][string]$Profile='legacy',[switch]$PrivateRuntimeChild)
+param([string]$Python='',[ValidateSet('none','after-stores')][string]$FailurePoint='none',[ValidateSet('legacy','v2','v2-retained','v2-retained-coupled','v2-retained-server','v2-retained-historical-server','v2-retained-inflight','v2-retained-restore-inflight','v2-retained-service-use','v2-retained-service-use-loss','v2-retained-service-use-expiry')][string]$Profile='legacy',[switch]$PrivateRuntimeChild,[switch]$OriginalPurpose)
+if($OriginalPurpose -and $Profile -cnotin @('v2-retained-service-use','v2-retained-service-use-loss','v2-retained-service-use-expiry')){throw 'Original purpose is restricted to generated private-use profiles.'}
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
 if($IsLinux -and -not $PrivateRuntimeChild -and $Profile -cin @('v2-retained-service-use','v2-retained-service-use-loss','v2-retained-service-use-expiry')){
     if(-not $Python){$Python=(Get-Command python3).Source}
-    & $Python -B (Join-Path $PSScriptRoot 'run_native_service_use_profile.py') --powershell ([Environment]::ProcessPath) --profile $Profile --failure-point $FailurePoint
+    $originalArgs=if($OriginalPurpose){@('--original-purpose')}else{@()}
+    & $Python -B (Join-Path $PSScriptRoot 'run_native_service_use_profile.py') --powershell ([Environment]::ProcessPath) --profile $Profile --failure-point $FailurePoint @originalArgs
     if($LASTEXITCODE -ne 0){throw 'Private runtime native retained profile failed.'}
     return
 }

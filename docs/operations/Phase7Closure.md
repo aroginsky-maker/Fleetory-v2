@@ -57,9 +57,14 @@ Each native job restores its own pinned prerequisites; none depends on Sonar
 credentials or an upstream execution result. Admission, restore, lifecycle and
 cleanup checks remain required.
 
-The final aggregate requires all six execution jobs, including both Windows
+The final aggregate requires all seven execution jobs, including both Windows
 jobs. A missing, failed, cancelled, skipped or extra job result is rejected.
 Layout tests also reject removed/duplicated/softened moved checks, altered
 bootstrap and changed deadlines. The split addresses observed exhaustion of
 the former single Windows job's 20-minute budget; it does not relax a control,
 change the repository visibility or Actions budget, or accept any deployment.
+
+
+A separate required `native-original-recovery` job runs the generated original-purpose normal, admission-peer-loss and original-expiry profiles on the standard `ubuntu-24.04` runner with its own 15-minute limit. All previous jobs and limits remain. The aggregate requires all seven execution jobs; omission, duplication, skipping, cancellation or failure remains a refusal. Independent prerequisites retain strict restore/audit/build checks. The repository is public; standard GitHub-hosted runner execution is free under [GitHub's public-repository rules](https://docs.github.com/en/actions/reference/runners/github-hosted-runners). No larger runner, artifact upload, budget or visibility change is introduced.
+
+The three local generated native cases used identical working source hashes and passed 27 independent own-resource absence observations. Normal restored two PostgreSQL archives and immudb, then started/stopped Server twice with runtime login and backend refusal checks. Admission loss and original expiry blocked subsequent audit/Server execution; expiry measured 108789ms without renewal. These facts do not establish complete runtime/command/resource inventory, original release continuity or full-system recovery. Original backups and original private PKI were not opened by these cases.
