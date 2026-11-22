@@ -60,3 +60,31 @@ foreach($arguments in @(@('exec',$foreign,'psql','-XqAt','-v',$id),@('exec','-i'
 }
 Require ($ownedTargetRefusals -eq 4) 'observed-owned-target-refusals'
 Write-Output 'OBSERVED OWNED TARGET PASS:2 exact-target positives and 4 misplaced-owned-ID refusals; no Docker invocation.'
+
+$utilityPositives=0
+foreach($tail in @(@('sha256sum','/tool/ServerBackendProbe.dll'),@('/bin/cat','/tmp/immudb.pid'),
+    @('/bin/mkdir','-m','700','/tmp/empty-ca-dir'),@('/bin/mkdir','-m','700','/run/fleetory-native/server'),
+    @('/bin/kill','-TERM','123'),@('/bin/kill','-0','123'))){
+    Assert-RetainedObservedWorkArguments (@('exec',$id)+$tail);$utilityPositives++
+}
+$writeScript='set -eu; umask 077; test ! -L "$1"; cat > "$1"; stat -c %a:%u:%h "$1"; sha256sum "$1"'
+$paths=@('/tmp/ca.pem','/tmp/server.crt','/tmp/server.key','/tmp/client.crt','/tmp/client.key','/tmp/state.key','/tmp/immudb.toml','/tmp/cli.toml','/tmp/hba.conf',
+    '/run/fleetory-native/server/infrastructure-ca','/run/fleetory-native/server/audit-immudb-password','/run/fleetory-native/server/fleetory-postgresql','/run/fleetory-native/server/fleetory-signer-postgresql')
+foreach($role in @('agent','admin')){foreach($slot in @('root-ca','server-cert','server-key')){$paths+=('/run/fleetory-native/server/'+$role+'-gateway-'+$slot)}}
+foreach($path in $paths){Assert-RetainedObservedWorkArguments @('exec','-i',$id,'/bin/sh','-c',$writeScript,'fixture',$path);$utilityPositives++}
+$utilityRefusals=0
+$invalid=@(@('sha256sum','/tmp/server.key'),@('sha256sum','/tool/ServerBackendProbe.dll','/etc/passwd'),
+    @('/bin/cat','/tmp/server.key'),@('/bin/cat','/tmp/immudb.pid','/etc/passwd'),
+    @('/bin/mkdir','-m','777','/tmp/empty-ca-dir'),@('/bin/mkdir','-p','/tmp/other'),
+    @('/bin/kill','-KILL','123'),@('/bin/kill','-TERM','-1'),@('/bin/kill','-TERM','0'),@('/bin/kill','-TERM','123','124'))
+foreach($path in @('/etc/passwd','/tmp/../etc/passwd','/run/fleetory-native/server/foreign','/tmp/server.key/child',"/tmp/server.key`n")){
+    $invalid+=,@('/bin/sh','-c',$writeScript,'fixture',$path)
+}
+foreach($tail in $invalid){
+    try{Assert-RetainedObservedWorkArguments (@('exec',$id)+$tail);throw 'Unlisted recovery utility arguments accepted.'}catch{
+        if($_.Exception.GetBaseException().Message -notmatch '^Audit data fixture refused: observed-client-'){throw}
+        $utilityRefusals++
+    }
+}
+Require ($utilityPositives -eq 25 -and $utilityRefusals -eq 15) 'observed-utility-catalog'
+Write-Output 'OBSERVED UTILITY CATALOG PASS:25 fixed-purpose positives and 15 path/option/signal refusals; no Docker invocation.'

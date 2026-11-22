@@ -31,6 +31,27 @@ function Assert-RetainedObservedWorkArguments([string[]]$Arguments,[string]$Expe
             $Arguments[$index+2] -ceq 'set -eu; umask 077; test ! -L "$1"; cat > "$1"; stat -c %a:%u:%h "$1"; sha256sum "$1"' -and
             $Arguments[$index+3] -ceq 'fixture') 'observed-client-fixed-shell'
     }
+    if($program -ceq 'sha256sum'){
+        Assert-ImmuData ($Arguments.Count -eq $index+2 -and $Arguments[$index+1] -ceq '/tool/ServerBackendProbe.dll') 'observed-client-hash-path'
+    }
+    if($program -ceq '/bin/cat'){
+        Assert-ImmuData ($Arguments.Count -eq $index+2 -and $Arguments[$index+1] -ceq '/tmp/immudb.pid') 'observed-client-pid-path'
+    }
+    if($program -ceq '/bin/mkdir'){
+        Assert-ImmuData ($Arguments.Count -eq $index+4 -and $Arguments[$index+1] -ceq '-m' -and $Arguments[$index+2] -ceq '700' -and
+            $Arguments[$index+3] -cin @('/tmp/empty-ca-dir','/run/fleetory-native/server')) 'observed-client-directory-path'
+    }
+    if($program -ceq '/bin/kill'){
+        Assert-ImmuData ($Arguments.Count -eq $index+3 -and $Arguments[$index+1] -cin @('-TERM','-0') -and
+            $Arguments[$index+2] -cmatch '^[1-9][0-9]{0,7}\z') 'observed-client-signal-purpose'
+    }
+    if($program -ceq '/bin/sh'){
+        $path=$Arguments[$index+4]
+        $temporary=$path -cin @('/tmp/ca.pem','/tmp/server.crt','/tmp/server.key','/tmp/client.crt','/tmp/client.key',
+            '/tmp/state.key','/tmp/immudb.toml','/tmp/cli.toml','/tmp/hba.conf')
+        $server=$path -cmatch '^/run/fleetory-native/server/(infrastructure-ca|audit-immudb-password|fleetory-postgresql|fleetory-signer-postgresql|(agent|admin)-gateway-(root-ca|server-cert|server-key))\z'
+        Assert-ImmuData ($temporary -or $server) 'observed-client-configuration-path'
+    }
     # This is a command-shape boundary, never resource custody or full argv/runtime provenance.
 
 }
