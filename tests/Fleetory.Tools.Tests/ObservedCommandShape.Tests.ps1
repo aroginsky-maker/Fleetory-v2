@@ -119,3 +119,25 @@ foreach($tail in $postgresCatalog){
 }
 Require ($postgresCatalog.Count -eq 9 -and $postgresRefusals -eq 102) 'observed-postgres-catalog'
 Write-Output 'OBSERVED POSTGRES CATALOG PASS:9 exact profiles and 102 option/path/role/database/TLS mutations refused; no Docker invocation.'
+
+$immuCatalog=@();$immuCatalog+=,@(Get-RetainedAuditStartArguments $id)
+foreach($mode in @('login','backup','verify','restore')){$immuCatalog+=,@(Get-ImmuDataCliArguments $id $mode)}
+$immuRefusals=0
+foreach($argv in $immuCatalog){
+    Assert-RetainedObservedWorkArguments $argv
+    $programIndex=[Array]::IndexOf($argv,'/usr/sbin/immudb')
+    if($programIndex -lt 0){$programIndex=[Array]::IndexOf($argv,'/usr/local/bin/immuadmin')}
+    Require ($programIndex -ge 0) 'immudb-builder-program'
+    $bad=@();$bad+=,@($argv+'--unlisted');$bad+=,@($argv[0..($argv.Count-2)])
+    for($position=$programIndex+1;$position -lt $argv.Count;$position++){
+        $changed=[string[]]$argv.Clone();$changed[$position]='unlisted';$bad+=,$changed
+    }
+    foreach($changed in $bad){
+        try{Assert-RetainedObservedWorkArguments $changed;throw 'Unlisted immudb arguments accepted.'}catch{
+            if($_.Exception.GetBaseException().Message -cne 'Audit data fixture refused: observed-client-immudb-purpose'){throw}
+            $immuRefusals++
+        }
+    }
+}
+Require ($immuCatalog.Count -eq 5 -and $immuRefusals -eq 75) 'observed-immudb-catalog'
+Write-Output 'OBSERVED IMMUDB CATALOG PASS:5 actual-builder profiles and 75 argument mutations refused; no Docker invocation.'

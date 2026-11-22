@@ -82,6 +82,17 @@ function Assert-RetainedObservedWorkArguments([string[]]$Arguments,[string]$Expe
         }
         Assert-ImmuData $matched 'observed-client-postgres-purpose'
     }
+    if($program -cin @('/usr/sbin/immudb','/usr/local/bin/immuadmin')){
+        $identifier=$Arguments[$index-1];$catalog=@()
+        if($program -ceq '/usr/sbin/immudb'){$catalog+=,@(Get-RetainedAuditStartArguments $identifier)}else{
+            foreach($mode in @('login','backup','verify','restore')){$catalog+=,@(Get-ImmuDataCliArguments $identifier $mode)}
+        }
+        $matched=$false
+        foreach($expected in $catalog){
+            if($Arguments.Count -eq $expected.Count -and ($Arguments -join "`0") -ceq ($expected -join "`0")){$matched=$true;break}
+        }
+        Assert-ImmuData $matched 'observed-client-immudb-purpose'
+    }
     # This is a command-shape boundary, never resource custody or full argv/runtime provenance.
 
 }
