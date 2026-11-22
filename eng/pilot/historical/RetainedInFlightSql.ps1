@@ -2,6 +2,34 @@
 # Private functions run in the live retained owner's scope. No serialized process/resource claim is accepted.
 function Assert-RetainedObservedWorkArguments([string[]]$Arguments){
     Assert-ImmuData ($null -ne $Arguments -and $Arguments.Count -ge 3 -and $Arguments[0] -ceq 'exec') 'observed-client-exec-only'
+    $index=1;$environments=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    while($index -lt $Arguments.Count -and $Arguments[$index].StartsWith('-',[StringComparison]::Ordinal)){
+        $option=$Arguments[$index];$index++
+        if($option -ceq '-e'){
+            Assert-ImmuData ($index -lt $Arguments.Count -and $Arguments[$index] -cmatch '^[A-Z][A-Z0-9_]*=[^\x00\r\n]{0,4096}\z') 'observed-client-environment-shape'
+            $pair=$Arguments[$index].Split('=',2);$key=$pair[0];$value=$pair[1]
+            Assert-ImmuData ($environments.Add($key)) 'observed-client-environment-duplicate'
+            $fixed=@{HOME='/tmp';PGCLIENTENCODING='UTF8';SSL_CERT_FILE='/tmp/ca.pem';SSL_CERT_DIR='/tmp/empty-ca-dir'}
+            $allowed=if($key -ceq 'PGAPPNAME'){$value -cmatch '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\z'}
+                else{$fixed.ContainsKey($key) -and $value -ceq $fixed[$key]}
+            Assert-ImmuData $allowed 'observed-client-environment-purpose'
+            $index++
+        }else{Assert-ImmuData ($option -cin @('-i','-d')) 'observed-client-option'}
+    }
+    Assert-ImmuData ($index+1 -lt $Arguments.Count -and $Arguments[$index] -cmatch '^[a-f0-9]{64}\z') 'observed-client-target-shape'
+    $index++;$program=$Arguments[$index]
+    Assert-ImmuData ($program -cin @('postgres','pg_isready','psql','pg_restore','initdb','pg_ctl','dotnet','sha256sum',
+        '/bin/mkdir','/bin/cat','/bin/kill','/usr/sbin/immudb','/usr/local/bin/immuadmin','/bin/sh')) 'observed-client-program'
+    if($program -ceq 'dotnet'){
+        Assert-ImmuData ($index+1 -lt $Arguments.Count -and $Arguments[$index+1] -ceq '/tool/ServerBackendProbe.dll') 'observed-client-probe-entry'
+    }
+    if($program -ceq '/bin/sh'){
+        Assert-ImmuData ($Arguments.Count -eq $index+5 -and $Arguments[$index+1] -ceq '-c' -and
+            $Arguments[$index+2] -ceq 'set -eu; umask 077; test ! -L "$1"; cat > "$1"; stat -c %a:%u:%h "$1"; sha256sum "$1"' -and
+            $Arguments[$index+3] -ceq 'fixture') 'observed-client-fixed-shell'
+    }
+    # This is a command-shape boundary, never resource custody or full argv/runtime provenance.
+
 }
 function Observe-RetainedNativeProcess([Diagnostics.Process]$Process,[Threading.CancellationToken]$Token){
     $meter.processObservationChecks++

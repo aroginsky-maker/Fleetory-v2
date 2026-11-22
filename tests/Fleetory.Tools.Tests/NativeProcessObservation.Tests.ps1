@@ -110,16 +110,7 @@ try{
     $ignored.refused=$true
 }
 Require ($ignored.observed-and$ignored.refused-and$watch.Elapsed.TotalSeconds-lt5) 'expired-observer-return-refused'
-. (Join-Path $PSScriptRoot '../../eng/pilot/ImmuDataRoundtripPolicy.ps1')
-. (Join-Path $PSScriptRoot '../../eng/pilot/historical/RetainedInFlightSql.ps1')
-Assert-RetainedObservedWorkArguments @('exec',('a'*64),'/bin/true')
-$purposeRefusals=0
-foreach($arguments in @($null,([string[]]@()),@('EXEC','target','command'),@('create','target','image'),@('run','target','image'),@('build','target','image'),@('exec'),@('exec','target'))){
-    try{Assert-RetainedObservedWorkArguments $arguments}catch{
-        if($_.Exception.GetBaseException().Message -cne 'Audit data fixture refused: observed-client-exec-only'){throw}
-        $purposeRefusals++;continue
-    }
-    throw 'Observed creation/build or incomplete exec purpose accepted.'
-}
-Require ($purposeRefusals-eq8) 'observed-exec-purpose-only-no-resource-authority'
+. (Join-Path $PSScriptRoot 'ObservedCommandShape.Tests.ps1')
 Write-Output 'NATIVE PROCESS OBSERVATION PASS:7 native cases and 8 exec-purpose refusals; own client cancelled; unrelated process preserved; final/expired result refused; no Docker/data/secret access.'
+
+& (Join-Path $PSScriptRoot 'NativeProfileForwarding.Tests.ps1') -Python $Python
