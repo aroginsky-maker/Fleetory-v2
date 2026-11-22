@@ -352,6 +352,9 @@ jobs:
       - name: Verify generated data host callback boundary on Windows
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/RetainedDataHostBoundary.Tests.ps1
+      - name: Verify original data host binding refusals on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/OriginalFourDataHostBinding.Tests.ps1
 
       - name: Verify scoped PostgreSQL expectation source on Windows
         shell: pwsh
@@ -972,6 +975,9 @@ jobs:
       - name: Verify generated data host callback boundary
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/RetainedDataHostBoundary.Tests.ps1
+      - name: Verify original data host binding refusals
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/OriginalFourDataHostBinding.Tests.ps1
 
       - name: Verify scoped PostgreSQL expectation source
         shell: pwsh

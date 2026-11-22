@@ -3,7 +3,7 @@
 function Invoke-RetainedDataStageHost([string]$Repository,[string]$Python,[string]$InputRoot,
     [hashtable]$RawMetadata,[hashtable]$Commitments,[hashtable]$Expected,$AuditPoint,$ImageContext,$Material,
     [ValidateSet('normal','exit-on-request','expire-after-restore')][string]$Mode='normal',
-    [scriptblock]$GeneratedAfterCapture=$null){
+    [scriptblock]$GeneratedAfterCapture=$null,[hashtable]$OriginalExpected=$null){
     if($null -ne $GeneratedAfterCapture){
         $namespace=Split-Path ([IO.Path]::GetFullPath($InputRoot)) -Parent
         $parent=[IO.Path]::GetFullPath((Split-Path $namespace -Parent))
@@ -16,7 +16,18 @@ function Invoke-RetainedDataStageHost([string]$Repository,[string]$Python,[strin
     $loss=$Mode -cne 'normal';$expiry=$Mode -ceq 'expire-after-restore'
     $admission=$null
     try{
-        $admission=Open-RetainedServiceUsePeer $Repository $Python $InputRoot $RawMetadata $Commitments -Mode $Mode
+        if($null -ne $OriginalExpected){
+            Assert-ImmuData ($OriginalExpected.ContainsKey('root') -and $OriginalExpected.ContainsKey('revision') -and
+                $OriginalExpected.ContainsKey('imageId') -and $OriginalExpected.ContainsKey('probeSha256') -and
+                $OriginalExpected.ContainsKey('configurationSha256')) 'original-host-binding-fields'
+            Assert-ImmuData ($OriginalExpected.root -ceq $InputRoot -and $OriginalExpected.revision -ceq $Commitments.revision -and
+                $OriginalExpected.imageId -ceq $Commitments.imageId -and $OriginalExpected.imageId -ceq $ImageContext.ImageId -and
+                $OriginalExpected.probeSha256 -ceq $Commitments.probeSha256 -and $OriginalExpected.probeSha256 -ceq $ImageContext.ProbeHash -and
+                $OriginalExpected.configurationSha256 -ceq $Commitments.configurationSha256) 'original-host-binding-drift'
+            $admission=Open-OriginalFourServiceUsePeer $Repository $Python $InputRoot $RawMetadata $Commitments -ExpectedBinding $OriginalExpected -Mode $Mode
+        }else{
+            $admission=Open-RetainedServiceUsePeer $Repository $Python $InputRoot $RawMetadata $Commitments -Mode $Mode
+        }
         $payload=Receive-RetainedServicePayload $admission
         Confirm-RetainedServiceUseLive $admission $admission.cancel.Token
         if($null -ne $GeneratedAfterCapture){$null=& $GeneratedAfterCapture}

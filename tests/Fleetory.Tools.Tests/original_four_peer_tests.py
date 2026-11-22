@@ -4,6 +4,7 @@ import copy
 from pathlib import Path
 import subprocess
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -16,7 +17,10 @@ C,H=entry.C,entry.H
 
 class OriginalPeerTests(unittest.TestCase):
     def setUp(self):
-        self.model=models.OriginalFourTests('runTest');self.model.setUp();self.addCleanup(self.model.doCleanups)
+        self.model=models.OriginalFourTests('runTest')
+        with patch.object(tempfile,'tempdir',str(Path(tempfile.gettempdir()).resolve(strict=True))):
+            self.model.setUp()
+        self.addCleanup(self.model.doCleanups)
         m=self.model;f=m.fixture;v=m.expected
         self.wanted=dict(root=v.root,artifacts=entry.policy._expected(v),revision=v.revision,imageId=v.image_id,
             probeSha256=v.probe_sha256,configurationSha256=v.configuration_sha256,

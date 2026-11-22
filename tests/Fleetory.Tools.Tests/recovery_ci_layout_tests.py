@@ -149,6 +149,11 @@ def validate(text):
         assert blocks[key].count(step) == 1
         assert text.count('./tests/Fleetory.Tools.Tests/RetainedDataHostBoundary.Tests.ps1') == 2
     for key, platform in (('windows-tls-chain', ' on Windows'), ('quality', '')):
+        step=('      - name: Verify original data host binding refusals'+platform+'\n'
+              '        shell: pwsh\n        run: ./tests/Fleetory.Tools.Tests/OriginalFourDataHostBinding.Tests.ps1\n')
+        assert blocks[key].count(step)==1
+        assert text.count('./tests/Fleetory.Tools.Tests/OriginalFourDataHostBinding.Tests.ps1')==2
+    for key, platform in (('windows-tls-chain', ' on Windows'), ('quality', '')):
         for title,filename in (('bounded public build source transport','PublicBuildSourceTransport.Tests.ps1'),
                 ('live public build source transaction','PublicBuildSourceTransaction.Tests.ps1')):
             command = './tests/Fleetory.Tools.Tests/' + filename
@@ -452,6 +457,13 @@ class RecoveryCiLayoutTests(unittest.TestCase):
         command = './tests/Fleetory.Tools.Tests/RetainedDataHostBoundary.Tests.ps1'
         self.refused(self.text.replace(command, 'omitted', 1))
         self.refused(self.text.replace('run: ' + command, 'continue-on-error: true\n        run: ' + command, 1))
+
+    def test_original_host_binding_refusals_are_mandatory(self):
+        command='./tests/Fleetory.Tools.Tests/OriginalFourDataHostBinding.Tests.ps1'
+        self.refused(self.text.replace(command,'omitted',1))
+        self.refused(self.text.replace(command,command+'\n          '+command,1))
+        for option in ('if: false','continue-on-error: true'):
+            self.refused(self.text.replace('run: '+command,option+'\n        run: '+command,1))
 
     def test_live_service_use_gate_is_required_once_and_cannot_be_softened(self):
         for executable in ('python', 'python3'):
