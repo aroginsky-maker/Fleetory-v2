@@ -1,6 +1,6 @@
 #requires -Version 7.3
 # Private functions run in the live retained owner's scope. No serialized process/resource claim is accepted.
-function Assert-RetainedObservedWorkArguments([string[]]$Arguments,[string]$ExpectedIdentifier=''){
+function Assert-RetainedObservedWorkArguments([string[]]$Arguments,[string]$ExpectedIdentifier='',[ValidateSet('','postgres','audit')][string]$ExpectedRole=''){
     Assert-ImmuData ($null -ne $Arguments -and $Arguments.Count -ge 3 -and $Arguments[0] -ceq 'exec') 'observed-client-exec-only'
     $index=1;$environments=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
     while($index -lt $Arguments.Count -and $Arguments[$index].StartsWith('-',[StringComparison]::Ordinal)){
@@ -23,6 +23,12 @@ function Assert-RetainedObservedWorkArguments([string[]]$Arguments,[string]$Expe
     $index++;$program=$Arguments[$index]
     Assert-ImmuData ($program -cin @('postgres','pg_isready','psql','pg_restore','initdb','pg_ctl','dotnet','sha256sum',
         '/bin/mkdir','/bin/cat','/bin/kill','/usr/sbin/immudb','/usr/local/bin/immuadmin','/bin/sh')) 'observed-client-program'
+    if($ExpectedRole){
+        Assert-ImmuData (-not [string]::IsNullOrEmpty($ExpectedIdentifier)) 'observed-client-role-owner-required'
+        $allowed=if($ExpectedRole -ceq 'postgres'){$program -cin @('postgres','pg_isready','psql','pg_restore','initdb','pg_ctl','/bin/sh')}
+            else{$program -cin @('dotnet','sha256sum','/bin/mkdir','/bin/cat','/bin/kill','/usr/sbin/immudb','/usr/local/bin/immuadmin','/bin/sh')}
+        Assert-ImmuData $allowed 'observed-client-role-program'
+    }
     if($program -ceq 'dotnet'){
         Assert-ImmuData ($index+1 -lt $Arguments.Count -and $Arguments[$index+1] -ceq '/tool/ServerBackendProbe.dll') 'observed-client-probe-entry'
     }
@@ -51,6 +57,11 @@ function Assert-RetainedObservedWorkArguments([string[]]$Arguments,[string]$Expe
             '/tmp/state.key','/tmp/immudb.toml','/tmp/cli.toml','/tmp/hba.conf')
         $server=$path -cmatch '^/run/fleetory-native/server/(infrastructure-ca|audit-immudb-password|fleetory-postgresql|fleetory-signer-postgresql|(agent|admin)-gateway-(root-ca|server-cert|server-key))\z'
         Assert-ImmuData ($temporary -or $server) 'observed-client-configuration-path'
+        if($ExpectedRole){
+            $rolePath=if($ExpectedRole -ceq 'postgres'){$path -cin @('/tmp/ca.pem','/tmp/server.crt','/tmp/server.key','/tmp/hba.conf')}
+                else{$path -cne '/tmp/hba.conf'}
+            Assert-ImmuData $rolePath 'observed-client-role-configuration-path'
+        }
     }
     if($program -cin @('postgres','initdb','pg_isready','pg_ctl','pg_restore')){
         $tail=@($Arguments | Select-Object -Skip ($index+1));$catalog=@()

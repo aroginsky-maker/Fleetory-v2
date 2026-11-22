@@ -20,7 +20,10 @@ foreach($name in @('Invoke-RetainedPgNative','Invoke-RetainedAuditNative')){
     $foreign=if($name -ceq 'Invoke-RetainedPgNative'){$auditOwned}else{$pgOwned}
     $source=$matches[0].Extent.Text
     . ([scriptblock]::Create($source))
-    foreach($argv in @(@('exec',$owned,'pg_isready','-q','-U','postgres'),@('exec','-i','-e','PGCLIENTENCODING=UTF8',$owned,'psql','-XqAt','-U','postgres','-d','postgres'))){
+    $role=if($name -ceq 'Invoke-RetainedPgNative'){'postgres'}else{'audit'}
+    $validCalls=if($role -ceq 'postgres'){@(@('exec',$owned,'pg_isready','-q','-U','postgres'),@('exec','-i','-e','PGCLIENTENCODING=UTF8',$owned,'psql','-XqAt','-U','postgres','-d','postgres'))}
+        else{@(@('exec',$owned,'sha256sum','/tool/ServerBackendProbe.dll'),@('exec',$owned,'/bin/cat','/tmp/immudb.pid'))}
+    foreach($argv in $validCalls){
         $script:dispatches=0;$meter=@{workInspections=0;nativeDispatches=0}
         $null=& $name $argv
         if($script:dispatches -ne 1 -or $meter.nativeDispatches -ne 1){throw 'Valid dispatch missing'}
@@ -34,8 +37,26 @@ foreach($name in @('Invoke-RetainedPgNative','Invoke-RetainedAuditNative')){
         if($script:dispatches -ne 0 -or $meter.nativeDispatches -ne 0){throw 'Refusal after dispatch'}
         $refused++
     }
+    $crossCalls=if($role -ceq 'postgres'){@(@('exec',$owned,'/bin/cat','/tmp/immudb.pid'),@('exec',$owned,'sha256sum','/tool/ServerBackendProbe.dll'))}
+        else{@(@('exec',$owned,'pg_isready','-q','-U','postgres'),@('exec','-i',$owned,'psql','-XqAt','-U','postgres','-d','postgres'))}
+    foreach($argv in $crossCalls){
+        $script:dispatches=0;$meter=@{workInspections=0;nativeDispatches=0}
+        try{$null=& $name $argv;throw 'Role-inappropriate program dispatched'}catch{
+            if($_.Exception.GetBaseException().Message -cne 'Audit data fixture refused: observed-client-role-program'){throw}
+        }
+        if($script:dispatches -ne 0 -or $meter.nativeDispatches -ne 0){throw 'Role refusal after dispatch'}
+    }
+    $foreignSlot=if($role -ceq 'postgres'){'/tmp/client.key'}else{'/tmp/hba.conf'}
+    $script:dispatches=0;$meter=@{workInspections=0;nativeDispatches=0}
+    try{
+        $null=& $name @('exec','-i',$owned,'/bin/sh','-c','set -eu; umask 077; test ! -L "$1"; cat > "$1"; stat -c %a:%u:%h "$1"; sha256sum "$1"','fixture',$foreignSlot)
+        throw 'Role-inappropriate configuration slot dispatched'
+    }catch{
+        if($_.Exception.GetBaseException().Message -cne 'Audit data fixture refused: observed-client-role-configuration-path'){throw}
+    }
+    if($script:dispatches -ne 0 -or $meter.nativeDispatches -ne 0){throw 'Configuration role refusal after dispatch'}
     $expected=if($name -ceq 'Invoke-RetainedPgNative'){'identifier'}else{'auditId'}
-    $line='Assert-RetainedObservedWorkArguments $Arguments -ExpectedIdentifier $'+$expected
+    $line='Assert-RetainedObservedWorkArguments $Arguments -ExpectedIdentifier $'+$expected+' -ExpectedRole '+$role
     if(-not $source.Contains($line)){throw 'Guard wiring changed'}
     $mutant=$source.Replace($line,('Assert-ImmuData ($Arguments -ccontains $'+$expected+') ''old-membership'''))
     . ([scriptblock]::Create($mutant))
@@ -44,13 +65,14 @@ foreach($name in @('Invoke-RetainedPgNative','Invoke-RetainedAuditNative')){
     if($script:dispatches -ne 1){throw 'Old membership mutant not reproduced'}
     $mutants++
 }
+Write-Output 'RETAINED ROLE DISPATCH PASS:4 cross-role program and2 configuration-slot refusals before native work; no native resources.'
 Write-Output 'RETAINED DISPATCH TARGET PASS:4 actual-dispatch positives,4 cross-role refusals before native work,2 old-membership mutants reproduced; Docker and custody reads stubbed; no live authority claim.'
 
 $launchNodes=@($ast.FindAll({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq 'Start-RetainedPgBackend'},$true))
 if($launchNodes.Count -ne 1){throw 'Backend launcher not unique'}
 . ([scriptblock]::Create($launchNodes[0].Extent.Text))
 function Invoke-RetainedPgNative([string[]]$Arguments,[byte[]]$InputBytes=$null,[switch]$AllowFailure){
-    Assert-RetainedObservedWorkArguments $Arguments -ExpectedIdentifier $pgOwned
+    Assert-RetainedObservedWorkArguments $Arguments -ExpectedIdentifier $pgOwned -ExpectedRole postgres
     $script:launchCalls++;return @{ExitCode=0}
 }
 $identifier=$pgOwned

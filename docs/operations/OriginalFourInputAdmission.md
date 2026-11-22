@@ -49,11 +49,12 @@ The existing mandatory native-process observation gate calls the shared command-
 
 The changed guard passed the normal generated native PostgreSQL/immudb/Server regression, with two PostgreSQL restores, audit four events/five transactions, two Server starts/stops and nine independent owned-resource absence checks. Earlier loss/expiry proofs predate this guard change and are not transferred to it automatically. Full per-purpose argv semantics, executable/runtime provenance and complete resource inventory remain open; this boundary does not authorize reading original backups or establish production readiness.
 
-The PostgreSQL and audit dispatchers compare the parsed Docker exec target directly with the ID obtained from their live opaque owner. An owned ID elsewhere in argv or an environment value is insufficient. The mandatory process-observation gate runs the command catalog and actual dispatcher/backend-builder regressions on each OS.
+The PostgreSQL and audit dispatchers supply a literal role and compare the parsed Docker exec target directly with the ID obtained from their live opaque owner. Their role restricts the allowed programs and configuration slots. An owned ID elsewhere in argv or an environment value is insufficient. The mandatory process-observation gate runs the command catalog and actual dispatcher/backend-builder regressions on each OS.
 
 | Boundary | Accepted cases | Refusal coverage |
 | --- | --- | --- |
 | Target position | 2 exact-target cases | 4 misplaced owned-ID cases |
+| Role/program/slot dispatch, native calls stubbed | Role-appropriate PostgreSQL and audit calls | 4 cross-role program and 2 configuration-slot substitutions refused before native work |
 | Actual dispatcher wiring, custody/native calls stubbed | 4 calls | 4 cross-role substitutions before native work; 2 old-membership mutants reproduced |
 | Utility paths/options | 25 cases, including 19 configuration slots | 15 foreign path, option and signal cases |
 | PostgreSQL utilities and daemon launch | 9 profiles: initdb, readiness, fast stop, 4 restores and 2 daemon launches | 102 changed, missing or extra arguments, including TLS/network settings |
