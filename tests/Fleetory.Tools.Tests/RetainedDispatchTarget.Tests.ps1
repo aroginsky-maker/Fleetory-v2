@@ -45,3 +45,23 @@ foreach($name in @('Invoke-RetainedPgNative','Invoke-RetainedAuditNative')){
     $mutants++
 }
 Write-Output 'RETAINED DISPATCH TARGET PASS:4 actual-dispatch positives,4 cross-role refusals before native work,2 old-membership mutants reproduced; Docker and custody reads stubbed; no live authority claim.'
+
+$launchNodes=@($ast.FindAll({param($node) $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq 'Start-RetainedPgBackend'},$true))
+if($launchNodes.Count -ne 1){throw 'Backend launcher not unique'}
+. ([scriptblock]::Create($launchNodes[0].Extent.Text))
+function Invoke-RetainedPgNative([string[]]$Arguments,[byte[]]$InputBytes=$null,[switch]$AllowFailure){
+    Assert-RetainedObservedWorkArguments $Arguments -ExpectedIdentifier $pgOwned
+    $script:launchCalls++;return @{ExitCode=0}
+}
+$identifier=$pgOwned
+foreach($server in @($false,$true)){
+    $listen='listen_addresses=';$tlsArguments=@()
+    if($server){
+        $listen='listen_addresses=127.0.0.1'
+        $tlsArguments=@('-c','hba_file=/tmp/hba.conf','-c','ssl=on','-c','ssl_cert_file=/tmp/server.crt','-c','ssl_key_file=/tmp/server.key','-c','ssl_min_protocol_version=TLSv1.2')
+    }
+    $script:launchCalls=0;$meter=@{bootstrapped=$false}
+    Start-RetainedPgBackend
+    if($script:launchCalls -ne 2 -or -not $meter.bootstrapped){throw 'Actual backend builder not admitted'}
+}
+Write-Output 'RETAINED BACKEND BUILDER PASS:2 actual launch/readiness profiles admitted; native dispatch stubbed; no PostgreSQL started.'

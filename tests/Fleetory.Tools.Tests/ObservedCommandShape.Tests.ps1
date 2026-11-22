@@ -97,6 +97,12 @@ foreach($pair in @(@('fleetory','fleetory_migrator'),@('fleetory_signer','fleeto
 foreach($mode in @('--section=pre-data','--data-only')){
     $postgresCatalog+=,@('pg_restore',$mode,'--exit-on-error','--single-transaction','--no-password','--role=fleetory_migrator','--username=postgres','--dbname=fleetory')
 }
+$launch=@('postgres','-D','/var/lib/postgresql/18/recovery','-c','listen_addresses=','-c','unix_socket_directories=/var/run/postgresql',
+    '-c','shared_buffers=32MB','-c','max_connections=20','-c','password_encryption=scram-sha-256','-c','log_statement=none','-c','log_min_error_statement=panic')
+$postgresCatalog+=,$launch
+$tlsLaunch=[string[]]$launch.Clone();$tlsLaunch[4]='listen_addresses=127.0.0.1'
+$postgresCatalog+=,@($tlsLaunch+@('-c','hba_file=/tmp/hba.conf','-c','ssl=on','-c','ssl_cert_file=/tmp/server.crt',
+    '-c','ssl_key_file=/tmp/server.key','-c','ssl_min_protocol_version=TLSv1.2'))
 $postgresRefusals=0
 foreach($tail in $postgresCatalog){
     Assert-RetainedObservedWorkArguments (@('exec',$id)+$tail)
@@ -111,5 +117,5 @@ foreach($tail in $postgresCatalog){
         }
     }
 }
-Require ($postgresCatalog.Count -eq 7 -and $postgresRefusals -eq 56) 'observed-postgres-catalog'
-Write-Output 'OBSERVED POSTGRES CATALOG PASS:7 exact profiles and 56 option/path/role/database mutations refused; no Docker invocation.'
+Require ($postgresCatalog.Count -eq 9 -and $postgresRefusals -eq 102) 'observed-postgres-catalog'
+Write-Output 'OBSERVED POSTGRES CATALOG PASS:9 exact profiles and 102 option/path/role/database/TLS mutations refused; no Docker invocation.'

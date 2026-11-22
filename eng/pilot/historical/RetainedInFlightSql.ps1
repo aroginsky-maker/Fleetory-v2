@@ -52,9 +52,18 @@ function Assert-RetainedObservedWorkArguments([string[]]$Arguments,[string]$Expe
         $server=$path -cmatch '^/run/fleetory-native/server/(infrastructure-ca|audit-immudb-password|fleetory-postgresql|fleetory-signer-postgresql|(agent|admin)-gateway-(root-ca|server-cert|server-key))\z'
         Assert-ImmuData ($temporary -or $server) 'observed-client-configuration-path'
     }
-    if($program -cin @('initdb','pg_isready','pg_ctl','pg_restore')){
+    if($program -cin @('postgres','initdb','pg_isready','pg_ctl','pg_restore')){
         $tail=@($Arguments | Select-Object -Skip ($index+1));$catalog=@()
         switch -CaseSensitive ($program){
+            'postgres' {
+                $base=@('-D','/var/lib/postgresql/18/recovery','-c','listen_addresses=','-c','unix_socket_directories=/var/run/postgresql',
+                    '-c','shared_buffers=32MB','-c','max_connections=20','-c','password_encryption=scram-sha-256',
+                    '-c','log_statement=none','-c','log_min_error_statement=panic')
+                $catalog+=,$base
+                $tls=[string[]]$base.Clone();$tls[3]='listen_addresses=127.0.0.1'
+                $catalog+=,@($tls+@('-c','hba_file=/tmp/hba.conf','-c','ssl=on','-c','ssl_cert_file=/tmp/server.crt',
+                    '-c','ssl_key_file=/tmp/server.key','-c','ssl_min_protocol_version=TLSv1.2'))
+            }
             'initdb' {$catalog+=,@('-D','/var/lib/postgresql/18/recovery','--auth-local=peer','--auth-host=reject','--no-instructions')}
             'pg_isready' {$catalog+=,@('-q','-U','postgres')}
             'pg_ctl' {$catalog+=,@('-D','/var/lib/postgresql/18/recovery','stop','-m','fast','-w','-t','5')}
