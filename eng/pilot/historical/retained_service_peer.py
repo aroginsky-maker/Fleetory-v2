@@ -158,6 +158,12 @@ class _Reader:
 def run(expected):
     raw = _receive()
     packet.require(H(raw) == packet.hex_value(expected))
+    _serve_header(raw)
+
+
+def _serve_header(raw, trusted_binding=None):
+    # Trusted entry-point code supplies the builder; no wire factory selector.
+    packet.require(trusted_binding is None or callable(trusted_binding))
     header = packet.strict_json(raw, MAX_CONTROL)
     packet.keys(header, 'schema plan planSha256 metadata parent mode sources codePlan codePlanSha256')
     packet.require(header['schema'] == HEADER)
@@ -189,7 +195,12 @@ def run(expected):
         def factory(consume):
             return use.use(Path.cwd().resolve().parent/'operator',Path.cwd().resolve(),REPO,
                            plan,header['planSha256'],metadata,consume)
-        session.serve(reader,_send,check_source,factory,parent,declared['nonce'],H(plan),H(raw),
+        use_pin = H(plan)
+        if trusted_binding is not None:
+            factory,use_pin = trusted_binding(parent,plan,header['planSha256'],metadata,check_source,
+                                              header['codePlanSha256'],Path.cwd().resolve().parent/'operator')
+            packet.require(callable(factory));packet.hex_value(use_pin)
+        session.serve(reader,_send,check_source,factory,parent,declared['nonce'],use_pin,H(raw),
                       header['codePlanSha256'],code_report['files'],mode)
 
 

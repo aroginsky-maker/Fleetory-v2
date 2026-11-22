@@ -22,8 +22,9 @@ function Send-RetainedServiceMessage($Peer,$Message){
 function Read-RetainedServiceMessage($Peer){
     return (Read-IndependentFrame $Peer.output $Peer.cancel.Token 32768)|ConvertFrom-Json -AsHashtable -Depth 12
 }
-function Open-RetainedServiceUsePeer([string]$Repository,[string]$Python,[string]$InputRoot,[hashtable]$Metadata,[hashtable]$Commitments,
-    [ValidateSet('normal','exit-after-release','exit-on-request','expire-after-restore')][string]$Mode='normal'){
+function Open-RetainedServiceUsePeerCore([string]$Repository,[string]$Python,[string]$InputRoot,[hashtable]$Metadata,[hashtable]$Commitments,
+    [ValidateSet('normal','exit-after-release','exit-on-request','expire-after-restore')][string]$Mode='normal',
+    [hashtable]$OriginalExpected=$null){
     $expected=Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent
     Assert-ImmuData ($Repository -ceq $expected -and $Metadata.Count -eq 5) 'service-peer-repository'
     . (Join-Path $PSScriptRoot '../HistoricalAuditInputPins.ps1')
@@ -38,12 +39,17 @@ function Open-RetainedServiceUsePeer([string]$Repository,[string]$Python,[string
         Assert-ImmuData ($Metadata.ContainsKey($name) -and $Metadata[$name] -is [byte[]]) 'service-peer-metadata'
         $request.metadata[$name]=[Convert]::ToBase64String($Metadata[$name])
     }
+    # Only the trusted host wrapper selects this fixed entry. Wire metadata cannot select it.
+    $original=$null -ne $OriginalExpected
+    $entry=if($original){@((Join-Path $PSScriptRoot 'original_four_source_bootstrap.py'))}
+        else{@((Join-Path $PSScriptRoot 'retained_source_bootstrap.py'),'peer')}
+    $prepareRequest=if($original){@{request=$request;expected=$OriginalExpected}}else{$request}
     $operator=Join-Path (Split-Path $InputRoot -Parent) 'operator'
     if(-not(Test-Path -LiteralPath $operator)){[Fleetory.Pilot.ExclusiveAuditDirectory]::Create($operator)}
     $oldDirectory=[Environment]::CurrentDirectory
     try{
         [Environment]::CurrentDirectory=$InputRoot
-        $prepared=Invoke-NativeBytes $Python @('-I','-S','-B',(Join-Path $PSScriptRoot 'retained_source_bootstrap.py'),'peer','--prepare') ([Text.Encoding]::UTF8.GetBytes(($request|ConvertTo-Json -Depth 8 -Compress))) 20
+        $prepared=Invoke-NativeBytes $Python (@('-I','-S','-B')+$entry+@('--prepare')) ([Text.Encoding]::UTF8.GetBytes(($prepareRequest|ConvertTo-Json -Depth 12 -Compress))) 20
         $category='unclassified'
         foreach($stage in @('metadata','parent-runtime','parent-identity')){
             if($prepared.Stderr.TrimEnd() -ceq ('Retained service preparation refused at '+$stage+'; no input contents logged.')){$category=$stage}
@@ -64,18 +70,29 @@ function Open-RetainedServiceUsePeer([string]$Repository,[string]$Python,[string
     try{
         $start=New-HistoricalChildStart $Python
         $start.WorkingDirectory=$InputRoot
-        foreach($part in @('-I','-S','-B',(Join-Path $PSScriptRoot 'retained_source_bootstrap.py'),'peer','--header-sha256',$header.sha256)){$start.ArgumentList.Add($part)}
+        $arguments=@('-I','-S','-B')+$entry+@('--header-sha256',$header.sha256)
+        if($original){$arguments+=@('--binding-sha256',$header.bindingSha256)}
+        foreach($part in $arguments){$start.ArgumentList.Add($part)}
         $peer.holder=[Diagnostics.Process]::Start($start);$null=$peer.holder.Handle
         $sealed.holder=$peer.holder
         $peer.childBirth=Get-HistoricalNativeBirth $peer.holder
         $peer.input=$peer.holder.StandardInput.BaseStream;$peer.output=$peer.holder.StandardOutput.BaseStream
         $peer.errorDrain=$peer.holder.StandardError.BaseStream.CopyToAsync($peer.errorStream)
+        if($original){
+            Assert-ImmuData ($header.bindingSha256 -cmatch '^[a-f0-9]{64}\z' -and
+                $header.originalPlanSha256 -cmatch '^[a-f0-9]{64}\z') 'original-peer-binding-pins'
+            $binding=[Convert]::FromBase64String($header.binding)
+            Assert-ImmuData ($binding.Length -gt 0 -and $binding.Length -le 32768 -and
+                (Get-ImmuDataHash $binding) -ceq $header.bindingSha256) 'original-peer-binding-frame'
+            Send-IndependentFrame $peer.input $binding $peer.cancel.Token
+        }
         Send-IndependentFrame $peer.input ([Convert]::FromBase64String($header.header)) $peer.cancel.Token
         $bound=Read-RetainedServiceMessage $peer
         Assert-ImmuData ($bound.Count -eq 8 -and $bound.codePlanSha256 -ceq $Peer.codePlanSha256 -and $bound.codeFiles -eq $Peer.codeFiles -and $bound.kind -ceq 'bound' -and $bound.nonce -ceq $peer.nonce -and
             $bound.headerSha256 -ceq $peer.headerSha256 -and $bound.owner.pid -eq $peer.holder.Id -and
             $bound.owner.birthKind -ceq $peer.childBirth.kind -and $bound.owner.birthToken -ceq $peer.childBirth.token -and
             $bound.consumer.pid -eq $PID -and $bound.consumer.birthToken -ceq $peer.ownerBirth.token) 'service-peer-bound'
+        if($original){Assert-ImmuData ($bound.planSha256 -ceq $header.originalPlanSha256) 'original-peer-purpose-plan'}
         $peer.planSha256=$bound.planSha256
         Assert-RetainedServicePeer $peer
         return $peer
@@ -159,4 +176,15 @@ function Close-RetainedServiceUsePeer($Peer){
         $Peer.owner.Dispose();$Peer.cancel.Dispose();$Peer.errorStream.Dispose()
         $null=$script:RetainedServicePeers.Remove($Peer)
     }
+}
+
+# These are trusted host library APIs, not permission or resource-custody parsers.
+function Open-RetainedServiceUsePeer([string]$Repository,[string]$Python,[string]$InputRoot,[hashtable]$Metadata,[hashtable]$Commitments,
+    [ValidateSet('normal','exit-after-release','exit-on-request','expire-after-restore')][string]$Mode='normal'){
+    return Open-RetainedServiceUsePeerCore $Repository $Python $InputRoot $Metadata $Commitments -Mode $Mode
+}
+function Open-OriginalFourServiceUsePeer([string]$Repository,[string]$Python,[string]$InputRoot,[hashtable]$Metadata,[hashtable]$Commitments,
+    [Parameter(Mandatory)][hashtable]$ExpectedBinding,
+    [ValidateSet('normal','exit-after-release','exit-on-request','expire-after-restore')][string]$Mode='normal'){
+    return Open-RetainedServiceUsePeerCore $Repository $Python $InputRoot $Metadata $Commitments -Mode $Mode -OriginalExpected $ExpectedBinding
 }

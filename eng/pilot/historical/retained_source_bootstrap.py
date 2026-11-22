@@ -22,14 +22,20 @@ def main():
                'historical-observation': 'historical_audit_observation.py'}
     if len(sys.argv) < 2 or sys.argv[1] not in targets:
         raise ValueError('Unknown fixed source entry')
+    _execute(targets[sys.argv[1]], sys.argv[2:])
+
+
+def _execute(relative, arguments):
+    if not (sys.flags.isolated and sys.flags.no_site and sys.dont_write_bytecode):
+        raise ValueError('Required interpreter isolation absent')
     # Install before pathlib or any project import. Frozen/builtin and external
     # runtime/zip/native loaders are not authenticated by this source boundary.
     external.SourceFileLoader.get_code = _source_code
     external.SourcelessFileLoader.get_code = _refuse_sourceless
     from pathlib import Path
     pilot = Path(__file__).resolve().parent.parent
-    target = pilot / targets[sys.argv[1]]
-    sys.argv = [str(target), *sys.argv[2:]]
+    target = pilot / relative
+    sys.argv = [str(target), *arguments]
     sys.path.insert(0, str(pilot))
     entry = type(sys)('__main__')
     entry.__dict__.update(__file__=str(target), __package__=None, __spec__=None, __cached__=None)

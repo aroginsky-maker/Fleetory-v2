@@ -158,12 +158,19 @@ def validate(text):
             assert blocks[key].count(step) == 1
             assert text.count(command) == 2
     for key, platform, executable in (('windows-tls-chain', ' on Windows', 'python'), ('quality', '', 'python3')):
+        command=executable+' -B ./tests/Fleetory.Tools.Tests/run_original_four_peer_prototype.py (Get-Command pwsh).Source'
+        step=('      - name: Verify actual original four-input private channel'+platform+'\n'
+              '        shell: pwsh\n        run: '+command+'\n')
+        assert blocks[key].count(step)==1
+        assert text.count(command)==1
+    for key, platform, executable in (('windows-tls-chain', ' on Windows', 'python'), ('quality', '', 'python3')):
         for title, filename in (('held audit control namespace identity', 'audit_control_identity_tests.py'),
                 ('four frozen retained service inputs', 'retained_service_inputs_tests.py'),
                 ('private frozen service payload', 'retained_service_payload_tests.py'),
                 ('live retained service use', 'retained_service_use_tests.py'),
                 ('distinct original four-input purpose', 'original_four_use_tests.py'),
                 ('fixed retained private exchange', 'retained_private_session_tests.py'),
+                ('separate original four-input peer', 'original_four_peer_tests.py'),
                 ('original inventory metadata mapping', 'retained_expected_inventory_tests.py'),
                 ('held retained source handles', 'retained_code_lease_tests.py'),
                 ('fixed retained source catalog', 'retained_code_catalog_tests.py'),
@@ -775,7 +782,7 @@ class RecoveryCiLayoutTests(unittest.TestCase):
 
     def test_original_four_input_purpose_gates_cannot_be_omitted_duplicated_or_softened(self):
         for executable in ('python','python3'):
-            for filename in ('original_four_use_tests.py','retained_private_session_tests.py'):
+            for filename in ('original_four_use_tests.py','retained_private_session_tests.py','original_four_peer_tests.py','run_original_four_peer_prototype.py (Get-Command pwsh).Source'):
                 command=executable+' -B ./tests/Fleetory.Tools.Tests/'+filename
                 self.refused(self.text.replace(command,'omitted',1))
                 self.refused(self.text.replace(command,command+'\n          '+command,1))

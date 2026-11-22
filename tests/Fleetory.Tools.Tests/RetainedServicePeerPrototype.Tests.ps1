@@ -1,5 +1,5 @@
 #requires -Version 7.3
-param([Parameter(Mandatory)][string]$Python,[Parameter(Mandatory)][string]$InputRoot,[switch]$ExitAfterRelease,[switch]$InjectCodeName)
+param([Parameter(Mandatory)][string]$Python,[Parameter(Mandatory)][string]$InputRoot,[switch]$ExitAfterRelease,[switch]$InjectCodeName,[switch]$OriginalPurpose)
 $ErrorActionPreference='Stop';Set-StrictMode -Version Latest
 $repo=Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 foreach($name in @('PilotNativeProcess.ps1','ProviderRecoveryTransport.ps1','ProviderRecoveryPolicy.ps1','ImmuDataRoundtripPolicy.ps1',
@@ -12,7 +12,8 @@ foreach($name in @('selection','manifest','checkpoint','ci','local')){$metadata[
 $peer=$null;$canary=$null;$canaryOwned=$false
 try{
     $mode=if($ExitAfterRelease){'exit-after-release'}else{'normal'}
-    $peer=Open-RetainedServiceUsePeer $repo $Python $InputRoot $metadata $request.commitments -Mode $mode
+    $peer=if($OriginalPurpose){Open-OriginalFourServiceUsePeer $repo $Python $InputRoot $metadata $request.commitments -ExpectedBinding $request.expected -Mode $mode}
+        else{Open-RetainedServiceUsePeer $repo $Python $InputRoot $metadata $request.commitments -Mode $mode}
     if($ExitAfterRelease){
         try{$null=Receive-RetainedServicePayload $peer}catch{
             if(-not $peer.holder.WaitForExit(3500) -or $peer.holder.ExitCode -ne 37){throw}
@@ -21,7 +22,7 @@ try{
         try{Confirm-RetainedServiceUseLive $peer $peer.cancel.Token;throw 'prototype-dead-peer-accepted'}catch{
             if($_.Exception.Message -notmatch 'service-peer-actual-owner'){throw}
         }
-        @{schema='fleetory.retained-service-parent-transport-prototype.v1';verified=$true;mode=$mode;
+        @{schema='fleetory.retained-service-parent-transport-prototype.v1';verified=$true;originalPurpose=[bool]$OriginalPurpose;mode=$mode;
             actualPowerShellParentBound=$true;actualChildExitVerified=$true;childExitCode=37;deadPeerRejected=$true;
             nativeTargetInvoked=$false;originalInputsRead=$false;nativeResultAuthenticated=$false;
             originalExecutorReady=$false;phase7Complete=$false}|ConvertTo-Json -Compress
@@ -64,7 +65,7 @@ try{
     Confirm-RetainedServiceUseLive $peer $peer.cancel.Token
     $receipt=Complete-RetainedServiceUse $peer ([Text.Encoding]::UTF8.GetBytes('generated-native-consumer-result'))
     Assert-ImmuData ($receipt.statusChecks -eq 2 -and $peer.closed -and $peer.holder.HasExited -and $peer.holder.ExitCode -eq 0) 'prototype-peer-complete'
-    @{schema='fleetory.retained-service-parent-transport-prototype.v1';verified=$true;packets=4;statusChecks=2;
+    @{schema='fleetory.retained-service-parent-transport-prototype.v1';verified=$true;originalPurpose=[bool]$OriginalPurpose;packets=4;statusChecks=2;
         actualPowerShellParentBound=$true;actualChildExitVerified=$true;copiedOrReplacedPeersRejected=$rejected;nativeTargetInvoked=$false;originalInputsRead=$false;
         nativeResultAuthenticated=$false;originalExecutorReady=$false;phase7Complete=$false}|ConvertTo-Json -Compress
 }finally{
