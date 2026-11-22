@@ -28,7 +28,7 @@ $id='a'*64
 Assert-RetainedObservedWorkArguments (Get-RetainedAuditStartArguments $id)
 foreach($mode in @('login','backup','verify','restore')){Assert-RetainedObservedWorkArguments (Get-ImmuDataCliArguments $id $mode)}
 Assert-RetainedObservedWorkArguments @('exec','-i','-e','PGCLIENTENCODING=UTF8',$id,'psql','-XqAt','-U','postgres','-d','postgres')
-Assert-RetainedObservedWorkArguments @('exec','-i','-e','PGAPPNAME=fleetory-generated-lock-123',$id,'pg_restore','--data-only')
+Assert-RetainedObservedWorkArguments @('exec','-i','-e','PGAPPNAME=fleetory-generated-lock-123',$id,'pg_restore','--data-only','--exit-on-error','--single-transaction','--no-password','--role=fleetory_migrator','--username=postgres','--dbname=fleetory')
 Assert-RetainedObservedWorkArguments @('exec','-i',$id,'/bin/sh','-c','set -eu; umask 077; test ! -L "$1"; cat > "$1"; stat -c %a:%u:%h "$1"; sha256sum "$1"','fixture','/tmp/server.crt')
 $environmentRefusals=0
 foreach($entry in @('LD_PRELOAD=/tmp/library','PATH=/tmp','HOME=/root','SSL_CERT_FILE=/tmp/foreign','SSL_CERT_DIR=/etc/ssl','PGCLIENTENCODING=LATIN1','PGAPPNAME=contains space')){
@@ -88,3 +88,28 @@ foreach($tail in $invalid){
 }
 Require ($utilityPositives -eq 25 -and $utilityRefusals -eq 15) 'observed-utility-catalog'
 Write-Output 'OBSERVED UTILITY CATALOG PASS:25 fixed-purpose positives and 15 path/option/signal refusals; no Docker invocation.'
+
+$postgresCatalog=@(@('initdb','-D','/var/lib/postgresql/18/recovery','--auth-local=peer','--auth-host=reject','--no-instructions'),
+    @('pg_isready','-q','-U','postgres'),@('pg_ctl','-D','/var/lib/postgresql/18/recovery','stop','-m','fast','-w','-t','5'))
+foreach($pair in @(@('fleetory','fleetory_migrator'),@('fleetory_signer','fleetory_signer_owner'))){
+    $postgresCatalog+=,@('pg_restore','--exit-on-error','--single-transaction','--no-password',('--role='+$pair[1]),'--username=postgres',('--dbname='+$pair[0]))
+}
+foreach($mode in @('--section=pre-data','--data-only')){
+    $postgresCatalog+=,@('pg_restore',$mode,'--exit-on-error','--single-transaction','--no-password','--role=fleetory_migrator','--username=postgres','--dbname=fleetory')
+}
+$postgresRefusals=0
+foreach($tail in $postgresCatalog){
+    Assert-RetainedObservedWorkArguments (@('exec',$id)+$tail)
+    $bad=@();$bad+=,@($tail+'--unlisted');$bad+=,@($tail[0..($tail.Count-2)])
+    for($position=1;$position -lt $tail.Count;$position++){
+        $changed=[string[]]$tail.Clone();$changed[$position]='unlisted';$bad+=,$changed
+    }
+    foreach($changed in $bad){
+        try{Assert-RetainedObservedWorkArguments (@('exec',$id)+$changed);throw 'Unlisted PostgreSQL argv accepted.'}catch{
+            if($_.Exception.GetBaseException().Message -cne 'Audit data fixture refused: observed-client-postgres-purpose'){throw}
+            $postgresRefusals++
+        }
+    }
+}
+Require ($postgresCatalog.Count -eq 7 -and $postgresRefusals -eq 56) 'observed-postgres-catalog'
+Write-Output 'OBSERVED POSTGRES CATALOG PASS:7 exact profiles and 56 option/path/role/database mutations refused; no Docker invocation.'

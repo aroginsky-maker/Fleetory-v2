@@ -52,6 +52,27 @@ function Assert-RetainedObservedWorkArguments([string[]]$Arguments,[string]$Expe
         $server=$path -cmatch '^/run/fleetory-native/server/(infrastructure-ca|audit-immudb-password|fleetory-postgresql|fleetory-signer-postgresql|(agent|admin)-gateway-(root-ca|server-cert|server-key))\z'
         Assert-ImmuData ($temporary -or $server) 'observed-client-configuration-path'
     }
+    if($program -cin @('initdb','pg_isready','pg_ctl','pg_restore')){
+        $tail=@($Arguments | Select-Object -Skip ($index+1));$catalog=@()
+        switch -CaseSensitive ($program){
+            'initdb' {$catalog+=,@('-D','/var/lib/postgresql/18/recovery','--auth-local=peer','--auth-host=reject','--no-instructions')}
+            'pg_isready' {$catalog+=,@('-q','-U','postgres')}
+            'pg_ctl' {$catalog+=,@('-D','/var/lib/postgresql/18/recovery','stop','-m','fast','-w','-t','5')}
+            'pg_restore' {
+                foreach($pair in @(@('fleetory','fleetory_migrator'),@('fleetory_signer','fleetory_signer_owner'))){
+                    $catalog+=,@('--exit-on-error','--single-transaction','--no-password',('--role='+$pair[1]),'--username=postgres',('--dbname='+$pair[0]))
+                }
+                foreach($mode in @('--section=pre-data','--data-only')){
+                    $catalog+=,@($mode,'--exit-on-error','--single-transaction','--no-password','--role=fleetory_migrator','--username=postgres','--dbname=fleetory')
+                }
+            }
+        }
+        $matched=$false
+        foreach($expected in $catalog){
+            if($tail.Count -eq $expected.Count -and ($tail -join "`0") -ceq ($expected -join "`0")){$matched=$true;break}
+        }
+        Assert-ImmuData $matched 'observed-client-postgres-purpose'
+    }
     # This is a command-shape boundary, never resource custody or full argv/runtime provenance.
 
 }
