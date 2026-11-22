@@ -108,6 +108,18 @@ function Assert-RetainedObservedWorkArguments([string[]]$Arguments,[string]$Expe
         }
         Assert-ImmuData $allowed 'observed-client-probe-mode'
     }
+    if($program -ceq 'psql'){
+        $tail=@($Arguments | Select-Object -Skip ($index+1));$catalog=@()
+        foreach($database in @('postgres','fleetory','fleetory_signer')){$catalog+=,@('-XqAt','-v','ON_ERROR_STOP=1','-U','postgres','-d',$database)}
+        $catalog+=,@('-XqAt','-U','postgres','-d','postgres')
+        $catalog+=,@('-XqAt','-v','ON_ERROR_STOP=1','-U','postgres','-d','fleetory','-c',
+            'BEGIN; LOCK TABLE platform.audit_events IN ACCESS EXCLUSIVE MODE; SELECT pg_sleep(30); ROLLBACK;')
+        $matched=$false
+        foreach($expected in $catalog){
+            if($tail.Count -eq $expected.Count -and ($tail -join "`0") -ceq ($expected -join "`0")){$matched=$true;break}
+        }
+        Assert-ImmuData $matched 'observed-client-psql-purpose'
+    }
     # This is a command-shape boundary, never resource custody or full argv/runtime provenance.
 
 }

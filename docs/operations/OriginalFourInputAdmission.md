@@ -49,16 +49,17 @@ The existing mandatory native-process observation gate calls the shared command-
 
 The changed guard passed the normal generated native PostgreSQL/immudb/Server regression, with two PostgreSQL restores, audit four events/five transactions, two Server starts/stops and nine independent owned-resource absence checks. Earlier loss/expiry proofs predate this guard change and are not transferred to it automatically. Full per-purpose argv semantics, executable/runtime provenance and complete resource inventory remain open; this boundary does not authorize reading original backups or establish production readiness.
 
-The PostgreSQL and audit dispatchers compare the parsed Docker exec target directly with the ID obtained from their live opaque owner. An owned ID elsewhere in argv or an environment value is insufficient. The portable command-shape gate covers two exact-target positives and four misplaced-ID refusals without Docker. This positional check does not establish the remaining full runtime or per-program argument inventory.
+The PostgreSQL and audit dispatchers compare the parsed Docker exec target directly with the ID obtained from their live opaque owner. An owned ID elsewhere in argv or an environment value is insufficient. The mandatory process-observation gate runs the command catalog and actual dispatcher/backend-builder regressions on each OS.
 
-The mandatory process-observation gate also runs the actual PostgreSQL/audit dispatcher definitions with stubbed custody reads and native dispatch. It exercises four accepted calls, four cross-role target substitutions refused before dispatch, and two reproductions of the old membership predicate. This is a regression of dispatch wiring, not evidence of live resource custody or independent cleanup.
+| Boundary | Accepted cases | Refusal coverage |
+| --- | --- | --- |
+| Target position | 2 exact-target cases | 4 misplaced owned-ID cases |
+| Actual dispatcher wiring, custody/native calls stubbed | 4 calls | 4 cross-role substitutions before native work; 2 old-membership mutants reproduced |
+| Utility paths/options | 25 cases, including 19 configuration slots | 15 foreign path, option and signal cases |
+| PostgreSQL utilities and daemon launch | 9 profiles: initdb, readiness, fast stop, 4 restores and 2 daemon launches | 102 changed, missing or extra arguments, including TLS/network settings |
+| Actual backend builder, native calls stubbed | 2 launch/readiness profiles | Both builders must satisfy the command guard |
+| immudb/immuadmin | 5 existing builders with exact Docker/environment/TLS/action argv | 75 argument mutations |
+| ServerBackendProbe | 9 modes with fixed Docker/TLS prefix; only 2 expectation modes take pin/nonce argv | 24 mode, pin, nonce and extra-argument cases |
+| psql | 5 profiles: 3 retained databases as postgres, late-refusal postgres probe, exact generated lock statement | 45 changed, missing or extra arguments |
 
-Observed utility dispatch fixes the probe hash path, immudb PID-file read, two directory paths/mode 700, TERM/status-only numeric signals, and 19 configuration output slots. The command gate covers 25 accepted utility/slot cases and 15 path/option/signal refusals. Signal syntax alone does not prove daemon identity; per-program PostgreSQL/probe argv, daemon provenance and full runtime inventory remain open.
-
-The observed PostgreSQL utility catalog fixes seven argv profiles: initdb, readiness, bounded fast stop, two database/owner full restores, and the generated Fleetory pre-data/data-only interruption cases. The gate rejects 56 changed/missing/extra argument mutations. This does not authenticate SQL stdin, PostgreSQL daemon launch settings, probe modes or full transitive runtime inputs.
-
-The PostgreSQL catalog additionally fixes both actual daemon launch profiles (Unix socket only, or localhost with the existing TLS/HBA settings): nine total profiles and 102 argument mutations. The actual backend launcher is extracted and exercised against the guard with native dispatch stubbed for both profiles. SQL stdin, probe modes, daemon identity and transitive runtime provenance remain separate open requirements.
-
-Observed immudb/immuadmin commands must match one of the five fixed existing builders exactly, including Docker flags/environment and TLS/configuration/action arguments. The gate admits all five and refuses 75 changed/missing/extra argument mutations. Password and archive bytes remain in the bounded private stdin path; this argv check does not authenticate those bytes or original PKI.
-
-The retained dotnet probe accepts only the nine modes called by the recovery controller with its fixed Docker/TLS prefix. Seven modes have no extra argv; the two expectation modes require exactly one SHA-256 and one canonical nonce. Nine positives and 24 mode/pin/nonce/extra-argument refusals are covered. Shape-valid pins/nonces are not independent authority or source-origin proof; private stdin and full transitive execution still require their own acceptance.
+These tests establish command-shape and dispatch regression boundaries. They do not authenticate private stdin (SQL, passwords, archives or configuration bytes), pin/nonce origin, daemon identity, original PKI, executable/transitive runtime provenance, live custody or independent cleanup. Those requirements retain separate acceptance evidence. Complete executable/command/resource inventory remains open before original backup execution; Phase 7 remains open.

@@ -20,7 +20,7 @@ foreach($name in @('Invoke-RetainedPgNative','Invoke-RetainedAuditNative')){
     $foreign=if($name -ceq 'Invoke-RetainedPgNative'){$auditOwned}else{$pgOwned}
     $source=$matches[0].Extent.Text
     . ([scriptblock]::Create($source))
-    foreach($argv in @(@('exec',$owned,'pg_isready','-q','-U','postgres'),@('exec','-i','-e','PGCLIENTENCODING=UTF8',$owned,'psql','-XqAt'))){
+    foreach($argv in @(@('exec',$owned,'pg_isready','-q','-U','postgres'),@('exec','-i','-e','PGCLIENTENCODING=UTF8',$owned,'psql','-XqAt','-U','postgres','-d','postgres'))){
         $script:dispatches=0;$meter=@{workInspections=0;nativeDispatches=0}
         $null=& $name $argv
         if($script:dispatches -ne 1 -or $meter.nativeDispatches -ne 1){throw 'Valid dispatch missing'}

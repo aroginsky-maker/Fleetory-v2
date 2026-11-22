@@ -48,7 +48,7 @@ Write-Output 'OBSERVED COMMAND PURPOSE PASS:8 real-builder positives,6 command r
 
 # The expected ID comes from the live owner, never from the argument packet.
 Assert-RetainedObservedWorkArguments @('exec',$id,'pg_isready','-q','-U','postgres') -ExpectedIdentifier $id
-Assert-RetainedObservedWorkArguments @('exec','-i','-e','PGCLIENTENCODING=UTF8',$id,'psql','-XqAt') -ExpectedIdentifier $id
+Assert-RetainedObservedWorkArguments @('exec','-i','-e','PGCLIENTENCODING=UTF8',$id,'psql','-XqAt','-U','postgres','-d','postgres') -ExpectedIdentifier $id
 $foreign='b'*64;$ownedTargetRefusals=0
 foreach($arguments in @(@('exec',$foreign,'psql','-XqAt','-v',$id),@('exec','-i',$foreign,'psql',$id),
     @('exec','-e',('PGAPPNAME='+$id),$foreign,'psql'),@('exec',$foreign,'dotnet','/tool/ServerBackendProbe.dll',$id))){
@@ -164,3 +164,24 @@ foreach($argv in $bad){
 }
 Require ($probePositives -eq 9 -and $probeRefusals -eq 24) 'observed-probe-mode-catalog'
 Write-Output 'OBSERVED PROBE CATALOG PASS:9 recovery modes and 24 mode/pin/nonce/extra-argument refusals; no Docker invocation.'
+
+$psqlCatalog=@()
+foreach($database in @('postgres','fleetory','fleetory_signer')){$psqlCatalog+=,@('-XqAt','-v','ON_ERROR_STOP=1','-U','postgres','-d',$database)}
+$psqlCatalog+=,@('-XqAt','-U','postgres','-d','postgres')
+$psqlCatalog+=,@('-XqAt','-v','ON_ERROR_STOP=1','-U','postgres','-d','fleetory','-c','BEGIN; LOCK TABLE platform.audit_events IN ACCESS EXCLUSIVE MODE; SELECT pg_sleep(30); ROLLBACK;')
+$psqlRefusals=0
+foreach($tail in $psqlCatalog){
+    Assert-RetainedObservedWorkArguments (@('exec','-i',$id,'psql')+$tail)
+    $bad=@();$bad+=,@($tail+'--unlisted');$bad+=,@($tail[0..($tail.Count-2)])
+    for($position=0;$position -lt $tail.Count;$position++){
+        $changed=[string[]]$tail.Clone();$changed[$position]='unlisted';$bad+=,$changed
+    }
+    foreach($changed in $bad){
+        try{Assert-RetainedObservedWorkArguments (@('exec','-i',$id,'psql')+$changed);throw 'Unlisted psql argv accepted.'}catch{
+            if($_.Exception.GetBaseException().Message -cne 'Audit data fixture refused: observed-client-psql-purpose'){throw}
+            $psqlRefusals++
+        }
+    }
+}
+Require ($psqlCatalog.Count -eq 5 -and $psqlRefusals -eq 45) 'observed-psql-catalog'
+Write-Output 'OBSERVED PSQL CATALOG PASS:5 actual profiles and 45 argument mutations refused; SQL stdin origin remains separate; no Docker invocation.'
