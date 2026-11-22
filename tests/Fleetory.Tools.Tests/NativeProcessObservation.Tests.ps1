@@ -114,3 +114,5 @@ Require ($ignored.observed-and$ignored.refused-and$watch.Elapsed.TotalSeconds-lt
 Write-Output 'NATIVE PROCESS OBSERVATION PASS:7 native cases and 8 exec-purpose refusals; own client cancelled; unrelated process preserved; final/expired result refused; no Docker/data/secret access.'
 
 & (Join-Path $PSScriptRoot 'NativeProfileForwarding.Tests.ps1') -Python $Python
+
+& (Join-Path $PSScriptRoot 'RetainedDispatchTarget.Tests.ps1')
