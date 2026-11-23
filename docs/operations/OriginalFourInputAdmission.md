@@ -109,3 +109,24 @@ actual native owner; it must never kill that resource creator as a shortcut.
 A failed root harness retains its public runtime and diagnostic directory when
 owner exit/cleanup is unverified. Their retention is an explicit failure ledger,
 not successful cleanup. A real child-process regression covers this path.
+
+
+CI #443 for `11c9790` ended cancelled at the 35-minute strict-job boundary.
+Six specialized jobs passed, but the second full .NET run was incomplete:
+the log contains 1,043 completed Linux test executions, no native coverage
+result and no submitted official Sonar analysis. This run is not accepted as a
+complete code gate. No historic coverage percentage is assigned to it.
+
+The actual Linux publication-fault check consumed 549 seconds in that run.
+It now runs unchanged, with `--continuation-image --owned-cleanup`, in the
+required `native-publication-faults` job. The job has its own pinned cold-runner
+SDK/strict dependency-audit build, standard `ubuntu-24.04`, read-only repository
+permission and a 15-minute limit. The existing 35-minute strict job, six other
+specialized jobs and all their checks/deadlines remain. The aggregate requires
+all eight execution jobs; omission, soft failure, a larger runner or a changed
+publication deadline/bootstrap are rejected by layout regressions.
+
+The repository remains public. Standard GitHub-hosted runners are free for
+public repositories under the [GitHub Actions billing rules](https://docs.github.com/en/actions/concepts/billing-and-usage).
+No artifact uploads, paid runners, visibility changes or billing-setting
+changes are introduced; the Actions budget remains $0.

@@ -83,7 +83,7 @@ def jobs(text):
 
 def validate(text):
     blocks = jobs(text)
-    assert set(blocks) == {'windows-tls-chain', 'windows-policy', 'quality', 'native-data-recovery', 'native-provider-recovery', 'native-retained-recovery', 'native-original-recovery', 'quality-gate'}
+    assert set(blocks) == {'windows-tls-chain', 'windows-policy', 'quality', 'native-data-recovery', 'native-provider-recovery', 'native-retained-recovery', 'native-original-recovery', 'native-publication-faults', 'quality-gate'}
     policy = blocks['windows-policy']
     assert '    runs-on: windows-latest\n' in policy and '    timeout-minutes: 10\n' in policy
     assert '    permissions:\n      contents: read\n' in policy
@@ -116,7 +116,7 @@ def validate(text):
         assert 'dotnet restore Fleetory.sln --force -warnaserror -p:FleetoryRequireDependencyAudit=true -p:NuGetAudit=true -p:NuGetAuditMode=all -p:NuGetAuditLevel=low -p:RestoreUseStaticGraphEvaluation=false\n' in block
         assert 'dotnet build Fleetory.sln -c Release --no-restore --disable-build-servers --warnaserror\n' in block
         bootstrap = block.split('      - name: Verify ', 1)[0]
-        assert bootstrap.count('if ($LASTEXITCODE -ne 0)') == (4 if key in ('native-retained-recovery','native-original-recovery') else 3)
+        assert bootstrap.count('if ($LASTEXITCODE -ne 0)') == (4 if key in ('native-retained-recovery','native-original-recovery','native-publication-faults') else 3)
         commands = re.findall(r'^\s*(?:run: )?(\./tests/Fleetory.Tools.Tests/[^\n]+)', block, re.MULTILINE)
         for name, profile in cases:
             prefix = './tests/Fleetory.Tools.Tests/' + name + (' ' + profile if profile else '')
@@ -131,6 +131,19 @@ def validate(text):
         end=block.find('      - name:',start+len(step))
         assert block[start:end if end>=0 else len(block)].strip()==step.strip()
         assert text.count('native_controller_loss.py --powershell (Get-Command pwsh).Source --case '+case)==1
+    publication=blocks['native-publication-faults']
+    assert '    runs-on: ubuntu-24.04\n' in publication and '    timeout-minutes: 15\n' in publication
+    assert '    permissions:\n      contents: read\n' in publication
+    assert not re.search(r'^\s*(if:|needs:|continue-on-error:|env:|SONAR_)',publication,re.MULTILINE)
+    for marker in ('actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803',
+                   'actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68',
+                   'global-json-file: eng/global.ci.json',
+                   'Copy-Item -LiteralPath eng/global.ci.json -Destination global.json',
+                   'dotnet tool restore\n',
+                   'dotnet restore Fleetory.sln --force -warnaserror -p:FleetoryRequireDependencyAudit=true -p:NuGetAudit=true -p:NuGetAuditMode=all -p:NuGetAuditLevel=low -p:RestoreUseStaticGraphEvaluation=false\n',
+                   'dotnet build Fleetory.sln -c Release --no-restore --disable-build-servers --warnaserror\n'):
+        assert publication.count(marker)==1
+    assert publication.count('if ($LASTEXITCODE -ne 0)')==3
     retained = blocks['native-retained-recovery']
     probe_step = ('      - name: Prepare retained Server backend probe\n'
         '        shell: pwsh\n'
@@ -242,7 +255,7 @@ def validate(text):
             step = ('      - name: Verify ' + title + platform + '\n'
                 '        shell: pwsh\n'
                 '        run: ' + executable + ' -B ./tests/Fleetory.Tools.Tests/' + filename + suffix + '\n')
-            block = blocks[key]
+            block = blocks['native-publication-faults'] if key=='quality' and filename=='native_publication_faults.py' else blocks[key]
             assert block.count(step) == 1
             start = block.index(step)
             end = block.find('      - name:', start + len(step))
@@ -356,7 +369,7 @@ def validate(text):
         assert block[start:end if end>=0 else len(block)].strip()==step.strip()
     aggregate = blocks['quality-gate']
     assert '    name: Strict build, tests, coverage and Sonar\n' in aggregate
-    assert '    needs: [quality, windows-tls-chain, windows-policy, native-data-recovery, native-provider-recovery, native-retained-recovery, native-original-recovery]\n' in aggregate
+    assert '    needs: [quality, windows-tls-chain, windows-policy, native-data-recovery, native-provider-recovery, native-retained-recovery, native-original-recovery, native-publication-faults]\n' in aggregate
     assert '    if: always()\n' in aggregate and 'continue-on-error:' not in aggregate
     assert '    name: Strict build, tests, coverage and Sonar execution\n' in blocks['quality']
     return True
@@ -670,7 +683,7 @@ class RecoveryCiLayoutTests(unittest.TestCase):
         script = '\n'.join(line[10:] for line in block.split('        run: |\n', 1)[1].splitlines())
         executable = shutil.which('pwsh')
         self.assertIsNotNone(executable)
-        names = ('quality', 'windows-tls-chain', 'windows-policy', 'native-data-recovery', 'native-provider-recovery', 'native-retained-recovery', 'native-original-recovery')
+        names = ('quality', 'windows-tls-chain', 'windows-policy', 'native-data-recovery', 'native-provider-recovery', 'native-retained-recovery', 'native-original-recovery', 'native-publication-faults')
         success = {name: {'result': 'success', 'outputs': {}} for name in names}
         cases = [(success, True), ({}, False), ({**success, 'extra': {'result': 'success'}}, False)]
         for name in names:
@@ -841,6 +854,17 @@ class RecoveryCiLayoutTests(unittest.TestCase):
             self.refused(self.text.replace(step,step+step))
             for option in ('if: false','continue-on-error: true'):
                 self.refused(self.text.replace(step,step.replace('        shell:', '        '+option+'\n        shell:',1)))
+
+
+    def test_publication_fault_job_preserves_cold_bootstrap_free_runner_and_required_gate(self):
+        block=jobs(self.text)['native-publication-faults']
+        self.refused(self.text.replace(block,''))
+        for before,after in (('ubuntu-24.04','ubuntu-24.04-4core'),('timeout-minutes: 15','timeout-minutes: 20'),
+                             ('dotnet tool restore','omitted'),(' --force -warnaserror',' --force'),
+                             ('if ($LASTEXITCODE -ne 0)','if ($false)')):
+            self.refused(self.text.replace(block,block.replace(before,after,1)))
+        for option in ('if: false','continue-on-error: true','needs: quality'):
+            self.refused(self.text.replace('  native-publication-faults:\n','  native-publication-faults:\n    '+option+'\n'))
 
 
 if __name__ == '__main__':
