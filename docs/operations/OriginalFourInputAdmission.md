@@ -185,3 +185,50 @@ cleanup, unknown-create recovery, complete execution origin, original recovery
 and full-system/Phase7 flags remain false. The original four saved files,
 retained credentials/PKI, source VPS, provider, issuer and production tokens
 remain outside this generated rehearsal.
+
+
+### Observed Docker executable and environment binding
+
+The retained observed-client path now resolves one absolute Docker executable
+once in the live fixture owner and holds a `NativeExecutableLease`. Windows
+requires one `docker.exe` application, avoiding the separate Unix `docker` file
+shipped beside Docker Desktop. The lease holds the executable without write or
+delete sharing and holds its ancestor directories without delete sharing. Linux
+holds the original descriptor, requires a single regular file, compares statx
+device/inode identity and executes through that owner's `/proc/<pid>/fd/<fd>`.
+Checks compare the held and selected file bytes under the existing 64-MiB file
+ceiling. An unchanged pathname or digest alone cannot replace the held identity.
+
+The shared native launcher validates the requested path against the live lease,
+starts its process and checks its actual executable before sending stdin. Initial
+module availability may be retried for at most one second inside the existing
+native-operation stopwatch. Only the original `Process` object is registered in
+a weak-table binding. Copied objects and unrelated processes are refused even
+when a PID matches. Active-SQL and controller-fault arming use this binding rather
+than the process name; native-client birth and cancellation checks remain.
+
+Both observed clients use a newly created private empty Docker configuration
+and a fixed local Engine endpoint: the existing desktop Linux named pipe on
+Windows or `/var/run/docker.sock` on Linux. The opt-in child environment is
+cleared, retaining only `SystemRoot` when Windows needs it. It cannot be combined
+with the existing classic-builder environment. Legacy default calls and the
+separate classic-builder mode retain their behavior. The owner disposes its
+lease after owned cleanup; it grants no container/image removal rights.
+
+The mandatory process-observation entry runs real lease/shared-launcher tests
+on both OSes, covering path/hash, copied/foreign/exited process, closed lease and
+pathname replacement refusal. Actual child environment tests cover the new
+mode, conflicting-mode refusal and the existing modes. Generated controller
+evidence now pins nine source files, including the shared launcher and lease;
+the held public catalog has434 files under the unchanged448-file/8-MiB limits.
+
+This binds the tested Docker client to bytes selected by the trusted host. The
+initial local hash is not independent release/build provenance. The native result
+retains a description from the held lease (canonical path, SHA-256 and length),
+with origin, cleanup authority and full inventory explicitly false. Unobserved
+preparation/cleanup launch paths, interpreters, SDK/managed/native dependencies,
+image/rootfs and accepted source/configuration/key continuity retain their own
+inventory and origin requirements. Neither this lease nor a passing generated
+test sets full runtime inventory, original execution, creator-death/unknown-create
+recovery or Phase7 flags to true. Original backups, retained secrets/PKI, provider,
+issuer, production tokens and source VPS remain outside these tests.

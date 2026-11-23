@@ -67,10 +67,18 @@ function Invoke-RetainedDataStageHost([string]$Repository,[string]$Python,[strin
         Remove-AuditDataImage $ImageContext
         Assert-ImmuData (Test-AuditDataImageClosed $ImageContext) 'retained-host-own-image-removed'
         if(-not $loss){$null=Complete-RetainedServiceUse $admission ([Text.Encoding]::UTF8.GetBytes(($result|ConvertTo-Json -Compress -Depth 24)))}
+        $executableBinding=$null
+        if($state.ContainsKey('DockerExecutableLease')){
+            $description=$state.DockerExecutableLease.Describe()
+            $executableBinding=@{schema='fleetory.native-docker-executable-binding.v1';path=$description.Item1;
+                sha256=$description.Item2;bytes=$description.Item3;originAuthenticated=$false;cleanupAuthorized=$false;
+                fullRuntimeInventoryVerified=$false}
+        }
         return @{schema='fleetory.retained-native-data-host.v1';verified=$true;case=$result;
             measuredImageId=$Commitments.imageId;probeSha256=$Commitments.probeSha256;configurationSha256=$Commitments.configurationSha256;
             privateFourPacketTransferVerified=$true;statusChecks=$admission.statusChecks;
             heldCodeFiles=$admission.codeFiles;heldCodePlanSha256=$admission.codePlanSha256;
+            nativeDockerExecutable=$executableBinding;
             codeLeaseHandoffBound=$true;fullTransitiveExecutionVerified=$false;
             actualChildExitVerified=($admission.closed -or ($loss -and $admission.holder.HasExited -and $admission.holder.ExitCode -ne 0));
             admissionLossAfterPgRestoreVerified=($loss -and -not $externalLoss);

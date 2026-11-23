@@ -125,3 +125,5 @@ if($LASTEXITCODE -ne 0){throw 'Native controller failure cleanup contract failed
 
 & $Python -B (Join-Path $PSScriptRoot 'retained_controller_parent_death.py') --repository (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) --powershell ([Environment]::ProcessPath)
 if($LASTEXITCODE -ne 0){throw 'Held controller parent final observation failed.'}
+
+& (Join-Path $PSScriptRoot 'NativeExecutableLease.Tests.ps1')

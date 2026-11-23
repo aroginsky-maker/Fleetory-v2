@@ -18,13 +18,32 @@ import time
 from private_runtime_fixture import private_powershell
 
 REPO = Path(__file__).resolve().parents[2]
-SOURCES = ('eng/pilot/historical/RetainedControllerPipe.ps1',
+SOURCES = ('eng/pilot/PilotNativeProcess.ps1', 'eng/pilot/PilotNativeExecutableLease.ps1',
+    'eng/pilot/historical/RetainedControllerPipe.ps1',
            'eng/pilot/historical/RetainedInFlightSql.ps1',
            'eng/pilot/historical/RetainedPostgresTarget.ps1',
            'eng/pilot/historical/RetainedDataStageHost.ps1',
            'eng/pilot/historical/RetainedNativeClient.ps1',
            'tests/Fleetory.Tools.Tests/NativeRetainedServiceUseWorkflow.ps1',
            'tests/Fleetory.Tools.Tests/NativeServerPair.Tests.ps1')
+
+
+def require_executable_binding(value, active_sql):
+    """Validate a held-byte description only; never open its path or recover authority."""
+    if not active_sql:
+        if value is not None:
+            raise ValueError('Pre-work fault unexpectedly described an executed client')
+        return
+    keys={'schema','path','sha256','bytes','originAuthenticated','cleanupAuthorized','fullRuntimeInventoryVerified'}
+    if (type(value) is not dict or set(value)!=keys
+            or value['schema']!='fleetory.native-docker-executable-binding.v1'
+            or type(value['path']) is not str or not 0<len(value['path'])<=32768
+            or not Path(value['path']).is_absolute() or '..' in Path(value['path']).parts
+            or any(c in value['path'] for c in ('\0','\r','\n'))
+            or type(value['sha256']) is not str or re.fullmatch('[a-f0-9]{64}',value['sha256']) is None
+            or type(value['bytes']) is not int or not 0<value['bytes']<=67108864
+            or any(value[k] is not False for k in ('originAuthenticated','cleanupAuthorized','fullRuntimeInventoryVerified'))):
+        raise ValueError('Held executable byte description exceeded its scope')
 
 
 def remaining(deadline, cap):
@@ -236,6 +255,7 @@ def rehearse(runtime, case, record, deadline):
             if case == 'eof' and proc.wait(timeout=remaining(deadline,10)) != 0:
                 raise ValueError('Native owner returned failure')
         cleanup = frames(output_path)['fleetory.native-pair-cleanup.v1']
+        require_executable_binding(proof['nativeDockerExecutable'], active_sql)
         native = proof['case']
         observation = native['externalControllerObservation']
         checks=dict(hostCleanup=proof['cleanupVerified'], externalLoss=proof['externalControllerLossVerified'],

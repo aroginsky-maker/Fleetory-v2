@@ -96,7 +96,8 @@ function Arm-RetainedControllerPipe($Context,[string]$Nonce,[Diagnostics.Process
     Assert-ImmuData (-not $held.armed -and $Nonce -cmatch '^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\z') 'controller-pipe-arm'
     $nativePid=0;$nativeBirth=$null
     if($held.faultPoint -ceq 'active-sql'){
-        Assert-ImmuData ($null -ne $NativeClient -and -not $NativeClient.HasExited -and $NativeClient.ProcessName -ceq 'docker') 'controller-original-native-client'
+        Assert-ImmuData ($null -ne $NativeClient -and -not $NativeClient.HasExited) 'controller-original-native-client'
+        [Fleetory.Pilot.NativeExecutableLease]::AssertStarted($NativeClient)
         $null=$NativeClient.Handle;$nativePid=$NativeClient.Id;$nativeBirth=Get-HistoricalNativeBirth $NativeClient
     }else{Assert-ImmuData ($null -eq $NativeClient) 'controller-prework-no-native-client'}
     $held.armed=$true;$held.nonce=$Nonce

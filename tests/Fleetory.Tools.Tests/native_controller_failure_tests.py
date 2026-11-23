@@ -44,6 +44,25 @@ class ControllerFailureTests(unittest.TestCase):
                 child.stderr.close()
 
 
+    def test_held_executable_description_cannot_upgrade_authority_or_choose_io(self):
+        import copy
+        from pathlib import Path
+        valid=dict(schema='fleetory.native-docker-executable-binding.v1',
+            path=str(Path.cwd()/'generated-public-client'),sha256='a'*64,bytes=4096,
+            originAuthenticated=False,cleanupAuthorized=False,fullRuntimeInventoryVerified=False)
+        with patch.object(Path,'open') as opened, patch.object(fixture.subprocess,'run') as native:
+            fixture.require_executable_binding(valid,True)
+            fixture.require_executable_binding(None,False)
+            for key,value in [('schema','other'),('path','relative'),('sha256','a'*63),('bytes',True),
+                    ('bytes',0),('bytes',67108865),('originAuthenticated',True),('cleanupAuthorized',0),
+                    ('fullRuntimeInventoryVerified',True),('unlisted',False)]:
+                changed=copy.deepcopy(valid);changed[key]=value
+                with self.subTest(key=key,value=value),self.assertRaises(ValueError):
+                    fixture.require_executable_binding(changed,True)
+            with self.assertRaises(ValueError):fixture.require_executable_binding(valid,False)
+            with self.assertRaises(ValueError):fixture.require_executable_binding(None,True)
+            opened.assert_not_called();native.assert_not_called()
+
     def test_sql_fault_cannot_enter_non_generated_or_unbound_profiles(self):
         powershell=shutil.which('pwsh')
         self.assertIsNotNone(powershell)

@@ -141,7 +141,8 @@ function Observe-RetainedNativeProcess([Diagnostics.Process]$Process,[Threading.
 }
 function Interrupt-RetainedActiveNative([Diagnostics.Process]$Process,[Threading.CancellationToken]$Token){
     Assert-ImmuData ($Flow -cin @('inflight-sql-exit','inflight-restore-exit') -and $meter.inflightPending -and -not $meter.inflightObserved -and
-        $Token.CanBeCanceled -and -not $Process.HasExited -and $Process.ProcessName -ceq 'docker' -and $meter.inflightWatch.Elapsed.TotalSeconds -lt 8) 'retained-inflight-fault-scope'
+        $Token.CanBeCanceled -and -not $Process.HasExited -and $meter.inflightWatch.Elapsed.TotalSeconds -lt 8) 'retained-inflight-fault-scope'
+    [Fleetory.Pilot.NativeExecutableLease]::AssertStarted($Process)
     $Token.ThrowIfCancellationRequested()
     $id=[Fleetory.Pilot.AuditContainerCustody]::Id($context,$store,$client)
     $meter.inflightObserver=[Diagnostics.Process]::GetProcessById($Process.Id)

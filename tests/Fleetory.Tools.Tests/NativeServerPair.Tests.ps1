@@ -199,6 +199,7 @@ try{
     }catch{$failures+='image'}}
     if(-not $failures.Count){try{Remove-NativePublicPayload $repo $root}catch{$failures+='payload'}}
     if($null -ne $retainedExternalController){Close-RetainedControllerPipe $retainedExternalController}
+    if($state.ContainsKey('DockerExecutableLease')){$state.DockerExecutableLease.Dispose()}
     $env:DOCKER_BUILDKIT=$oldBuildKit;if($state.ContainsKey('SigningPems')){$state.SigningPems.Clear()};$state.SigningPem=$state.Tls=$null;$state.GatewayTls.Clear();$state.Canaries.Clear();foreach($s in $state.Sides){$s.Secrets.Clear()};$pg=$audit=$pgCaptured=$auditCaptured=$capture=$captured=$packet=$null;$watch.Stop()
     if($failures.Count){throw 'Native pair owned cleanup unverified; resource ledger retained.'}
     @{schema='fleetory.native-pair-cleanup.v1';fixture=$fixture;cleanupVerified=$true;ids=@($state.Sides|ForEach-Object {$_.Id})+@($state.Audits|ForEach-Object {$_.Id});image=$state.Image;aliases=@($state.Audits|ForEach-Object {$_.Image});originalInputsRead=$false}|ConvertTo-Json -Compress
