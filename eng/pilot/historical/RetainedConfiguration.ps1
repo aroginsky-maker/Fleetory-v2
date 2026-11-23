@@ -48,3 +48,14 @@ function Assert-RetainedConfigurationValue($Configuration,[string]$Key,[string]$
         throw [InvalidOperationException]::new('Retained configuration drift refused.')
     }
 }
+
+function Assert-RetainedRestoreInput([string[]]$Arguments,[byte[]]$InputBytes,$Pins){
+    $kind=$null
+    if($Arguments -ccontains 'pg_restore'){
+        $kind=if($Arguments -ccontains '--dbname=fleetory'){'application-postgres'}elseif($Arguments -ccontains '--dbname=fleetory_signer'){'signer-postgres'}else{throw 'Retained restore database refused.'}
+    }elseif($Arguments -ccontains '/usr/local/bin/immuadmin' -and $Arguments -ccontains 'hot-restore'){$kind='audit-immudb'}
+    if($null -eq $kind){return}
+    Assert-ImmuData ($Pins -is [Collections.ObjectModel.ReadOnlyDictionary[string,string]] -and
+        $Pins.ContainsKey($kind) -and $Pins[$kind] -cmatch '^[a-f0-9]{64}\z') 'retained-restore-packet-pin'
+    if($kind -ceq 'audit-immudb'){Assert-ImmuDataPacket $InputBytes $Pins[$kind]}else{Assert-PgDataPacket $InputBytes $Pins[$kind]}
+}

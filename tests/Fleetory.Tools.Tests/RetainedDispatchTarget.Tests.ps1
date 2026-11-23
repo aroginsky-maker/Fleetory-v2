@@ -2,6 +2,9 @@
 $ErrorActionPreference='Stop';Set-StrictMode -Version Latest
 $repo=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 . (Join-Path $repo 'eng/pilot/ImmuDataRoundtripPolicy.ps1')
+. (Join-Path $repo 'eng/pilot/PgDataRoundtripPolicy.ps1')
+. (Join-Path $repo 'eng/pilot/historical/RetainedConfiguration.ps1')
+$restorePins=[Collections.ObjectModel.ReadOnlyDictionary[string,string]]::new([Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal))
 . (Join-Path $repo 'eng/pilot/historical/RetainedInFlightSql.ps1')
 $tokens=$null;$errors=$null
 $ast=[Management.Automation.Language.Parser]::ParseFile((Join-Path $repo 'eng/pilot/historical/RetainedPostgresTarget.ps1'),[ref]$tokens,[ref]$errors)
@@ -87,3 +90,40 @@ foreach($server in @($false,$true)){
     if($script:launchCalls -ne 2 -or -not $meter.bootstrapped){throw 'Actual backend builder not admitted'}
 }
 Write-Output 'RETAINED BACKEND BUILDER PASS:2 actual launch/readiness profiles admitted; native dispatch stubbed; no PostgreSQL started.'
+
+$packets=@{'application-postgres'=[Text.Encoding]::ASCII.GetBytes('PGDMP'+('a'*59));'signer-postgres'=[Text.Encoding]::ASCII.GetBytes('PGDMP'+('b'*59));'audit-immudb'=[Text.Encoding]::ASCII.GetBytes('IMMUBACKUP'+('c'*54))}
+$pinValues=[Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
+foreach($kind in $packets.Keys){$pinValues.Add($kind,(Get-ImmuDataHash $packets[$kind]))}
+$restorePins=[Collections.ObjectModel.ReadOnlyDictionary[string,string]]::new($pinValues)
+$accepted=0;$rejected=0
+$cases=@(@{kind='application-postgres';name='Invoke-RetainedPgNative';argv=@('exec','-i',$pgOwned,'pg_restore','--exit-on-error','--single-transaction','--no-password','--role=fleetory_migrator','--username=postgres','--dbname=fleetory')},
+    @{kind='signer-postgres';name='Invoke-RetainedPgNative';argv=@('exec','-i',$pgOwned,'pg_restore','--exit-on-error','--single-transaction','--no-password','--role=fleetory_signer_owner','--username=postgres','--dbname=fleetory_signer')})
+foreach($mode in @('verify','restore')){$cases+=@{kind='audit-immudb';name='Invoke-RetainedAuditNative';argv=(Get-ImmuDataCliArguments $auditOwned $mode)}}
+foreach($case in $cases){
+    $node=@($ast.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -ceq $case.name},$true))
+    if($node.Count -ne 1){throw 'Restore dispatcher not unique'}
+    . ([scriptblock]::Create($node[0].Extent.Text))
+    $script:dispatches=0;$meter=@{workInspections=0;nativeDispatches=0}
+    $null=& $case.name $case.argv $packets[$case.kind]
+    if($script:dispatches -ne 1 -or $meter.nativeDispatches -ne 1){throw 'Pinned restore not dispatched'}
+    $accepted++
+    foreach($fault in @('changed','wrong-packet','missing','missing-pin')){
+        $data=[byte[]]$packets[$case.kind].Clone();$saved=$restorePins
+        if($fault -ceq 'changed'){$data[63]=$data[63] -bxor 1}
+        elseif($fault -ceq 'wrong-packet'){if($case.kind -ceq 'application-postgres'){$data=$packets['signer-postgres']}elseif($case.kind -ceq 'signer-postgres'){$data=$packets['application-postgres']}else{$data[62]=$data[62] -bxor 2}}
+        elseif($fault -ceq 'missing'){$data=$null}
+        else{$restorePins=[Collections.ObjectModel.ReadOnlyDictionary[string,string]]::new([Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal))}
+        $script:dispatches=0;$meter=@{workInspections=0;nativeDispatches=0}
+        try{$null=& $case.name $case.argv $data;throw 'Changed restore input dispatched'}catch{
+            $expected=if($fault -ceq 'missing-pin'){'Audit data fixture refused: retained-restore-packet-pin'}else{
+                $prefix=if($case.kind -ceq 'audit-immudb'){'Audit'}else{'PostgreSQL'}
+                $prefix+' data fixture refused: '+$(if($fault -ceq 'missing'){'packet-bound'}else{'packet-pin-format'})
+            }
+            if($_.Exception.GetBaseException().Message -cne $expected){throw}
+        }finally{$restorePins=$saved}
+        if($script:dispatches -ne 0 -or $meter.nativeDispatches -ne 0){throw 'Restore refusal after dispatch'}
+        $rejected++
+    }
+}
+if($accepted -ne 4 -or $rejected -ne 16){throw 'Restore input regression count'}
+Write-Output 'RETAINED RESTORE INPUT PASS:4 pinned-input calls and16 changed/wrong/missing input/pin refusals before native dispatch; synthetic headers only; no databases.'

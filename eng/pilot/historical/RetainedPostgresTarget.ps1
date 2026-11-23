@@ -38,6 +38,9 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
     Assert-ImmuData ($Payload.packetSha256['audit-export'] -ceq $Expected.fleetory.inventory.audit.snapshotSha256) 'retained-pg-expected-snapshot'
     Assert-PgDataPacket $copy['application-postgres'] $Payload.packetSha256['application-postgres']
     Assert-PgDataPacket $copy['signer-postgres'] $Payload.packetSha256['signer-postgres']
+    $pinValues=[Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)
+    foreach($kind in $kinds[0..2]){$pinValues.Add($kind,[string]$Payload.capture.artifactPins[$kind])}
+    $restorePins=[Collections.ObjectModel.ReadOnlyDictionary[string,string]]::new($pinValues)
     $image=@((Invoke-Docker @('image','inspect',$script:nativeJournalImage)).Stdout|ConvertFrom-Json -AsHashtable)
     Assert-ImmuData ($image.Count -eq 1 -and $image[0].Id -cmatch '^sha256:[a-f0-9]{64}\z') 'retained-pg-base-image'
     $context=@{Fixture=$plan.nonce;ImageName=$script:nativeJournalImage;ImageId=$image[0].Id;LifetimeSeconds=3300;
@@ -91,6 +94,7 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
         $meter.workInspections++
         Confirm-RetainedLiveWork
         Assert-RetainedObservedWorkArguments $Arguments -ExpectedIdentifier $identifier -ExpectedRole postgres
+        Assert-RetainedRestoreInput $Arguments $InputBytes $restorePins
         $meter.nativeDispatches++
         return Invoke-Docker $Arguments $InputBytes 15 -AllowFailure:$AllowFailure -ObserveProcess ${function:Observe-RetainedNativeProcess}
     }
@@ -115,6 +119,7 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
         $meter.workInspections++
         Confirm-RetainedLiveWork
         Assert-RetainedObservedWorkArguments $Arguments -ExpectedIdentifier $auditId -ExpectedRole audit
+        Assert-RetainedRestoreInput $Arguments $InputBytes $restorePins
         $meter.nativeDispatches++
         return Invoke-Docker $Arguments $InputBytes 15 -AllowFailure:$AllowFailure -ObserveProcess ${function:Observe-RetainedNativeProcess}
     }
