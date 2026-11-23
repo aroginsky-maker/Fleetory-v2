@@ -4,6 +4,7 @@ $repo=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 . (Join-Path $repo 'eng/pilot/ImmuDataRoundtripPolicy.ps1')
 . (Join-Path $repo 'eng/pilot/PgDataRoundtripPolicy.ps1')
 . (Join-Path $repo 'eng/pilot/historical/RetainedConfiguration.ps1')
+$configuration=@{Values=[Collections.ObjectModel.ReadOnlyDictionary[string,string]]::new([Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal))}
 $restorePins=[Collections.ObjectModel.ReadOnlyDictionary[string,string]]::new([Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal))
 . (Join-Path $repo 'eng/pilot/historical/RetainedInFlightSql.ps1')
 $tokens=$null;$errors=$null
@@ -127,3 +128,43 @@ foreach($case in $cases){
 }
 if($accepted -ne 4 -or $rejected -ne 16){throw 'Restore input regression count'}
 Write-Output 'RETAINED RESTORE INPUT PASS:4 pinned-input calls and16 changed/wrong/missing input/pin refusals before native dispatch; synthetic headers only; no databases.'
+
+$fakeTls=@{RootCertificatePem='generated-ca';ServerCertificatePem='generated-server-cert';ServerPrivateKeyPem='generated-server-key';ClientCertificatePem='generated-client-cert';ClientPrivateKeyPem='generated-client-key'}
+$material=@{Tls=$fakeTls;PostgresTls=$fakeTls;GatewayTls=@{agent=$fakeTls;admin=$fakeTls};SigningPem='generated-state-key';Secrets=@{admin=('a'*64);reader=('b'*64);writer=('c'*64);database=('d'*64);signer=('e'*64)}}
+$configuration=New-RetainedConfiguration $material $true $true
+$configCases=@()
+foreach($key in $configuration.Values.Keys){
+    if($key.StartsWith('postgres:',[StringComparison]::Ordinal) -or $key.StartsWith('audit:',[StringComparison]::Ordinal)){
+        $parts=$key.Split(':',2);$role=$parts[0];$target=if($role -ceq 'postgres'){$pgOwned}else{$auditOwned}
+        $name=if($role -ceq 'postgres'){'Invoke-RetainedPgNative'}else{'Invoke-RetainedAuditNative'}
+        $argv=@('exec','-i',$target,'/bin/sh','-c','set -eu; umask 077; test ! -L "$1"; cat > "$1"; stat -c %a:%u:%h "$1"; sha256sum "$1"','fixture',$parts[1])
+        $configCases+=@{name=$name;argv=$argv;bytes=[Text.Encoding]::UTF8.GetBytes($configuration.Values[$key])}
+    }
+}
+$configCases+=@{name='Invoke-RetainedAuditNative';argv=(Get-ImmuDataCliArguments $auditOwned 'login');bytes=[Text.Encoding]::UTF8.GetBytes($material.Secrets.admin)}
+$configAccepted=0;$configRejected=0
+foreach($case in $configCases){
+    $node=@($ast.FindAll({param($n) $n -is [Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -ceq $case.name},$true))
+    if($node.Count -ne 1){throw 'Configuration dispatcher not unique'}
+    . ([scriptblock]::Create($node[0].Extent.Text))
+    $script:dispatches=0;$meter=@{workInspections=0;nativeDispatches=0}
+    $null=& $case.name $case.argv $case.bytes
+    if($script:dispatches -ne 1 -or $meter.nativeDispatches -ne 1){throw 'Bound configuration input not dispatched'}
+    $configAccepted++
+    foreach($fault in @('changed','missing','unknown-key','mutable-values')){
+        $data=[byte[]]$case.bytes.Clone();$saved=$configuration
+        if($fault -ceq 'changed'){$data[0]=$data[0] -bxor 1}
+        elseif($fault -ceq 'missing'){$data=$null}
+        elseif($fault -ceq 'unknown-key'){$configuration=@{Values=[Collections.ObjectModel.ReadOnlyDictionary[string,string]]::new([Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal))}}
+        else{$configuration=@{Values=[Collections.Generic.Dictionary[string,string]]::new([StringComparer]::Ordinal)}}
+        $script:dispatches=0;$meter=@{workInspections=0;nativeDispatches=0}
+        try{$null=& $case.name $case.argv $data;throw 'Unbound configuration input dispatched'}catch{
+            $expected='Audit data fixture refused: '+$(if($fault -cin @('unknown-key','mutable-values')){'retained-configuration-input-key'}else{'retained-configuration-input-bytes'})
+            if($_.Exception.GetBaseException().Message -cne $expected){throw}
+        }finally{$configuration=$saved}
+        if($script:dispatches -ne 0 -or $meter.nativeDispatches -ne 0){throw 'Configuration input refusal after dispatch'}
+        $configRejected++
+    }
+}
+if($configAccepted -ne 23 -or $configRejected -ne 92){throw 'Configuration input count drift'}
+Write-Output 'RETAINED CONFIGURATION INPUT PASS:22 file slots and1 generated login;92 byte/key/mutability refusals before native dispatch; no secrets read or services started.'

@@ -95,6 +95,7 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
         Confirm-RetainedLiveWork
         Assert-RetainedObservedWorkArguments $Arguments -ExpectedIdentifier $identifier -ExpectedRole postgres
         Assert-RetainedRestoreInput $Arguments $InputBytes $restorePins
+        Assert-RetainedConfigurationInput postgres $Arguments $InputBytes $configuration
         $meter.nativeDispatches++
         return Invoke-Docker $Arguments $InputBytes 15 -AllowFailure:$AllowFailure -ObserveProcess ${function:Observe-RetainedNativeProcess}
     }
@@ -120,6 +121,7 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
         Confirm-RetainedLiveWork
         Assert-RetainedObservedWorkArguments $Arguments -ExpectedIdentifier $auditId -ExpectedRole audit
         Assert-RetainedRestoreInput $Arguments $InputBytes $restorePins
+        Assert-RetainedConfigurationInput audit $Arguments $InputBytes $configuration
         $meter.nativeDispatches++
         return Invoke-Docker $Arguments $InputBytes 15 -AllowFailure:$AllowFailure -ObserveProcess ${function:Observe-RetainedNativeProcess}
     }

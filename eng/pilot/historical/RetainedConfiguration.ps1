@@ -59,3 +59,15 @@ function Assert-RetainedRestoreInput([string[]]$Arguments,[byte[]]$InputBytes,$P
         $Pins.ContainsKey($kind) -and $Pins[$kind] -cmatch '^[a-f0-9]{64}\z') 'retained-restore-packet-pin'
     if($kind -ceq 'audit-immudb'){Assert-ImmuDataPacket $InputBytes $Pins[$kind]}else{Assert-PgDataPacket $InputBytes $Pins[$kind]}
 }
+
+function Assert-RetainedConfigurationInput([string]$Role,[string[]]$Arguments,[byte[]]$InputBytes,$Configuration){
+    $key=$null
+    if($Arguments -ccontains '/bin/sh'){$key=$Role+':'+$Arguments[-1]}
+    elseif($Arguments -ccontains '/usr/local/bin/immuadmin' -and $Arguments -ccontains 'login'){$key='credential:audit/admin'}
+    if($null -eq $key){return}
+    Assert-ImmuData ($null -ne $Configuration -and $Configuration.Values -is [Collections.ObjectModel.ReadOnlyDictionary[string,string]] -and
+        $Configuration.Values.ContainsKey($key)) 'retained-configuration-input-key'
+    $expected=[Text.Encoding]::UTF8.GetBytes($Configuration.Values[$key])
+    Assert-ImmuData ($null -ne $InputBytes -and $InputBytes.Length -gt 0 -and $InputBytes.Length -le 16384 -and
+        $InputBytes.Length -eq $expected.Length -and (Get-ImmuDataHash $InputBytes) -ceq (Get-ImmuDataHash $expected)) 'retained-configuration-input-bytes'
+}
