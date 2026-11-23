@@ -1,8 +1,11 @@
 using Fleetory.ModuleAbstractions;
 using Fleetory.Platform.Contracts;
 using Fleetory.SharedKernel;
+using Fleetory.Platform.Audit;
+using Fleetory.Platform.Contracts.Secrets;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 
 namespace Fleetory.Platform.Tests;
 
@@ -39,6 +42,68 @@ public sealed class PlatformFoundationTests
 
         Assert.NotNull(provider.GetRequiredService<IModuleRegistry>());
         Assert.NotNull(provider.GetRequiredService<ISearchService>());
+        Assert.NotNull(provider.GetRequiredService<IAuditWriter>());
+        Assert.NotNull(provider.GetRequiredService<IAuthorizationService>());
+    }
+
+    [Fact]
+    public void Enabled_audit_export_requires_a_registered_sink()
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:Fleetory"] =
+                    "Host=127.0.0.1;Port=1;Database=fleetory_phase7_unit_test;Username=fleetory;Timeout=1",
+                ["Fleetory:AuditExport:Enabled"] = "true"
+            })
+            .Build();
+        var platform = new Fleetory.Platform.PlatformModule();
+        services.AddSingleton<IReadOnlyCollection<IFleetoryModule>>(new IFleetoryModule[] { platform });
+        platform.RegisterServices(services, configuration);
+
+        Assert.Contains(services, registration => registration.ServiceType == typeof(IHostedService));
+        var exception = Assert.Throws<AggregateException>(() => services.BuildServiceProvider(
+            new ServiceProviderOptions { ValidateOnBuild = true }));
+        Assert.Contains(nameof(IAuditExportSink), exception.ToString(), StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("Development", true)]
+    [InlineData("Production", false)]
+    public void Immudb_export_uses_secret_provider_and_allows_http_only_in_development(
+        string environmentName, bool shouldCreate)
+    {
+        var hostBuilder = Host.CreateApplicationBuilder(new HostApplicationBuilderSettings
+        {
+            EnvironmentName = environmentName
+        });
+        var secretProvider = new AuditSecretProvider();
+        hostBuilder.Services.AddSingleton<ISecretProvider>(secretProvider);
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Fleetory:AuditExport:Enabled"] = "true",
+                ["Fleetory:AuditExport:Sink"] = "Immudb",
+                ["Fleetory:AuditExport:Address"] = "http://127.0.0.1:8090/",
+                ["Fleetory:AuditExport:Username"] = "audit-writer"
+            })
+            .Build();
+        new Fleetory.Platform.PlatformModule().RegisterServices(hostBuilder.Services, configuration);
+        using var services = hostBuilder.Services.BuildServiceProvider();
+
+        if (shouldCreate)
+        {
+            Assert.IsType<ImmudbAuditExportSink>(services.GetRequiredService<IAuditExportSink>());
+        }
+        else
+        {
+            Assert.Throws<ArgumentException>(() =>
+                services.GetRequiredService<IAuditExportSink>());
+        }
+
+        Assert.Equal(FleetorySecretNames.AuditImmudbPassword, secretProvider.RequestedName);
     }
 
     [Fact]
@@ -191,6 +256,17 @@ public sealed class PlatformFoundationTests
     private sealed class StubModule(string name) : FleetoryModuleBase
     {
         public override string Name { get; } = name;
+    }
+
+    private sealed class AuditSecretProvider : ISecretProvider
+    {
+        public string? RequestedName { get; private set; }
+
+        public string GetRequiredSecret(string name)
+        {
+            RequestedName = name;
+            return "private-password";
+        }
     }
 
     private sealed class StubSearchProvider(

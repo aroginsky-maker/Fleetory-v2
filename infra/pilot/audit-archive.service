@@ -1,0 +1,32 @@
+[Unit]
+Description=Fleetory pilot read-only audit snapshot archive
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+UMask=0077
+StateDirectory=fleetory-audit-archive
+StateDirectoryMode=0700
+ExecStart=/usr/bin/python3 /srv/fleetory/eng/pilot/audit_archive.py capture
+TimeoutStartSec=40
+NoNewPrivileges=true
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/fleetory-audit-archive
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryMax=256M
+TasksMax=32
+CPUQuota=10%
+LimitFSIZE=32M

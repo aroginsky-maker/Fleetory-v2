@@ -2,7 +2,7 @@
 
 **Scope:** cross-cutting quality verification for every Fleetory phase.
 
-**Architecture status:** PHASE 6 is complete; the quality checks do not change module ownership or introduce PHASE 7 functionality.
+**Architecture status:** PHASE 6 is complete and PHASE 7 Security Foundation is in progress. These quality checks apply to every phase without changing module ownership.
 
 ## 1. What Sonar verifies
 
@@ -92,7 +92,11 @@ sonar.cs.vscoveragexml.reportsPaths=artifacts/coverage/coverage.xml
 
 Test projects remain part of Sonar analysis as test code. Production projects are not excluded from coverage to inflate percentages.
 
-The `eng/**` verification and packaging scripts remain in Sonar analysis, including duplication and issue checks. They are excluded only from Sonar's coverage denominator because `dotnet-coverage` instruments .NET assemblies and cannot measure PowerShell or shell execution. Their behavior is checked by the phase verification scripts and package smoke tests. No production `src/**` code is excluded from coverage.
+The `eng/**` verification and packaging scripts, runtime/fixture helpers and compatibility entrypoints in `tests/Fleetory.Tools.Tests/**` remain main code in Sonar analysis, including duplication and issue checks. They are excluded only from Sonar's coverage denominator because `dotnet-coverage` instruments .NET assemblies and cannot measure PowerShell or shell execution. No production `src/**` code is excluded from coverage.
+
+Six pure CLI assertion suites are physically held in `tests/Fleetory.Tooling.Tests`: dependency audit, quality orchestration, Phase 7 readiness, immudb signed-state, receipt-export verification and the Sonar issue gate. Their metadata-only project sets `SonarQubeTestProject=true` and contains no hand-written C# compilation input. `IsTestProject=false` keeps VSTest from trying to run PowerShell. The existing CI commands still execute every suite through the original path: a compatibility entrypoint invokes the same PowerShell engine with its effective execution policy and arguments, and preserves the actual exit status. Missing targets, exceptions and explicit nonzero exits fail the entrypoint.
+
+The test-owner project is built explicitly between scanner begin and end; it does not enter `Fleetory.sln` or the runtime build graph. The scanner must report the six assertion files as TEST, while all operational Python/PowerShell code, native fixtures and old entrypoints remain MAIN. This follows Sonar's [main/test analysis model](https://github.com/SonarSource/sonar-scanner-msbuild/wiki/Analysis-of-product-projects-vs.-test-projects): test-specific rules still apply, but test code contributes no LOC, coverage or copy/paste metrics. That metric scope change is stated explicitly; it is not evidence that the assertion source became less duplicated. The working controls and thresholds, multi-language analysis and coverage exclusions are unchanged. No `sonar.exclusions` or test-project exclusion is added.
 
 `eng/verify-quality.ps1` also calculates a local overall production line-coverage value from Fleetory production modules in `coverage.xml`. This local figure is diagnostic; the authoritative new-code coverage result remains the Sonar server Quality Gate result.
 
@@ -141,6 +145,47 @@ SONAR QUALITY GATE  NOT VERIFIED
 and exits with code 2 so CI cannot mistake incomplete external verification for a full Quality Gate PASS.
 
 If only some Sonar parameters are set, verification fails as a configuration error.
+
+### Local execution without Sonar credentials
+
+With all three Sonar values absent, the quality entrypoint runs the audited
+strict restore/build, then the full solution once under the pinned coverage
+collector and the explicit Architecture project gate. It removes only the old
+generated coverage.xml, rejects a directory/reparse-point report, and requires
+a fresh readable production report with the unchanged 80% floor. Other output
+in the coverage directory is retained. Successful local checks still exit 2
+and do not claim an external Sonar Quality Gate. Partial Sonar configuration
+fails before Docker, restore, build or tests.
+
+Configured Sonar execution retains both independent gates described above:
+strict build and tests before the unchanged scanner clean/begin/build/covered
+tests/end sequence. Those tests exercise different build outputs. This change
+does not reuse a prior report across those gates or add a skip/reuse option to
+standalone verify-sonar.ps1. The working coverage target remains about 90%.
+
+The combined quality entrypoint checks and prints `NATIVE COVERAGE` immediately
+after successful collection and before scanner end submits the report and
+waits for the external Quality Gate. A runner interrupted during that wait
+can retain the native result. A failed collector cannot publish its partial
+report as verified coverage. The final summary and exit code continue to
+require the external gate in configured mode.
+
+### Orchestration regression
+
+Run tests/Fleetory.Tools.Tests/QualityOrchestration.Tests.ps1 with PowerShell 7.3+
+and the pinned .NET toolchain. It copies the real entrypoints into generated
+fixtures and runs fresh PowerShell children, substituting only external dotnet
+and Docker commands to record the requested protocol. Twenty-nine CLI cases
+check suite counts, exact unfiltered Release/coverage calls, strict/scanner
+ordering, the fixed test-owner build and its failure, architecture, audit options, failure propagation, stale/malformed/low
+coverage, preserved output and unconfigured/partial configuration results.
+The pinned real collector also runs a separate disposable child that writes a
+marker and exits 17; the test requires that exact nonzero status to propagate.
+
+These fixtures prove orchestration and the observed collector exit contract.
+They do not replace the actual solution tests or establish an external Sonar
+result. Both Windows and Linux CI run this regression; no production service,
+test filter, quality threshold or coverage exclusion is changed.
 
 ## 8. Bash invocation
 
@@ -208,7 +253,7 @@ Do not:
 - weaken the Quality Gate;
 - ignore Security Hotspots.
 
-Small duplication across bounded contexts is preferable to introducing an incorrect shared abstraction only to satisfy duplication metrics.
+Review duplication reported by Sonar in the same increment and remove it when the repeated code has one responsibility. Keep bounded-context ownership and architecture tests intact; do not hide duplication with exclusions, suppressions or a weaker threshold.
 
 ## 12. Current code-hardening changes before external Sonar analysis
 
@@ -224,7 +269,7 @@ These changes are not reported as Sonar findings. They are ordinary maintainabil
 
 ## 13. CI-ready behavior
 
-Recommended current sequence for PHASE 6:
+Current strict/coverage/server sequence for PHASE 7:
 
 ```text
 1. start Docker (default Testcontainers PostgreSQL path)
@@ -243,6 +288,27 @@ FLEETORY_TEST_CONNECTION_STRING=<external test PostgreSQL>
 This prevents a Sonar/coverage run from silently treating skipped PostgreSQL integration tests as a complete PHASE 6 quality result. The connection string is not printed or stored by the script.
 
 A full quality PASS is valid only when strict verification, real PostgreSQL tests and the external Sonar Quality Gate are green.
+
+### Additional CI requirement: zero new and accepted issues
+
+The server's Sonar Way result alone does not enforce Fleetory's zero-issue policy in every case. The official check for commit `f0307cee4ad7fb8205bf9c8e7d72754d50aca6bc` concluded successfully with **2 New issues**. The repository guard rejects that real report; it does not change the assigned server gate or profile.
+
+After `verify-quality.ps1`, the Linux CI job runs `eng/verify-sonar-issues.ps1`. This separate guard:
+
+- reads the GitHub Checks API over a fixed HTTPS endpoint with redirects disabled and a 15-second request timeout;
+- accepts only the `SonarCloud Code Analysis` check from app ID `12526`, slug `sonarqubecloud`, for the exact analysis revision;
+- uses the PR event's head SHA instead of the synthetic merge SHA; push/manual runs use the exact branch revision;
+- requires a bounded, matching `.sonarqube/out/.sonar/report-task.txt` submission artifact and a completion time at or after its UTC modification time (second precision);
+- requires a successful check and exactly one canonical **0 New issues** and **0 Accepted issues** link, with matching SonarCloud project and PR/branch in both issue links and dashboard URL;
+- waits up to 90 seconds for a completed current report, including replacement of an older report for the same SHA.
+
+API errors, incomplete/paginated responses, ambiguous checks, unknown issue counts, positive counts and report mismatches fail the CI job. An absent report never means zero issues. The artifact and completion-time checks establish submission freshness; they do not bind the GitHub check to a Sonar compute-task ID. The scanner's independent server Quality Gate wait remains required.
+
+Only this job adds `checks: read` alongside `contents: read`; `GITHUB_TOKEN` is supplied only to the guard step and is never printed. The [GitHub Checks API](https://docs.github.com/en/rest/checks/runs?apiVersion=2022-11-28) supplies the publisher, revision, completion and summary evidence. The guard neither follows report links nor needs a separate Sonar token. A provider app/schema change requires review of the policy and its fixtures; do not bypass the failure or substitute unauthenticated empty issue responses.
+
+`tests/Fleetory.Tools.Tests/SonarIssueGate.Tests.ps1` runs on Windows and Linux. It exercises 23 malformed/unsafe policy cases, publisher/revision/pending/missing evidence, 14 CLI rejection cases, successful PR-head and feature-branch checks, and an old-to-current report retry. Transport failures must not disclose the fixture credential.
+
+A standalone local SonarQube scan remains local evidence. It cannot satisfy this official SonarCloud PR integration check or replace the official PR result.
 
 ## 14. Troubleshooting
 
@@ -269,3 +335,27 @@ Increase `SONAR_QUALITYGATE_TIMEOUT` only when the Sonar server legitimately nee
 ### Quality Gate fails
 
 Read the server findings and fix the actual issues. Do not alter the gate or exclusions merely to obtain PASS.
+
+
+## SonarCloud quota refusal
+
+At commit `74cf81a2e8a867a2633d30a5cd912b6287f8acb8`, the official
+compute task `AaHbXTJGgdnaIrRUmdpk` rejected 50,255 main-code LOC against the
+organization's 50,000 limit. This is a backend quota failure, not a passed
+Quality Gate. CI #368's selected Windows retry passed; its Linux code/tests
+passed but the configured scanner gate and the aggregate remained failed.
+Printed previous project measures after that failed compute task are not
+current-commit official results.
+
+Keep the full existing analysis scope, thresholds and test execution. A local
+server analysis may be recorded separately with its exact revision, coverage
+source, metrics and limitations. It does not make the failed official check
+green. Do not purchase a plan, change visibility, split uploads to pretend the
+organization's total is smaller, or suppress working recovery code to fit the
+quota. Test classification must be proved from the scanner's actual generated
+inputs; adding an out-of-directory MSBuild link alone is insufficient with the
+pinned scanner. The later physical separation of six pure suites above requires actual scanner input proof; runtime helpers and the other suites are not reclassified.
+
+The official [LOC rules](https://docs.sonarsource.com/sonarqube-cloud/administering-sonarcloud/managing-subscription/subscription-plans)
+describe the organization-wide count. Any later correction must preserve the
+real main/test boundary and state the resulting metric scope explicitly.

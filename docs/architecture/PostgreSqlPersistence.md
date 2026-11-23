@@ -29,7 +29,7 @@ Executable PHASE 6 schemas:
 
 | Schema | Owner | PHASE 6 physical model |
 | --- | --- | --- |
-| `platform` | Platform | `person_projections`, Platform migration history |
+| `platform` | Platform | `person_projections`, PHASE 7 `audit_events` and `audit_export_queue`, Platform migration history |
 | `core` | Core | `devices`, Core migration history |
 
 Reserved by Data Ownership but intentionally not materialized without a real persisted model:
@@ -83,13 +83,26 @@ Migrations are owned by their DbContext/module and have separate history tables:
 
 ```text
 Platform: 202609280001_InitialPlatformPersistence
+Platform: 202610160001_AddPlatformAuditOutbox (PHASE 7)
+Platform: 202610160002_AddPlatformAuthorization (PHASE 7)
+Platform: 202610160003_AddAuditExportLease (PHASE 7)
+Platform: 202610180001_RestrictAuthorizationRoleDeletion (PHASE 7)
+Platform: 202610190001_AddAuthorizationRoleVersions (PHASE 7)
+Platform: 202610190002_AddAuthorizationScopeVersions (PHASE 7)
 Core:     202609280002_InitialCorePersistence
+Core:     20261016212919_AddAgentCertificateBindings (PHASE 7)
+Core:     20261017051549_AddAgentEnrollmentGrants (PHASE 7)
+Core:     20261018134130_EnforceAgentIdentityCollision (PHASE 7)
+Core:     20261018182619_AddAgentRotationIntents (PHASE 7)
+Core:     20261018192451_AddAgentCertificateRecovery (PHASE 7)
 
 platform."__EFMigrationsHistory"
 core."__EFMigrationsHistory"
 ```
 
 Production startup does not call `EnsureCreated`, automatic `Migrate`, destructive reset, or legacy v1 `Schema.sql`.
+
+PHASE 7 audit and authorization storage is written through parameterized Npgsql transactions rather than EF entity models. Platform migrations own those tables; the EF snapshot continues to describe the EF-owned Person projection. Audit events and their export queue entries commit together. Role-version snapshots retain each API-created permission set and predecessor ID; the migration backfills the current roles present when it runs. Direct database bootstrap and recovery scripts also write a snapshot in their transaction. Scope-version snapshots retain the stable scope ID, revision, parent and name; the scope migration backfills revision 1 for existing scopes.
 
 Design-time migration operations use the non-repository environment value `FLEETORY_MIGRATION_CONNECTION_STRING`. This value is not a production secret store.
 
@@ -103,16 +116,18 @@ The minimal updateable records use a `revision bigint` concurrency token. Stale 
 
 ## 8. Runtime configuration
 
-The production/server configuration key remains:
+Production and other non-development Server deployments set the absolute directory path:
+
+```text
+FLEETORY_Fleetory__Secrets__Directory=/run/secrets/fleetory
+```
+
+The directory contains a UTF-8 `fleetory-postgresql` file supplied by a secret manager or OS secret mount. Linux permissions must exclude group and other access; Windows deployments must restrict ACLs to the service identity. Startup reads and caches the secret and validates Host and Database. Restart to pick up a rotated value. Direct connection strings are rejected in non-development environments.
+
+Development and isolated tests may still use:
 
 ```text
 ConnectionStrings:Fleetory
-```
-
-With Fleetory's configuration prefix it can be supplied as:
-
-```text
-FLEETORY_ConnectionStrings__Fleetory
 ```
 
 No production credential or connection string is committed to repository files.

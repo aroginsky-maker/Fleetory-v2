@@ -1,0 +1,5 @@
+# Windows gateway PKI provisioning
+
+Run `eng/provision-fleetory-gateway-pki.ps1` elevated during host provisioning. Supply the approved SHA-256 fingerprints for the root and intermediate CA. The script validates both fingerprints, CA Basic Constraints, `KeyCertSign`, validity windows and the intermediate-to-root chain before installing only the public certificates into `LocalMachine\Root` and `LocalMachine\CA`; it never accepts private-key files or prints private key material. Re-running is idempotent. If the second store update fails, certificates added by that invocation are removed; pre-existing certificates are never removed.
+
+Install the new CA chain before switching the gateway certificate. Verify the gateway with root-only TLS validation, then retire the old CA through the organization's certificate-management process. Keep CA private keys and approval records outside Fleetory. Production completion requires an approved custody, renewal and rollback record; the CI certificate-store check is ephemeral evidence only.

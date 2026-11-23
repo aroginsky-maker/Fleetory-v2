@@ -1,0 +1,259 @@
+using System.Net;
+using System.Text;
+using System.Text.Json;
+using Fleetory.Platform.Audit;
+using Fleetory.Platform.Contracts;
+using Fleetory.SharedKernel;
+
+namespace Fleetory.Platform.Tests;
+
+public sealed class ImmudbAuditExportSinkTests
+{
+    [Fact]
+    public async Task Repeated_delivery_reads_the_same_single_revision_and_rejects_a_conflict()
+    {
+        using var handler = new ImmudbHandler();
+        using var sink = new ImmudbAuditExportSink(new Uri("https://audit.example/"),
+            "audit-writer", "private-password", handler: handler);
+        var eventId = Guid.NewGuid();
+        var occurredAt = DateTimeOffset.UtcNow;
+        var auditEvent = NewEvent(eventId, "Core.Device.Read", occurredAt);
+
+        await sink.PublishAsync(auditEvent);
+        await sink.PublishAsync(auditEvent);
+        Assert.Equal(2, handler.WriteAttempts);
+        Assert.Equal(1, handler.CommittedWrites);
+
+        var conflict = NewEvent(eventId, "Core.Device.Delete", occurredAt);
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await sink.PublishAsync(conflict));
+        Assert.DoesNotContain("private-password", exception.ToString(), StringComparison.Ordinal);
+        Assert.Equal(1, handler.CommittedWrites);
+    }
+
+    [Fact]
+    public async Task Uncertain_write_is_retried_without_creating_a_second_revision()
+    {
+        using var handler = new ImmudbHandler { WriteResponseFailuresRemaining = 1 };
+        using var sink = new ImmudbAuditExportSink(new Uri("https://audit.example/"),
+            "audit-writer", "private-password", handler: handler);
+        var auditEvent = NewEvent(Guid.NewGuid(), "Core.Device.Read", DateTimeOffset.UtcNow);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await sink.PublishAsync(auditEvent));
+        Assert.Equal(1, handler.CommittedWrites);
+
+        await sink.PublishAsync(auditEvent);
+        Assert.Equal(2, handler.WriteAttempts);
+        Assert.Equal(1, handler.CommittedWrites);
+    }
+
+    [Fact]
+    public async Task Refuses_bad_authentication_or_modified_revision()
+    {
+        using var handler = new ImmudbHandler { LoginForbidden = true };
+        using var sink = new ImmudbAuditExportSink(new Uri("https://audit.example/"),
+            "audit-writer", "private-password", handler: handler);
+        var auditEvent = NewEvent(Guid.NewGuid(), "Core.Device.Read", DateTimeOffset.UtcNow);
+
+        var authError = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await sink.PublishAsync(auditEvent));
+        Assert.DoesNotContain("private-password", authError.ToString(), StringComparison.Ordinal);
+        Assert.Equal(0, handler.WriteAttempts);
+
+        handler.LoginForbidden = false;
+        handler.StoredRevision = "2";
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await sink.PublishAsync(auditEvent));
+        Assert.Equal(1, handler.CommittedWrites);
+    }
+
+    [Fact]
+    public async Task Selects_the_configured_database_before_writing()
+    {
+        using var handler = new ImmudbHandler { ExpectedDatabase = "fleetory-audit" };
+        using var sink = new ImmudbAuditExportSink(new Uri("https://audit.example/"),
+            "audit-writer", "private-password", handler: handler,
+            databaseName: "fleetory-audit");
+
+        await sink.PublishAsync(NewEvent(Guid.NewGuid(), "Core.Device.Read", DateTimeOffset.UtcNow));
+        Assert.Equal(1, handler.CommittedWrites);
+    }
+
+    [Fact]
+    public async Task Refuses_database_selection_failure_before_writing()
+    {
+        using var handler = new ImmudbHandler { DatabaseSelectionForbidden = true };
+        using var sink = new ImmudbAuditExportSink(new Uri("https://audit.example/"),
+            "audit-writer", "private-password", handler: handler);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await sink.PublishAsync(NewEvent(Guid.NewGuid(), "Core.Device.Read", DateTimeOffset.UtcNow)));
+
+        Assert.Contains("database selection", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(0, handler.WriteAttempts);
+    }
+
+    [Fact]
+    public async Task Refuses_malformed_authentication_response_without_leaking_credentials()
+    {
+        using var handler = new ImmudbHandler { MalformedLoginResponse = true };
+        using var sink = new ImmudbAuditExportSink(new Uri("https://audit.example/"),
+            "audit-writer", "private-password", handler: handler);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await sink.PublishAsync(NewEvent(Guid.NewGuid(), "Core.Device.Read", DateTimeOffset.UtcNow)));
+
+        Assert.Contains("response is invalid", exception.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("private-password", exception.ToString(), StringComparison.Ordinal);
+        Assert.Equal(0, handler.WriteAttempts);
+    }
+
+    [Fact]
+    public async Task Refuses_oversized_readback_response_after_the_write()
+    {
+        using var handler = new ImmudbHandler { OversizedReadResponse = true };
+        using var sink = new ImmudbAuditExportSink(new Uri("https://audit.example/"),
+            "audit-writer", "private-password", handler: handler);
+
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await sink.PublishAsync(NewEvent(Guid.NewGuid(), "Core.Device.Read", DateTimeOffset.UtcNow)));
+
+        Assert.Contains("response is too large", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(1, handler.CommittedWrites);
+    }
+
+    [Theory]
+    [InlineData("http://audit.example/")]
+    [InlineData("http://127.0.0.1:8090/other")]
+    [InlineData("https://audit.example/path")]
+    [InlineData("https://user:password@audit.example/")]
+    public void Rejects_insecure_or_non_origin_address(string address)
+    {
+        Assert.Throws<ArgumentException>(() => new ImmudbAuditExportSink(
+            new Uri(address), "writer", "password", allowInsecureLoopback: true));
+    }
+
+    [Fact]
+    public void Refuses_default_admin_credentials_except_for_explicit_development_use()
+    {
+        Assert.Throws<InvalidOperationException>(() => new ImmudbAuditExportSink(
+            new Uri("https://audit.example/"), "immudb", "private-password"));
+        Assert.Throws<InvalidOperationException>(() => new ImmudbAuditExportSink(
+            new Uri("https://audit.example/"), "AUDIT-WRITER", "immudb"));
+
+        using var developmentSink = new ImmudbAuditExportSink(
+            new Uri("http://127.0.0.1:8090/"), "immudb", "private-password",
+            allowInsecureLoopback: true, allowDefaultAdminCredential: true);
+        Assert.NotNull(developmentSink);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("audit/db")]
+    [InlineData("audit db")]
+    public void Rejects_invalid_database_names(string databaseName)
+    {
+        Assert.Throws<ArgumentException>(() => new ImmudbAuditExportSink(
+            new Uri("https://audit.example/"), "writer", "password",
+            databaseName: databaseName));
+    }
+
+    private static AuditExportEvent NewEvent(Guid eventId, string action, DateTimeOffset occurredAt) =>
+        new(eventId, new AuditRecord(
+            new ActorReference("person:demo", ActorKind.Person), action,
+            new AuditTarget("Device", "device-1"), new CorrelationId("correlation-1"),
+            occurredAt, new Dictionary<string, string> { ["Decision"] = "Allowed" }),
+            occurredAt.AddMilliseconds(1));
+
+    private sealed class ImmudbHandler : HttpMessageHandler
+    {
+        private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);
+        public bool LoginForbidden { get; set; }
+        public bool MalformedLoginResponse { get; set; }
+        public bool DatabaseSelectionForbidden { get; set; }
+        public bool OversizedReadResponse { get; set; }
+        public string ExpectedDatabase { get; set; } = "defaultdb";
+        public int WriteResponseFailuresRemaining { get; set; }
+        public string StoredRevision { get; set; } = "1";
+        public int WriteAttempts { get; private set; }
+        public int CommittedWrites { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Assert.DoesNotContain("private-password", request.RequestUri!.ToString(),
+                StringComparison.Ordinal);
+            if (request.RequestUri.AbsolutePath == "/api/login")
+            {
+                if (LoginForbidden)
+                {
+                    return Json(HttpStatusCode.Unauthorized, "{\"error\":\"bad credentials\"}");
+                }
+
+                if (MalformedLoginResponse)
+                {
+                    return Json(HttpStatusCode.OK, "not-json");
+                }
+
+                using var login = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
+                var password = Encoding.UTF8.GetString(Convert.FromBase64String(
+                    login.RootElement.GetProperty("password").GetString()!));
+                Assert.Equal("private-password", password);
+                return Json(HttpStatusCode.OK, "{\"token\":\"test-token\"}");
+            }
+
+            if (request.RequestUri.AbsolutePath == "/api/db/use/" + ExpectedDatabase)
+            {
+                Assert.Equal("Bearer", request.Headers.Authorization?.Scheme);
+                Assert.Equal("test-token", request.Headers.Authorization?.Parameter);
+                if (DatabaseSelectionForbidden)
+                {
+                    return Json(HttpStatusCode.Forbidden, "{}");
+                }
+                return Json(HttpStatusCode.OK, "{\"token\":\"selected-token\"}");
+            }
+
+            Assert.Equal("Bearer", request.Headers.Authorization?.Scheme);
+            Assert.Equal("selected-token", request.Headers.Authorization?.Parameter);
+            if (request.RequestUri.AbsolutePath == "/api/db/set")
+            {
+                WriteAttempts++;
+                using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
+                var entry = body.RootElement.GetProperty("KVs")[0];
+                var key = entry.GetProperty("key").GetString()!;
+                var value = entry.GetProperty("value").GetString()!;
+                Assert.Equal(key, body.RootElement.GetProperty("preconditions")[0]
+                    .GetProperty("keyMustNotExist").GetProperty("key").GetString());
+                if (_values.TryAdd(key, value))
+                {
+                    CommittedWrites++;
+                    if (WriteResponseFailuresRemaining > 0)
+                    {
+                        WriteResponseFailuresRemaining--;
+                        return Json(HttpStatusCode.ServiceUnavailable, "{}");
+                    }
+                    return Json(HttpStatusCode.OK, "{\"id\":\"1\"}");
+                }
+
+                return Json(HttpStatusCode.BadRequest, "{\"error\":\"precondition failed\"}");
+            }
+
+            var encoded = request.RequestUri.AbsolutePath["/api/db/get/".Length..];
+            var storedKey = Uri.UnescapeDataString(encoded);
+            if (OversizedReadResponse)
+            {
+                return Json(HttpStatusCode.OK, new string('x', (16 * 1024) + 1));
+            }
+            return _values.TryGetValue(storedKey, out var storedValue)
+                ? Json(HttpStatusCode.OK, JsonSerializer.Serialize(new
+                {
+                    key = storedKey, value = storedValue, revision = StoredRevision
+                }))
+                : Json(HttpStatusCode.NotFound, "{}");
+        }
+
+        private static HttpResponseMessage Json(HttpStatusCode status, string body) =>
+            new(status) { Content = new StringContent(body, Encoding.UTF8, "application/json") };
+    }
+}
