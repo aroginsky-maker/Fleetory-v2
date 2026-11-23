@@ -14,6 +14,7 @@ function Invoke-RetainedDataStageHost([string]$Repository,[string]$Python,[strin
             (Split-Path $InputRoot -Leaf) -ceq 'retained-inputs') 'retained-host-generated-callback-root'
     }
     $externalLoss=$null -ne $ControllerPipe
+    $externalSql=$externalLoss -and (Get-RetainedControllerFaultPoint $ControllerPipe) -ceq 'active-sql'
     if($externalLoss){
         Assert-ImmuData ($Mode -ceq 'normal' -and $null -ne $GeneratedAfterCapture -and $null -ne $OriginalExpected) 'controller-host-generated-only'
         Assert-RetainedControllerPipe $ControllerPipe
@@ -41,15 +42,21 @@ function Invoke-RetainedDataStageHost([string]$Repository,[string]$Python,[strin
             AdmissionPeer=$admission;ExpectedConfigurationSha256=$Commitments.configurationSha256;
             GeneratedAdmissionFault=($loss -and -not $externalLoss);GeneratedAdmissionExpiry=$expiry}
         if($externalLoss){$auditStage.ControllerPipe=$ControllerPipe}
-        $result=Invoke-RetainedPostgresTarget $Repository $Python $payload $Expected 'complete' $auditStage
-        Assert-ImmuData ($result.verified -and $result.cleanupVerified -and $result.nativePgRestores -eq $(if($externalLoss){0}else{2}) -and
-            $result.nativeAuditRestored -eq (-not $loss) -and $result.serverStarted -eq (-not $loss) -and
+        $flow=if($externalSql){'inflight-sql-exit'}else{'complete'}
+        $result=Invoke-RetainedPostgresTarget $Repository $Python $payload $Expected $flow $auditStage
+        Assert-ImmuData ($result.verified -and $result.cleanupVerified -and $result.nativePgRestores -eq $(if($externalLoss -and -not $externalSql){0}else{2}) -and
+            $result.nativeAuditRestored -eq (-not $loss -or $externalSql) -and $result.serverStarted -eq (-not $loss) -and
             $result.runtimeLoginVerified -eq (-not $loss) -and $result.admissionLossAfterPgRestoreVerified -eq ($loss -and -not $externalLoss) -and
             $result.ownRemovalCalls -eq 1 -and $result.ownedAuditRemovalCalls -eq 1 -and
             $result.configurationSha256 -ceq $Commitments.configurationSha256) 'retained-host-native-result'
         if($externalLoss){
-            Assert-ImmuData ($result.externalControllerLossVerified -and $result.nativeWorkDispatches -eq 0 -and
-                $result.externalControllerLateWorkRefusals -eq 1) 'controller-host-no-native-work'
+            Assert-ImmuData ($result.externalControllerLossVerified -and $result.externalControllerLateWorkRefusals -eq 1 -and
+                ($externalSql -or $result.nativeWorkDispatches -eq 0)) 'controller-host-no-late-native-work'
+            if($externalSql){
+                Assert-ImmuData ($result.externalControllerActiveSqlVerified -and $result.inFlightSql.actualQueryActive -and
+                    $result.inFlightSql.nativeClientExitVerified -and -not $result.inFlightSql.coordinatorLost -and
+                    $result.inFlightSql.lateNativeWorkRefusals -eq 1) 'controller-host-active-sql-cancellation'
+            }
         }
         if(-not $loss){
             Assert-ImmuData ($result.server.boundedRestartVerified -and $result.server.sameTargetBackendRestartVerified -and
@@ -67,7 +74,7 @@ function Invoke-RetainedDataStageHost([string]$Repository,[string]$Python,[strin
             codeLeaseHandoffBound=$true;fullTransitiveExecutionVerified=$false;
             actualChildExitVerified=($admission.closed -or ($loss -and $admission.holder.HasExited -and $admission.holder.ExitCode -ne 0));
             admissionLossAfterPgRestoreVerified=($loss -and -not $externalLoss);
-            externalControllerLossVerified=$externalLoss;
+            externalControllerLossVerified=$externalLoss;externalControllerActiveSqlVerified=$externalSql;
             admissionOriginalExpiryVerified=($expiry -and $result.admissionOriginalExpiryMilliseconds -ge 108000);
             ownAuditImageRemovalVerified=$true;gateOriginAuthenticated=$false;nativeResultAuthenticated=$false;
             originalExecutorReady=$false;fullSystemRecoveryVerified=$false;phase7Complete=$false}

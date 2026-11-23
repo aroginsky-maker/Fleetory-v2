@@ -37,7 +37,7 @@ PUBLICATION_IMAGE_PREP = '      - name: Prepare pinned public publication base\n
 
 
 def controller_fault_step(case):
-    label = 'EOF' if case == 'eof' else 'death'
+    label = {'eof':'EOF','death':'death','sql-death':'active SQL'}[case]
     return (f'      - name: Verify generated external controller {label} cleanup\n'
             '        shell: pwsh\n        run: |\n'
             '          python3 -B ./tests/Fleetory.Tools.Tests/native_controller_loss.py '
@@ -128,7 +128,7 @@ def validate(text):
             matches = [line for line in commands if line == prefix or line.startswith(prefix + ' -Python ')]
             assert len(matches) == 1, (key, name, profile)
         assert len(commands) == len(cases)
-    for case in ('eof','death'):
+    for case in ('eof','death','sql-death'):
         step=controller_fault_step(case)
         block=blocks['native-original-recovery']
         assert block.count(step)==1
@@ -855,7 +855,7 @@ class RecoveryCiLayoutTests(unittest.TestCase):
 
 
     def test_external_controller_fault_gates_cannot_be_omitted_duplicated_or_softened(self):
-        for case in ('eof','death'):
+        for case in ('eof','death','sql-death'):
             step=controller_fault_step(case)
             self.refused(self.text.replace(step,''))
             self.refused(self.text.replace(step,step+step))

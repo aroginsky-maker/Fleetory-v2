@@ -161,6 +161,17 @@ function Interrupt-RetainedActiveNative([Diagnostics.Process]$Process,[Threading
     $Token.ThrowIfCancellationRequested()
     $meter.inflightObserved=$true
     $meter.dispatchesAtInterruption=$meter.nativeDispatches
+    if($null -ne (Get-Variable -Name externalController -ValueOnly -ErrorAction SilentlyContinue) -and $externalSql){
+        Assert-ImmuData ($Flow -ceq 'inflight-sql-exit') 'external-controller-fixed-readonly-sql'
+        Arm-RetainedControllerPipe $externalController $plan.nonce $Process
+        try{Wait-RetainedControllerLoss $externalController $Token $clock}catch{
+            if($_.Exception.GetBaseException() -isnot [OperationCanceledException]){throw}
+            Assert-ImmuData (-not $Process.HasExited) 'external-loss-before-native-client-exit'
+            $meter.inflightAliveAtExternalLoss=$true
+            throw
+        }
+        throw 'External SQL fault unexpectedly returned.'
+    }
     $prefix=if($Flow -ceq 'inflight-restore-exit'){'interrupt-restore:'}else{'interrupt-inflight:'}
     Send-IndependentFrame $peer.input ([Text.Encoding]::ASCII.GetBytes($prefix+$peer.projection)) $Token
     $frame=Read-IndependentFrame $peer.output $Token 2048

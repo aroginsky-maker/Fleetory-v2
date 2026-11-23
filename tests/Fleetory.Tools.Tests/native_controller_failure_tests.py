@@ -1,5 +1,6 @@
 """An invalid controller request must close its pipe and await the actual child."""
 import io
+import shutil
 import subprocess
 import sys
 import unittest
@@ -41,6 +42,22 @@ class ControllerFailureTests(unittest.TestCase):
                     child.stdin.close()
                 child.stdout.close()
                 child.stderr.close()
+
+
+    def test_sql_fault_cannot_enter_non_generated_or_unbound_profiles(self):
+        powershell=shutil.which('pwsh')
+        self.assertIsNotNone(powershell)
+        entry=fixture.REPO/'tests/Fleetory.Tools.Tests/NativeServerPair.Tests.ps1'
+        common=[powershell,'-NoLogo','-NoProfile','-NonInteractive','-File',str(entry),'-ControllerFaultPoint','active-sql']
+        for arguments,message in (([], 'External SQL fault requires the generated controller owner.'),
+                (['-ControllerLossRehearsal'], 'Controller loss is restricted'),
+                (['-ControllerLossRehearsal','-OriginalPurpose','-Profile','v2'], 'Controller loss is restricted')):
+            with self.subTest(arguments=arguments):
+                result=subprocess.run(common+arguments,capture_output=True,timeout=10,check=False)
+                self.assertNotEqual(result.returncode,0)
+                self.assertIn(message.encode(),result.stderr)
+                self.assertNotIn(b'fleetory.native-pair-cleanup',result.stdout)
+                self.assertNotIn(b'fleetory.native-owner-controller-arm',result.stdout)
 
 
 if __name__ == '__main__':

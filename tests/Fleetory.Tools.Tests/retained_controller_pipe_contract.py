@@ -28,6 +28,7 @@ for case in ('alive','eof','byte'):
         arm=json.loads(first)
         assert arm['schema']=='fleetory.native-owner-controller-arm.v1'
         assert arm['controllerPid']==os.getpid() and arm['ownerPid']==process.pid and not arm['cleanupAuthorized']
+        assert arm['faultPoint']=='after-targets' and arm['nativeClientPid']==0 and arm['nativeClientBirth'] is None
         assert arm['controllerImageSha256']==hashlib.sha256(Path(sys.executable).resolve().read_bytes()).hexdigest()
         if case=='eof':
             process.stdin.close();process.stdin=None
@@ -39,7 +40,7 @@ for case in ('alive','eof','byte'):
         assert process.returncode==0 and not errors,(process.returncode,errors.decode(errors='replace')[:1200])
         result=json.loads(output)
         snapshot=result['snapshot']
-        assert result['schema']=='fleetory.controller-pipe-contract.v1' and result['refusals']==6
+        assert result['schema']=='fleetory.controller-pipe-contract.v1' and result['refusals']==7
         assert not snapshot['parentExited'] and not snapshot['controllerOriginAuthenticated']
         assert not snapshot['cleanupAuthorized'] and not snapshot['controllerDeathCleanupVerified']
         assert not result['nativeResourcesCreated'] and not result['cleanupVerified']
@@ -52,5 +53,5 @@ for case in ('alive','eof','byte'):
         if process.stdin is not None:process.stdin.close()
         process.stdout.close();process.stderr.close()
 assert hashlib.sha256(helper.read_bytes()).hexdigest()==pin
-print(json.dumps(dict(schema='fleetory.controller-pipe-contract-results.v1',cases=len(results),refusals=18,
+print(json.dumps(dict(schema='fleetory.controller-pipe-contract-results.v1',cases=len(results),refusals=21,
     helperSha256=pin,nativeResourcesCreated=False,controllerDeathCleanupVerified=False)))

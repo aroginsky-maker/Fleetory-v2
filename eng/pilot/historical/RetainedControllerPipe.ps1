@@ -25,7 +25,7 @@ function Get-RetainedControllerImageHash([string]$Path){
         return [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($stream)).ToLowerInvariant()
     }finally{$stream.Dispose()}
 }
-function New-RetainedControllerPipe([string]$Python,[Diagnostics.Stopwatch]$OwnerWatch){
+function New-RetainedControllerPipe([string]$Python,[Diagnostics.Stopwatch]$OwnerWatch,[ValidateSet('after-targets','active-sql')][string]$FaultPoint='after-targets'){
     Assert-ImmuData (-not $script:retainedControllerPipeStarted) 'controller-pipe-one-use'
     $script:retainedControllerPipeStarted=$true
     Assert-ImmuData ([Console]::IsInputRedirected -and [Console]::IsOutputRedirected -and
@@ -45,7 +45,7 @@ function New-RetainedControllerPipe([string]$Python,[Diagnostics.Stopwatch]$Owne
         $context=[object]::new()
         $held=@{ownerId=$PID;parent=$parent;birth=$birth;image=$image;input=$inputStream;buffer=$buffer;pending=$pending;
             clock=[Diagnostics.Stopwatch]::StartNew();remainingMilliseconds=(600000-$OwnerWatch.ElapsedMilliseconds);
-            armed=$false;nonce=$null;lost=$false;lossKind=$null;checks=0;closed=$false}
+            faultPoint=$FaultPoint;armed=$false;nonce=$null;lost=$false;lossKind=$null;checks=0;closed=$false}
         $script:retainedControllerPipeStates.Add($context,$held)
         $parent=$inputStream=$null
         return $context
@@ -76,12 +76,32 @@ function Assert-RetainedControllerPipe($Context){
     $birth=Get-HistoricalNativeBirth $held.parent
     Assert-ImmuData ($birth.kind -ceq $held.birth.kind -and $birth.token -ceq $held.birth.token) 'controller-parent-birth'
 }
-function Arm-RetainedControllerPipe($Context,[string]$Nonce){
+function Get-RetainedControllerFaultPoint($Context){
+    return (Read-RetainedControllerPipeState $Context).faultPoint
+}
+function Wait-RetainedControllerLoss($Context,[Threading.CancellationToken]$Token,[Diagnostics.Stopwatch]$WorkWatch){
+    Assert-ImmuData ($null -ne $WorkWatch -and $WorkWatch.IsRunning) 'controller-original-work-clock'
+    $ready=[Diagnostics.Stopwatch]::StartNew()
+    while($ready.ElapsedMilliseconds -lt 5000){
+        $Token.ThrowIfCancellationRequested()
+        Assert-ImmuData ($WorkWatch.Elapsed.TotalSeconds -lt 75) 'controller-original-work-window'
+        Assert-RetainedControllerPipe $Context
+        Start-Sleep -Milliseconds 25
+    }
+    throw 'External controller fault was not observed within readiness budget.'
+}
+function Arm-RetainedControllerPipe($Context,[string]$Nonce,[Diagnostics.Process]$NativeClient=$null){
     Assert-RetainedControllerPipe $Context
     $held=Read-RetainedControllerPipeState $Context
     Assert-ImmuData (-not $held.armed -and $Nonce -cmatch '^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\z') 'controller-pipe-arm'
+    $nativePid=0;$nativeBirth=$null
+    if($held.faultPoint -ceq 'active-sql'){
+        Assert-ImmuData ($null -ne $NativeClient -and -not $NativeClient.HasExited -and $NativeClient.ProcessName -ceq 'docker') 'controller-original-native-client'
+        $null=$NativeClient.Handle;$nativePid=$NativeClient.Id;$nativeBirth=Get-HistoricalNativeBirth $NativeClient
+    }else{Assert-ImmuData ($null -eq $NativeClient) 'controller-prework-no-native-client'}
     $held.armed=$true;$held.nonce=$Nonce
     $frame=@{schema='fleetory.native-owner-controller-arm.v1';nonce=$Nonce;ownerPid=$PID;controllerPid=$held.parent.Id;
+        faultPoint=$held.faultPoint;nativeClientPid=$nativePid;nativeClientBirth=$nativeBirth;
         controllerBirth=$held.birth;controllerImageSha256=$held.image;ownerBirth=(Get-HistoricalNativeBirth ([Diagnostics.Process]::GetCurrentProcess()));cleanupAuthorized=$false}
     [Console]::Out.WriteLine(($frame|ConvertTo-Json -Depth 4 -Compress))
     [Console]::Out.Flush()
@@ -89,7 +109,7 @@ function Arm-RetainedControllerPipe($Context,[string]$Nonce){
 function Get-RetainedControllerPipeSnapshot($Context){
     $held=Read-RetainedControllerPipeState $Context
     return @{schema='fleetory.retained-controller-pipe-observation.v1';ownerPid=$PID;controllerPid=$held.parent.Id;
-        controllerBirth=$held.birth;controllerImageSha256=$held.image;armed=$held.armed;nonce=$held.nonce;
+        controllerBirth=$held.birth;controllerImageSha256=$held.image;faultPoint=$held.faultPoint;armed=$held.armed;nonce=$held.nonce;
         lossObserved=$held.lost;lossKind=$held.lossKind;parentExited=$held.parent.HasExited;checks=$held.checks;
         controllerOriginAuthenticated=$false;cleanupAuthorized=$false;controllerDeathCleanupVerified=$false;phase7Complete=$false}
 }

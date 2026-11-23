@@ -1366,6 +1366,12 @@ jobs:
           python3 -B ./tests/Fleetory.Tools.Tests/native_controller_loss.py --powershell (Get-Command pwsh).Source --case death
           if ($LASTEXITCODE -ne 0) { throw 'Generated external controller death cleanup failed.' }
 
+      - name: Verify generated external controller active SQL cleanup
+        shell: pwsh
+        run: |
+          python3 -B ./tests/Fleetory.Tools.Tests/native_controller_loss.py --powershell (Get-Command pwsh).Source --case sql-death
+          if ($LASTEXITCODE -ne 0) { throw 'Generated external controller active SQL cleanup failed.' }
+
   native-publication-faults:
     name: Native public publication faults
     runs-on: ubuntu-24.04

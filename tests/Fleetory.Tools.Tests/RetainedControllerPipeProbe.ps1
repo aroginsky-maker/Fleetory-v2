@@ -16,6 +16,13 @@ try{
  try{$null=New-RetainedControllerPipe $Python $clock;throw 'Controller stream reused'}catch{
   if($_.Exception.GetBaseException().Message -cne 'Audit data fixture refused: controller-pipe-one-use'){throw};$refused++
  }
+ if((Get-RetainedControllerFaultPoint $context) -cne 'after-targets'){throw 'Default live fault point drift'}
+ $foreign=[Diagnostics.Process]::GetCurrentProcess()
+ try{
+  try{Arm-RetainedControllerPipe $context '01234567-89ab-cdef-0123-456789abcdef' $foreign;throw 'Pre-work native client accepted'}catch{
+   if($_.Exception.GetBaseException().Message -cne 'Audit data fixture refused: controller-prework-no-native-client'){throw};$refused++
+  }
+ }finally{$foreign.Dispose()}
  Arm-RetainedControllerPipe $context '01234567-89ab-cdef-0123-456789abcdef'
  if($Case -ceq 'alive'){
   try{Arm-RetainedControllerPipe $context '01234567-89ab-cdef-0123-456789abcdef';throw 'Controller rearmed'}catch{
@@ -43,6 +50,6 @@ try{
 try{$null=Get-RetainedControllerPipeSnapshot $context;throw 'Closed context accepted'}catch{
  if($_.Exception.GetBaseException().Message -cne 'Audit data fixture refused: controller-pipe-original-context'){throw};$refused++
 }
-if($refused -ne 6){throw 'Controller refusal count drift'}
+if($refused -ne 7){throw 'Controller refusal count drift'}
 @{schema='fleetory.controller-pipe-contract.v1';case=$Case;refusals=$refused;snapshot=$snapshot;nativeResourcesCreated=$false;cleanupVerified=$false}|ConvertTo-Json -Compress -Depth 6
 exit 0

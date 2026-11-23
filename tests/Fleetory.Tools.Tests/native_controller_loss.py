@@ -19,6 +19,7 @@ from private_runtime_fixture import private_powershell
 
 REPO = Path(__file__).resolve().parents[2]
 SOURCES = ('eng/pilot/historical/RetainedControllerPipe.ps1',
+           'eng/pilot/historical/RetainedInFlightSql.ps1',
            'eng/pilot/historical/RetainedPostgresTarget.ps1',
            'eng/pilot/historical/RetainedDataStageHost.ps1',
            'eng/pilot/historical/RetainedNativeClient.ps1',
@@ -103,6 +104,18 @@ class ExitObservation:
         if birth != expected_birth:
             self.close()
             raise ValueError('Owner birth differs from arm')
+        self.require_live()
+
+    def require_live(self):
+        if os.name == 'nt':
+            exited = self.api.WaitForSingleObject(self.handle, 0) == 0
+        else:
+            poll = select.poll()
+            poll.register(self.handle, select.POLLIN)
+            exited = bool(poll.poll(0))
+        if exited:
+            self.close()
+            raise ValueError('Observed process exited before fault injection')
 
     def wait(self, seconds):
         if os.name == 'nt':
@@ -123,10 +136,11 @@ class ExitObservation:
             self.handle = None
 
 
-def controller(runtime):
+def controller(runtime, active_sql=False):
     child = subprocess.Popen([runtime, '-NoLogo', '-NoProfile', '-NonInteractive', '-File',
         str(REPO/'tests/Fleetory.Tools.Tests/NativeServerPair.Tests.ps1'), '-Python', sys.executable,
-        '-Profile', 'v2-retained-service-use', '-PrivateRuntimeChild', '-OriginalPurpose', '-ControllerLossRehearsal'],
+        '-Profile', 'v2-retained-service-use', '-PrivateRuntimeChild', '-OriginalPurpose', '-ControllerLossRehearsal',
+        *(['-ControllerFaultPoint','active-sql'] if active_sql else [])],
         stdin=subprocess.PIPE, cwd=REPO)
     try:
         requests = queue.Queue()
@@ -177,8 +191,13 @@ def rehearse(runtime, case, record, deadline):
     pins = {name: hashlib.sha256((REPO/name).read_bytes()).hexdigest() for name in SOURCES}
     proc = None
     observer = None
+    client_observer = None
+    control = None
+    active_sql = case == 'sql-death'
     output_path = record/'stdout.log'
     try:
+        control = subprocess.Popen([sys.executable,'-I','-S','-B','-c','import time;time.sleep(660)'],
+            stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         with output_path.open('xb') as output, (record/'stderr.log').open('xb') as errors:
             proc = subprocess.Popen([sys.executable, str(Path(__file__).resolve()), '--controller',
                 '--powershell', str(runtime), '--case', case], stdin=subprocess.PIPE,
@@ -188,17 +207,31 @@ def rehearse(runtime, case, record, deadline):
                 raise ValueError('Actual controller/owner arm mismatch')
             if arm['controllerImageSha256'] != hashlib.sha256(Path(sys.executable).resolve().read_bytes()).hexdigest():
                 raise ValueError('Actual controller image mismatch')
+            expected_point='active-sql' if active_sql else 'after-targets'
+            if arm['faultPoint'] != expected_point:
+                raise ValueError('Fault point differs from the sealed owner context')
             observer = ExitObservation(arm['ownerPid'], arm['ownerBirth'])
+            if active_sql:
+                if arm['nativeClientPid'] in (arm['ownerPid'],arm['controllerPid']):
+                    raise ValueError('Native client identity aliases an owner/controller')
+                client_observer = ExitObservation(arm['nativeClientPid'],arm['nativeClientBirth'])
+            elif arm['nativeClientPid'] != 0 or arm['nativeClientBirth'] is not None:
+                raise ValueError('Pre-work arm unexpectedly carried a native client')
+            observer.require_live()
+            if client_observer is not None:
+                client_observer.require_live()
             if proc.poll() is not None:
                 raise ValueError('Actual controller exited before fault injection')
-            if case == 'death':
+            if case != 'eof':
                 proc.kill()
                 if proc.wait(timeout=remaining(deadline,10)) == 0:
                     raise ValueError('Killed controller did not report a failure exit')
             else:
                 proc.stdin.write(b'e')
                 proc.stdin.flush()
-            proof = wait_frame(output_path, 'fleetory.native-original-four-service-use-stage.v1', proc, remaining(deadline,180), case == 'death')
+            proof = wait_frame(output_path, 'fleetory.native-original-four-service-use-stage.v1', proc, remaining(deadline,180), case != 'eof')
+            if client_observer is not None:
+                client_observer.wait(remaining(deadline,10))
             observer.wait(remaining(deadline,10))
             if case == 'eof' and proc.wait(timeout=remaining(deadline,10)) != 0:
                 raise ValueError('Native owner returned failure')
@@ -207,17 +240,27 @@ def rehearse(runtime, case, record, deadline):
         observation = native['externalControllerObservation']
         checks=dict(hostCleanup=proof['cleanupVerified'], externalLoss=proof['externalControllerLossVerified'],
             targetCleanup=native['cleanupVerified'], postgresRemoval=native['ownRemovalCalls']==1,
-            auditRemoval=native['ownedAuditRemovalCalls']==1, noWork=native['nativeWorkDispatches']==0,
-            noRestore=native['nativePgRestores']==0, lateRefusal=native['externalControllerLateWorkRefusals']==1,
-            lossObserved=observation['lossObserved'], finalParentExit=(case!='death' or observation['parentExited']))
+            auditRemoval=native['ownedAuditRemovalCalls']==1, workScope=(native['nativeWorkDispatches']>0 if active_sql else native['nativeWorkDispatches']==0),
+            restores=native['nativePgRestores']==(2 if active_sql else 0), lateRefusal=native['externalControllerLateWorkRefusals']==1,
+            lossObserved=observation['lossObserved'], finalParentExit=(case=='eof' or observation['parentExited']))
         failed=[name for name,passed in checks.items() if not passed]
         if failed:
             # Fixed boolean names only; never dump packets, SQL or configuration values.
             raise ValueError('Native fault/cleanup result mismatch: '+','.join(failed))
-        if (native['nativeAuditRestored'] or native['serverStarted'] or native['independentCreatorDeathCleanupVerified']
+        if (native['nativeAuditRestored'] != active_sql or native['serverStarted'] or native['independentCreatorDeathCleanupVerified']
                 or native['unknownCreateOutcomeRecoveryVerified'] or proof['sourceOriginalFilesRead']
                 or proof['fullRuntimeCommandResourceInventoryVerified']):
             raise ValueError('Fault proof exceeded its scope')
+        if active_sql:
+            flight=native['inFlightSql']
+            if not (proof['externalControllerActiveSqlVerified'] and native['externalControllerActiveSqlVerified']
+                    and flight['actualQueryActive'] and flight['nativeClientExitVerified'] and native['nativeClientAliveAtExternalLoss']
+                    and flight['observationCalls']==flight['lateNativeWorkRefusals']==1
+                    and flight['nativeClientPid']==arm['nativeClientPid'] and flight['nativeClientBirth']==arm['nativeClientBirth']
+                    and not flight['coordinatorLost'] and not native['postLossDatabaseComparisonVerified']):
+                raise ValueError('Actual active SQL/cancelled original client evidence mismatch')
+        if control.poll() is not None:
+            raise ValueError('Unrelated original control process was not preserved')
         checks = absence_checks(cleanup, native, proof['measuredImageId'], deadline)
         for name, pin in pins.items():
             if hashlib.sha256((REPO/name).read_bytes()).hexdigest() != pin:
@@ -226,6 +269,8 @@ def rehearse(runtime, case, record, deadline):
             sourceSha256=pins, arm=arm, ownerProof=proof, cleanup=cleanup, ownerExitObserved=True,
             independentAbsenceChecks=checks, sharedBasePreserved=True, originalInputsOpened=False,
             actualControllerExitCode=proc.returncode, actualControllerExitObserved=(proc.poll() is not None),
+            actualActiveSqlObserved=active_sql,originalNativeClientExitObserved=(client_observer is not None),
+            unrelatedControlProcessPreserved=True,postLossDatabaseComparisonVerified=False,
             creatorDeathCleanupVerified=False, fullExecutionInventoryVerified=False, phase7Complete=False)
 
         encoded=json.dumps(result)
@@ -234,6 +279,10 @@ def rehearse(runtime, case, record, deadline):
         (record/'verified.json').write_text(json.dumps(result, indent=2)+'\n', encoding='utf-8')
         print(encoded)
     finally:
+        if client_observer is not None:
+            client_observer.close()
+        if control is not None and control.poll() is None:
+            control.kill();control.wait(timeout=10)
         if observer is not None:
             observer.close()
         if proc is not None:
@@ -246,12 +295,12 @@ def rehearse(runtime, case, record, deadline):
 def main():
     parser = argparse.ArgumentParser(allow_abbrev=False)
     parser.add_argument('--powershell', required=True)
-    parser.add_argument('--case', choices=('eof', 'death'), required=True)
+    parser.add_argument('--case', choices=('eof', 'death', 'sql-death'), required=True)
     parser.add_argument('--controller', action='store_true')
     parser.add_argument('--record', type=Path)
     args = parser.parse_args()
     if args.controller:
-        return controller(args.powershell)
+        return controller(args.powershell,active_sql=args.case=='sql-death')
     deadline=time.monotonic()+660
     root = Path(tempfile.mkdtemp(prefix='fleetory-controller-owner-')).resolve(strict=True)
     parent = Path(tempfile.gettempdir()).resolve(strict=True)

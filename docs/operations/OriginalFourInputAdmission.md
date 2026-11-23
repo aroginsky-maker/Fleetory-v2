@@ -154,3 +154,34 @@ is retained. A portable actual-parent-death regression checks both snapshots and
 refuses a final observation before loss. Generated native evidence is emitted in
 bounded full form after validation so CI retains identities/source hashes and
 actual cleanup results; mismatch diagnostics contain only fixed boolean names.
+
+
+### Controller termination during an actually active SQL operation
+
+The generated-only `sql-death` case uses the same owner and private four-packet
+target. Its CWT context fixes `active-sql` at creation; wire metadata cannot
+select a new executable, command or artifact category. The owner restores both
+generated PostgreSQL databases and the four-event/five-transaction audit history,
+then uses the existing fixed read-only `pg_sleep` query. It arms the external
+fault only after observing that exact query in `pg_stat_activity` and holding
+the original Docker-client process handle/birth. The root harness additionally
+opens a read-only OS observation handle for that client before terminating only
+its held controller. Original client exit, owner exit, late-work refusal, ten
+own-resource absences, shared-base preservation and an unrelated real process
+surviving the fault are required.
+
+The internal comparison coordinator is not the injected victim; its
+`coordinatorLost` flag must remain false. No work is admitted after external
+loss. A final inspection uses the original custody context and unchanged cleanup
+path. The original 660/600/108/75/15/5-second and status256 limits remain; no
+deadline is renewed. The native original-purpose job requires all three
+external EOF/death/active-SQL cases within its existing 15 minutes. The portable
+pipe contracts now retain the previous refusals and add a wrong native-client
+binding refusal before arming: three cases/21 refusals per OS.
+
+The query observation proves that the fixed read-only statement was active;
+it does not prove a post-loss database comparison. That flag, creator-death
+cleanup, unknown-create recovery, complete execution origin, original recovery
+and full-system/Phase7 flags remain false. The original four saved files,
+retained credentials/PKI, source VPS, provider, issuer and production tokens
+remain outside this generated rehearsal.

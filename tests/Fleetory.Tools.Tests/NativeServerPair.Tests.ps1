@@ -1,5 +1,6 @@
 #requires -Version 7.3
-param([string]$Python='',[ValidateSet('none','after-stores')][string]$FailurePoint='none',[ValidateSet('legacy','v2','v2-retained','v2-retained-coupled','v2-retained-server','v2-retained-historical-server','v2-retained-inflight','v2-retained-restore-inflight','v2-retained-service-use','v2-retained-service-use-loss','v2-retained-service-use-expiry')][string]$Profile='legacy',[switch]$PrivateRuntimeChild,[switch]$OriginalPurpose,[switch]$ControllerLossRehearsal)
+param([string]$Python='',[ValidateSet('none','after-stores')][string]$FailurePoint='none',[ValidateSet('legacy','v2','v2-retained','v2-retained-coupled','v2-retained-server','v2-retained-historical-server','v2-retained-inflight','v2-retained-restore-inflight','v2-retained-service-use','v2-retained-service-use-loss','v2-retained-service-use-expiry')][string]$Profile='legacy',[switch]$PrivateRuntimeChild,[switch]$OriginalPurpose,[switch]$ControllerLossRehearsal,[ValidateSet('after-targets','active-sql')][string]$ControllerFaultPoint='after-targets')
+if($ControllerFaultPoint -cne 'after-targets' -and -not $ControllerLossRehearsal){throw 'External SQL fault requires the generated controller owner.'}
 if($ControllerLossRehearsal -and (-not $OriginalPurpose -or $Profile -cne 'v2-retained-service-use' -or ($IsLinux -and -not $PrivateRuntimeChild))){throw 'Controller loss is restricted to the direct generated original-purpose owner.'}
 if($OriginalPurpose -and $Profile -cnotin @('v2-retained-service-use','v2-retained-service-use-loss','v2-retained-service-use-expiry')){throw 'Original purpose is restricted to generated private-use profiles.'}
 $ErrorActionPreference='Stop'
@@ -56,7 +57,7 @@ function Restore-Audit{
     $script:auditRestores++
 }
 try{
-    if($ControllerLossRehearsal){$retainedExternalController=New-RetainedControllerPipe $Python $watch}
+    if($ControllerLossRehearsal){$retainedExternalController=New-RetainedControllerPipe $Python $watch -FaultPoint $ControllerFaultPoint}
     $null=New-Item -ItemType Directory -Path $root
     $published=Publish-NativeProbe $repo 'ServerBackendProbe' $root
     $state.ProbeHash=(Get-FileHash -LiteralPath (Join-Path $published 'ServerBackendProbe.dll') -Algorithm SHA256).Hash.ToLowerInvariant()
