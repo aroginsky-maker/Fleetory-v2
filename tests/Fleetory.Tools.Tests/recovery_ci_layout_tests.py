@@ -192,6 +192,16 @@ def validate(text):
         assert blocks[key].count(step)==1 and text.count(command)==1
         start=blocks[key].index(step);end=blocks[key].find('      - name:',start+len(step))
         assert blocks[key][start:end if end>=0 else len(blocks[key])].strip()==step.strip()
+    for key, platform, executable in (('windows-tls-chain', ' on Windows', 'python'), ('quality', '', 'python3')):
+        for title, filename, argument in (
+                ('reduced native output limit', 'NativeReducedOutputLimit.Tests.ps1', ' -Python (Get-Command '+executable+').Source'),
+                ('owned schema early refusals', 'OwnedSchemaRefusals.Tests.ps1', ''),
+                ('owned schema native reply contracts', 'OwnedSchemaNativeReplies.Tests.ps1', ' -Python (Get-Command '+executable+').Source')):
+            command='./tests/Fleetory.Tools.Tests/'+filename+argument
+            step='      - name: Verify '+title+platform+'\n        shell: pwsh\n        run: '+command+'\n'
+            assert blocks[key].count(step)==1
+            start=blocks[key].index(step);end=blocks[key].find('      - name:',start+len(step))
+            assert blocks[key][start:end if end>=0 else len(blocks[key])].strip()==step.strip()
     for key, platform in (('windows-tls-chain', ' on Windows'), ('quality', '')):
         step=('      - name: Verify original data host binding refusals'+platform+'\n'
               '        shell: pwsh\n        run: ./tests/Fleetory.Tools.Tests/OriginalFourDataHostBinding.Tests.ps1\n')
@@ -947,6 +957,18 @@ class RecoveryCiLayoutTests(unittest.TestCase):
                     self.assertEqual(invoked.call_count,1)
                 self.assertEqual(rehearsal.preflight(),'28.0.4')
         finally:sys.path[:]=before
+
+
+    def test_owned_schema_gates_cannot_be_omitted_duplicated_or_masked(self):
+        for executable, platform in (('python',' on Windows'),('python3','')):
+            for title, filename, argument in (
+                    ('reduced native output limit','NativeReducedOutputLimit.Tests.ps1',' -Python (Get-Command '+executable+').Source'),
+                    ('owned schema early refusals','OwnedSchemaRefusals.Tests.ps1',''),
+                    ('owned schema native reply contracts','OwnedSchemaNativeReplies.Tests.ps1',' -Python (Get-Command '+executable+').Source')):
+                command='./tests/Fleetory.Tools.Tests/'+filename+argument
+                step='      - name: Verify '+title+platform+'\n        shell: pwsh\n        run: '+command+'\n'
+                for changed in ('',step+step,step.replace(command,command+'; exit 0')):
+                    self.refused(self.text.replace(step,changed))
 
 
 if __name__ == '__main__':

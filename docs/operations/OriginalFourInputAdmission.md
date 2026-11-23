@@ -361,3 +361,28 @@ and Linux jobs. Native source/SDK/target/schema integration remains a separately
 recorded, outside-repository prototype; this component does not start services,
 read original recovery inputs, establish a full runtime inventory or close
 Phase 7.
+
+
+## Original-owner native schema extraction
+
+`Invoke-PublicOwnedRestoreSchema` takes the original live image context/client
+and permits one attempt per context, including failed attempts. It creates one
+originally claimed container from that image, verifies its stopped isolation
+profile and runs only `dotnet /tool/ServerBackendProbe.dll restore-schema`.
+The fixed profile has no network or mounts, a read-only root, UID/GID3322,
+cap-drop ALL, NNP, no restart, 256MiB, one CPU, 64PIDs and a 64MiB private tmpfs.
+
+The target window is75seconds and each native operation15seconds. Stdout is
+limited to262144bytes; the shared native runner permits smaller caller-selected
+limits while retaining its existing64MiB maximum and1MiB stderr limit. The
+response must have exactly five unique fields, bounded SQL and false database,
+HTTP and issuer flags. SQL and its digest are metadata, not execution authority.
+
+Known containers are removed and absence confirmed using the original context,
+store and client, even after controller loss. A malformed create reply does not
+authorize ID/name adoption or cleanup; unknown create outcome and creator-death
+recovery remain open. Early-refusal, modeled native-response and actual reduced
+output-limit tests run in both existing OS jobs. The model never invokes Docker;
+its copied executable is held only as a public identity fixture and not executed.
+The separate native source-to-schema prototype does not yet establish generated
+backend integration, historical release provenance or complete runtime inventory.

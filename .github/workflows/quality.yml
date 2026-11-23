@@ -361,6 +361,18 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/PinnedSdkPublicationChild.Tests.ps1 -Python (Get-Command python).Source
 
+      - name: Verify reduced native output limit on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativeReducedOutputLimit.Tests.ps1 -Python (Get-Command python).Source
+
+      - name: Verify owned schema early refusals on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/OwnedSchemaRefusals.Tests.ps1
+
+      - name: Verify owned schema native reply contracts on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/OwnedSchemaNativeReplies.Tests.ps1 -Python (Get-Command python).Source
+
       - name: Verify separate public build create policy on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/build_runtime_create_profile_tests.py
@@ -1003,6 +1015,18 @@ jobs:
       - name: Verify pinned SDK publication child
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/PinnedSdkPublicationChild.Tests.ps1 -Python (Get-Command python3).Source
+
+      - name: Verify reduced native output limit
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativeReducedOutputLimit.Tests.ps1 -Python (Get-Command python3).Source
+
+      - name: Verify owned schema early refusals
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/OwnedSchemaRefusals.Tests.ps1
+
+      - name: Verify owned schema native reply contracts
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/OwnedSchemaNativeReplies.Tests.ps1 -Python (Get-Command python3).Source
 
       - name: Verify separate public build create policy
         shell: pwsh

@@ -1,7 +1,8 @@
 #requires -Version 7.3
 # Bounded binary stdin/stdout; callers must keep credentials out of Arguments.
 . (Join-Path $PSScriptRoot 'PilotCaptureStream.ps1')
-function Invoke-NativeBytes([string] $Executable, [string[]] $Arguments, [byte[]] $InputBytes = $null, [int] $TimeoutSeconds = 90, [scriptblock] $ObserveProcess = $null, [switch] $ClassicDockerEnvironment, [switch] $DockerClientEnvironment, [object] $ExecutableLease = $null) {
+function Invoke-NativeBytes([string] $Executable, [string[]] $Arguments, [byte[]] $InputBytes = $null, [int] $TimeoutSeconds = 90, [scriptblock] $ObserveProcess = $null, [switch] $ClassicDockerEnvironment, [switch] $DockerClientEnvironment, [object] $ExecutableLease = $null, [int] $OutputLimit = 67108864) {
+    if($OutputLimit -lt 1 -or $OutputLimit -gt 67108864){throw 'Native output limit outside original bound.'}
     if ($ClassicDockerEnvironment -and $DockerClientEnvironment) { throw 'Native Docker environment modes are mutually exclusive.' }
     $start = [Diagnostics.ProcessStartInfo]::new()
     if ($null -ne $ExecutableLease) {
@@ -27,7 +28,7 @@ function Invoke-NativeBytes([string] $Executable, [string[]] $Arguments, [byte[]
     foreach ($argument in $Arguments) { $null = $start.ArgumentList.Add($argument) }
     $process = [Diagnostics.Process]::new()
     $process.StartInfo = $start
-    $stdout = [Fleetory.Tests.PilotCaptureStream]::new(67108864)
+    $stdout = [Fleetory.Tests.PilotCaptureStream]::new($OutputLimit)
     $stderr = [Fleetory.Tests.PilotCaptureStream]::new(1048576)
     $stopwatch = [Diagnostics.Stopwatch]::StartNew()
     $observationCancel = if ($null -ne $ObserveProcess) { [Threading.CancellationTokenSource]::new([TimeSpan]::FromSeconds($TimeoutSeconds)) } else { $null }
