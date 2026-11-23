@@ -21,6 +21,16 @@ namespace Fleetory.Pilot {
         private bool closed;
         [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
         private static extern SafeFileHandle CreateFileW(string name,uint access,uint share,IntPtr security,uint disposition,uint flags,IntPtr template);
+        [DllImport("kernel32.dll",CharSet=CharSet.Unicode,ExactSpelling=true,SetLastError=true)]
+        [return: MarshalAs(UnmanagedType.Bool)]
+        private static extern bool QueryFullProcessImageNameW(SafeProcessHandle process,int flags,System.Text.StringBuilder name,ref int size);
+        private static string WindowsImage(Process process) {
+            var name=new System.Text.StringBuilder(32768);int size=name.Capacity;
+            var handle=process.SafeHandle;
+            Require(!handle.IsInvalid && QueryFullProcessImageNameW(handle,0,name,ref size) && size>0 && size<name.Capacity);
+            return name.ToString();
+        }
+
         [StructLayout(LayoutKind.Explicit,Size=256)]
         private struct LinuxStatx {
             [FieldOffset(0)] internal uint Mask;
@@ -85,22 +95,29 @@ namespace Fleetory.Pilot {
         }
         public void Start(Process process) {
             Require(process!=null && !process.StartInfo.UseShellExecute && String.Equals(process.StartInfo.FileName,GetLaunchPath(),Comparison));
-            bool launched=false;
+            bool launched=false;string stage="start";
             try {
                 Require(process.Start());launched=true;
-                string actual=null;
-                var startup=Stopwatch.StartNew();
-                while(actual==null) {
-                    Require(!process.HasExited && startup.ElapsedMilliseconds<1000);
-                    actual=process.MainModule?.FileName;
-                    if(actual==null) System.Threading.Thread.Sleep(5);
+                string actual=null;stage="image-query";
+                if(OperatingSystem.IsWindows()) actual=WindowsImage(process);
+                else {
+                    var startup=Stopwatch.StartNew();
+                    while(actual==null) {
+                        Require(!process.HasExited && startup.ElapsedMilliseconds<1000);
+                        actual=process.MainModule?.FileName;
+                        if(actual==null) System.Threading.Thread.Sleep(5);
+                    }
                 }
+                stage="image-path-match";
                 Require(String.Equals(Path.GetFullPath(actual),path,Comparison));
+                stage="image-file-identity";
                 if(OperatingSystem.IsLinux()) Require(linuxIdentity==LinuxIdentity(-100,"/proc/"+process.Id+"/exe",0));
+                stage="live-handle";
                 var handle=process.Handle;
                 Require(handle!=IntPtr.Zero && !process.HasExited);
                 Started.Add(process,this);
-            } catch {
+            } catch(Exception failure) {
+                failure.Data["NativeExecutableLeaseStage"]=stage;
                 if(launched) {try {if(!process.HasExited) process.Kill(true);} catch {} try {process.WaitForExit(2000);} catch {}}
                 throw;
             }

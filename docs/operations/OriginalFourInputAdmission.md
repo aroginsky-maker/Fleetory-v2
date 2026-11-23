@@ -279,3 +279,23 @@ actual source-child to SDK to held publication/native-owner integration and host
 Publish-NativeProbe replacement remain open, as do historical release/config/key
 continuity and full recovery. Original backups/secrets/PKI remain outside this
 change; no Phase7 closure or production readiness is inferred.
+
+## Windows child image identity query
+
+Windows leased launches query the executable through the original started process
+SafeHandle with QueryFullProcessImageNameW, using Win32 path format. They no longer
+wait for loader module enumeration to become available. The actual path must still
+match the held executable before stdin; the selected bytes/ancestor locks and live
+original Process weak-table binding remain mandatory. Linux descriptor/inode and
+module checks retain their existing one-second startup cap. No operation timeout
+is enlarged. Unexpected startup refusals attach only a fixed stage diagnostic;
+no argv, stdin or child output is added to that diagnostic.
+
+CI451 Windows refused an earlier MainModule-based identity check; its old log
+cannot identify the exact failed predicate. Ten local diagnostic repetitions did
+not reproduce it. The replacement uses the Windows kernel process-image API;
+the next exact-commit CI must establish the regression outcome. CI451 remains
+rejected as a complete code gate and does not cover this working change.
+
+API references: https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.process.mainmodule
+and https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-queryfullprocessimagenamew

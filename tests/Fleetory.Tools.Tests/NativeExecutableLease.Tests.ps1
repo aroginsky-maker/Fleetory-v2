@@ -1,6 +1,15 @@
 #requires -Version 7.3
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
+trap {
+    $failure=$_.Exception.GetBaseException()
+    $stage=$failure.Data['NativeExecutableLeaseStage']
+    if($stage -cin @('start','image-query','image-path-match','image-file-identity','live-handle')){
+        [Console]::Error.WriteLine(('NATIVE EXECUTABLE LEASE FAILURE STAGE: '+$stage))
+    }
+    throw
+}
+
 . (Join-Path $PSScriptRoot '../../eng/pilot/PilotNativeExecutableLease.ps1')
 . (Join-Path $PSScriptRoot '../../eng/pilot/PilotNativeProcess.ps1')
 $executable=if($IsWindows){[Environment]::ProcessPath}else{'/usr/bin/cat'}
