@@ -196,6 +196,7 @@ def validate(text):
         for title, filename, argument in (
                 ('reduced native output limit', 'NativeReducedOutputLimit.Tests.ps1', ' -Python (Get-Command '+executable+').Source'),
                 ('owned schema early refusals', 'OwnedSchemaRefusals.Tests.ps1', ''),
+                ('original one-use SQL lease', 'OwnedSchemaSqlLease.Tests.ps1', ''),
                 ('owned schema native reply contracts', 'OwnedSchemaNativeReplies.Tests.ps1', ' -Python (Get-Command '+executable+').Source')):
             command='./tests/Fleetory.Tools.Tests/'+filename+argument
             step='      - name: Verify '+title+platform+'\n        shell: pwsh\n        run: '+command+'\n'
@@ -964,6 +965,7 @@ class RecoveryCiLayoutTests(unittest.TestCase):
             for title, filename, argument in (
                     ('reduced native output limit','NativeReducedOutputLimit.Tests.ps1',' -Python (Get-Command '+executable+').Source'),
                     ('owned schema early refusals','OwnedSchemaRefusals.Tests.ps1',''),
+                    ('original one-use SQL lease','OwnedSchemaSqlLease.Tests.ps1',''),
                     ('owned schema native reply contracts','OwnedSchemaNativeReplies.Tests.ps1',' -Python (Get-Command '+executable+').Source')):
                 command='./tests/Fleetory.Tools.Tests/'+filename+argument
                 step='      - name: Verify '+title+platform+'\n        shell: pwsh\n        run: '+command+'\n'

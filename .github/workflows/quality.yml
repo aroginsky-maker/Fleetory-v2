@@ -369,6 +369,10 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/OwnedSchemaRefusals.Tests.ps1
 
+      - name: Verify original one-use SQL lease on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/OwnedSchemaSqlLease.Tests.ps1
+
       - name: Verify owned schema native reply contracts on Windows
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/OwnedSchemaNativeReplies.Tests.ps1 -Python (Get-Command python).Source
@@ -1023,6 +1027,10 @@ jobs:
       - name: Verify owned schema early refusals
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/OwnedSchemaRefusals.Tests.ps1
+
+      - name: Verify original one-use SQL lease
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/OwnedSchemaSqlLease.Tests.ps1
 
       - name: Verify owned schema native reply contracts
         shell: pwsh

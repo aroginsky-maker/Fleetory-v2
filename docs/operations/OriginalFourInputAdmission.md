@@ -376,7 +376,8 @@ The target window is75seconds and each native operation15seconds. Stdout is
 limited to262144bytes; the shared native runner permits smaller caller-selected
 limits while retaining its existing64MiB maximum and1MiB stderr limit. The
 response must have exactly five unique fields, bounded SQL and false database,
-HTTP and issuer flags. SQL and its digest are metadata, not execution authority.
+HTTP and issuer flags. Parsing occurs once in the original SQL lease; plain SQL
+and its digest cannot import native ownership or replace that lease.
 
 Known containers are removed and absence confirmed using the original context,
 store and client, even after controller loss. A malformed create reply does not
@@ -386,3 +387,23 @@ output-limit tests run in both existing OS jobs. The model never invokes Docker;
 its copied executable is held only as a public identity fixture and not executed.
 The separate native source-to-schema prototype does not yet establish generated
 backend integration, historical release provenance or complete runtime inventory.
+
+
+## One-use native SQL handoff
+
+The schema API returns `PublicOwnedSchemaLease`, bound to the same original live
+image context, native container store and client. It captures the complete native
+start reply inside the original guarded callback. Completion requires original
+container removal and confirmed absence. `TakeSql` then returns bytes exactly
+once to the same context/client while the original image and controller remain
+live. Premature completion/take, replay, malformed replies and failed claims
+cannot be repaired. JSON copies and another context/store/client cannot import
+the lease. The existing75-second clock is retained and an independent monotonic
+age prevents restarting that clock from extending the remaining allowance.
+
+Portable lease tests use modeled replies; the separate native source-to-schema
+prototype exercised this exact lease with public frozen sources and one actual
+schema execution. It did not start PostgreSQL/immudb/Server. Generated backend
+integration and removal of host-publish/schema use on that path remain open.
+The in-process lease does not authorize cleanup after its creator dies, prove
+historical release/SQL origin or replace original-data admission requirements.

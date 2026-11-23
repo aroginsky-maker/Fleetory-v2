@@ -112,7 +112,7 @@ foreach($case in $cases){
   $store=$model.Context.Stores[0]
   Check ([Fleetory.Pilot.AuditContainerCustody]::Closed($model.Context,$store,$model.Client)) ('original removal not confirmed '+$case)
  }
- if($case -ceq 'normal'){Check ($result.verified -and $result.sql -ceq 'SELECT 1;' -and $result.originalContainerClaimClosed) 'normal schema response'}
+ if($case -ceq 'normal'){try{Check ([Text.Encoding]::UTF8.GetString($result.TakeSql($model.Context,$model.Client)) -ceq 'SELECT 1;') 'original one-use schema response'}finally{$result.Dispose()}}
  if($case -cin @('controller-loss') -or $case -cin $mutations.Keys -and $case -cnotin @('opened-database','started-http','issuer','empty-sql','duplicate-key','extra-key','wrong-category','stderr','exit-code')){
   Check (-not @($script:commands|Where-Object { $_.StartsWith('start|') }).Count) ('late start after refusal '+$case)
  }

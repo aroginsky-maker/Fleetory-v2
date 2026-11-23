@@ -118,6 +118,84 @@ namespace Fleetory.Pilot {
         public static void Absent(System.Collections.IDictionary context, object client) => Core.Absent(context,client);
         public static void ConfirmRemoval(System.Collections.IDictionary context, object client, Func<Tuple<int,byte[],byte[]>> operation) => Core.ConfirmRemoval(context,client,operation);
     }
+    // Trusted original native worker only. Metadata/SQL strings cannot import this lease.
+    public sealed class PublicOwnedSchemaLease : IDisposable {
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<object,object> Attempts=new();
+        private readonly System.Collections.IDictionary context,store;
+        private readonly object client;
+        private readonly string image,container;
+        private readonly Func<bool> alive;
+        private readonly System.Diagnostics.Stopwatch clock;
+        private readonly int process=Environment.ProcessId,thread=Environment.CurrentManagedThreadId;
+        private byte[] sql;
+        private readonly long capturedAt=System.Diagnostics.Stopwatch.GetTimestamp();
+        private readonly double priorSeconds;
+        private bool complete,consumed,disposed;
+        private static void Require(bool value) {if(!value)throw new InvalidOperationException("Original native SQL lease refused.");}
+        private void Check() {
+            Require(!disposed && process==Environment.ProcessId && thread==Environment.CurrentManagedThreadId &&
+                clock.IsRunning && clock.ElapsedMilliseconds<75000 &&
+                priorSeconds+System.Diagnostics.Stopwatch.GetElapsedTime(capturedAt).TotalSeconds<75 && alive() &&
+                AuditImageCustody.Id(context,client)==image);
+        }
+        private PublicOwnedSchemaLease(System.Collections.IDictionary source,System.Collections.IDictionary originalStore,
+                object originalClient,Func<bool> originalAlive,System.Diagnostics.Stopwatch originalClock) {
+            context=source;store=originalStore;client=originalClient;alive=originalAlive;clock=originalClock;
+            Require(alive!=null && clock!=null);
+            priorSeconds=clock.Elapsed.TotalSeconds;
+            image=AuditImageCustody.Id(context,client);
+            container=AuditContainerCustody.Id(context,store,client);
+            Require(Equals(store["Role"],"public-restore-schema") && Equals(context["ImageId"],image));
+            Check();
+        }
+        public static PublicOwnedSchemaLease Capture(System.Collections.IDictionary context,System.Collections.IDictionary store,
+                object client,Func<bool> alive,System.Diagnostics.Stopwatch clock,Func<Tuple<int,byte[],byte[]>> nativeStart) {
+            Require(nativeStart!=null);
+            var value=new PublicOwnedSchemaLease(context,store,client,alive,clock);
+            byte[] raw=null;
+            try {
+                Attempts.Add(context,new object()); // Once per original image, including failed reads.
+                var reply=AuditNativeReply.Hold(nativeStart());
+                value.Check();Require(AuditContainerCustody.Id(context,store,client)==value.container);
+                Require(reply.Item1==0 && reply.Item3.Length==0 && reply.Item2.Length>0 && reply.Item2.Length<=262144);
+                raw=reply.Item2;
+                using var parsed=System.Text.Json.JsonDocument.Parse(raw);
+                var root=parsed.RootElement;
+                Require(root.ValueKind==System.Text.Json.JsonValueKind.Object);
+                var keys=new System.Collections.Generic.HashSet<string>(StringComparer.Ordinal);
+                foreach(var property in root.EnumerateObject())Require(keys.Add(property.Name));
+                Require(keys.SetEquals(new[]{"category","databaseOpened","httpHostStarted","issuerActivated","sql"}));
+                Require(root.GetProperty("category").GetString()=="restore-schema" &&
+                    root.GetProperty("databaseOpened").ValueKind==System.Text.Json.JsonValueKind.False &&
+                    root.GetProperty("httpHostStarted").ValueKind==System.Text.Json.JsonValueKind.False &&
+                    root.GetProperty("issuerActivated").ValueKind==System.Text.Json.JsonValueKind.False &&
+                    root.GetProperty("sql").ValueKind==System.Text.Json.JsonValueKind.String);
+                string text=root.GetProperty("sql").GetString();Require(text.Length>0 && text.Length<=131072);
+                value.sql=System.Text.Encoding.UTF8.GetBytes(text);value.Check();return value;
+            }catch{value.Dispose();throw;}
+            finally{if(raw!=null)Array.Clear(raw,0,raw.Length);}
+        }
+        public void Complete() {
+            try {
+                Require(!complete && !consumed);Check();
+                Require(AuditContainerCustody.Closed(context,store,client));complete=true;
+            }catch{Dispose();throw;}
+        }
+        public string SqlSha256() {
+            Check();Require(complete && !consumed && sql!=null);
+            return Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(sql)).ToLowerInvariant();
+        }
+        public byte[] TakeSql(System.Collections.IDictionary originalContext,object originalClient) {
+            Require(!consumed);consumed=true;
+            try {
+                Check();Require(complete && sql!=null && Object.ReferenceEquals(context,originalContext) &&
+                    Object.ReferenceEquals(client,originalClient) && AuditContainerCustody.Closed(context,store,client));
+                byte[] result=sql;sql=null;return result;
+            }catch{Dispose();throw;}
+        }
+        public void Dispose() {if(sql!=null){Array.Clear(sql,0,sql.Length);sql=null;}disposed=true;}
+    }
+
     // Trusted native worker only. A serialized result is never an import grant.
     public sealed class PublicSdkOutputLease : IDisposable {
         private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<object,object> Attempts=new();

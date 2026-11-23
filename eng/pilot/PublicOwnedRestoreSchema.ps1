@@ -57,26 +57,14 @@ function Invoke-PublicOwnedRestoreSchema([string]$Docker,[string]$DockerSha256,[
             $h.Tmpfs.Count -ne 1 -or $h.Tmpfs['/tmp'] -cne 'rw,noexec,nosuid,nodev,size=67108864,uid=3322,gid=3322,mode=0700'){
             throw 'Original schema creation profile drift.'
         }
-        $run=Schema-Native @('start','--attach',$identifier)
-        if($run.Item1 -ne 0 -or $run.Item3.Length -ne 0 -or $run.Item2.Length -eq 0){throw 'Original native schema probe failed.'}
-        $json=[Text.Json.JsonDocument]::Parse([ReadOnlyMemory[byte]]::new($run.Item2))
-        try{
-            $root=$json.RootElement;$keys=[Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-            foreach($property in $root.EnumerateObject()){if(-not $keys.Add($property.Name)){throw 'Duplicate schema field refused.'}}
-            if((($keys|Sort-Object)-join '|') -cne 'category|databaseOpened|httpHostStarted|issuerActivated|sql' -or
-                $root.GetProperty('category').GetString() -cne 'restore-schema' -or
-                $root.GetProperty('databaseOpened').ValueKind -ne [Text.Json.JsonValueKind]::False -or
-                $root.GetProperty('httpHostStarted').ValueKind -ne [Text.Json.JsonValueKind]::False -or
-                $root.GetProperty('issuerActivated').ValueKind -ne [Text.Json.JsonValueKind]::False -or
-                $root.GetProperty('sql').ValueKind -ne [Text.Json.JsonValueKind]::String){throw 'Native schema response shape refused.'}
-            $sql=$root.GetProperty('sql').GetString()
-            if($sql.Length -lt 1 -or $sql.Length -gt 131072){throw 'Native schema SQL bound refused.'}
-            $result=@{schema='fleetory.original-owned-native-restore-schema.v1';verified=$true;sql=$sql;
-                sqlSha256=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($sql))).ToLowerInvariant();
-                originalImageId=$image;originalContainerId=$identifier;databaseOpened=$false;httpHostStarted=$false;issuerActivated=$false;
-                nativeDeadlineSeconds=15;targetWindowSeconds=75;hostDotnetUsed=$false;originalInputsRead=$false;phase7Complete=$false}
-        }finally{$json.Dispose()}
+        $sqlAlive={
+            $value=@(& $ControllerAlive)
+            return ($value.Count -eq 1 -and $value[0] -is [bool] -and $value[0])
+        }.GetNewClosure()
+        $start=[Func[Tuple[int,byte[],byte[]]]]{Schema-Native @('start','--attach',$identifier)}
+        $result=[Fleetory.Pilot.PublicOwnedSchemaLease]::Capture($ImageContext,$store,$ImageClient,[Func[bool]]$sqlAlive,$clock,$start)
     }finally{
+        $cleanupOk=$false
         try{
             if($null -ne $identifier){
                 $id=[Fleetory.Pilot.AuditContainerCustody]::Id($ImageContext,$store,$ImageClient)
@@ -85,10 +73,12 @@ function Invoke-PublicOwnedRestoreSchema([string]$Docker,[string]$DockerSha256,[
                 $absent=[Func[Tuple[int,byte[],byte[]]]]{Schema-Native @('inspect',$id) -Cleanup}
                 [Fleetory.Pilot.AuditContainerCustody]::ConfirmRemoval($ImageContext,$store,$ImageClient,$absent)
             }
+            $cleanupOk=$true
         }finally{
+            if(-not $cleanupOk -and $null -ne $result){$result.Dispose()}
             if($createdConfig){[IO.Directory]::Delete($PrivateConfig,$false)}
-            if($null -ne $held){$held.Dispose()};$clock.Stop()
+            if($null -ne $held){$held.Dispose()}
         }
     }
-    $result.originalContainerClaimClosed=$true;return $result
+    $result.Complete();return $result
 }
