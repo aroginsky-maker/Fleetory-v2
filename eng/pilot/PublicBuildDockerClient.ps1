@@ -1,6 +1,7 @@
 #requires -Version 7.3
 . (Join-Path $PSScriptRoot 'AuditDataResourceOwnership.ps1')
 . (Join-Path $PSScriptRoot 'PilotNativeProcess.ps1')
+. (Join-Path $PSScriptRoot 'PilotNativeExecutableLease.ps1')
 . (Join-Path $PSScriptRoot 'PublicBuildImagePolicy.ps1')
 . (Join-Path $PSScriptRoot 'PublicBuildSdkPolicy.ps1')
 
@@ -13,11 +14,11 @@ function New-PublicBuildDockerClient([string]$Docker,[string]$ExpectedDockerSha2
     $imageArguments=${function:Get-PublicBuildImageArguments}
     $sdkArguments=${function:Get-PublicBuildSdkArguments}
     $nativeBytes=${function:Invoke-NativeBytes}
-    $held=[IO.FileStream]::new($Docker,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+    $held=[Fleetory.Pilot.NativeExecutableLease]::new($Docker,$ExpectedDockerSha256)
     $created=$false
     try{
-        $hash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($held)).ToLowerInvariant()
-        if($hash -cne $ExpectedDockerSha256){throw 'Public build Docker executable pin refused.'}
+        $description=$held.Describe()
+        $hash=$description.Item2
         [Fleetory.Pilot.ExclusiveAuditDirectory]::Create($PrivateConfig);$created=$true
         $state=@{Closed=$false;Held=$held;Path=$Docker;Config=$PrivateConfig;Sha256=$hash;Sdk=$null}
         $invoke={param([string[]]$Arguments,[byte[]]$InputBytes)
@@ -52,7 +53,7 @@ function New-PublicBuildDockerClient([string]$Docker,[string]$ExpectedDockerSha2
             }
             if(-not $valid){throw 'Public build native command refused.'}
             $prefix=@('--config',$state.Config,'--host',$(if($IsWindows){'npipe:////./pipe/dockerDesktopLinuxEngine'}else{'unix:///var/run/docker.sock'}))
-            $result=& $nativeBytes $state.Path ($prefix+$Arguments) $InputBytes -TimeoutSeconds 120 -ClassicDockerEnvironment
+            $result=& $nativeBytes $state.Path ($prefix+$Arguments) $InputBytes -TimeoutSeconds 120 -ClassicDockerEnvironment -ExecutableLease $state.Held
             if($Arguments[0] -ceq 'create' -and $result.ExitCode -eq 0 -and $result.Stdout -cmatch '^([a-f0-9]{64})\r?\n\z'){$state.Sdk.Id=$Matches[1]}
             return [Tuple[int,byte[],byte[]]]::new($result.ExitCode,$result.StdoutBytes,$result.StderrBytes)
         }.GetNewClosure()

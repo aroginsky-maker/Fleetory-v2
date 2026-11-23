@@ -232,3 +232,22 @@ inventory and origin requirements. Neither this lease nor a passing generated
 test sets full runtime inventory, original execution, creator-death/unknown-create
 recovery or Phase7 flags to true. Original backups, retained secrets/PKI, provider,
 issuer, production tokens and source VPS remain outside these tests.
+
+## Held executable for the public SDK client
+
+The public build client now reuses the shared NativeExecutableLease instead of a
+separate read-only stream and initial pathname hash. Each actual image/SDK command
+passes that live lease to the shared launcher, which verifies the selected bytes
+and launched process before stdin. The fixed local endpoint, private empty config,
+classic builder clean environment and 120-second native call ceiling remain.
+The client closes its lease only after its original transaction unwinds; this
+confers no new image/container cleanup authority. Both clean environment modes
+support a lease, but they remain mutually exclusive and a leased call cannot use
+the inherited default environment.
+
+This is a prerequisite to the protected source-to-SDK output integration. It does
+not replace the host dotnet publisher, validate a returned SDK probe bundle,
+authenticate the initial Docker hash or historical release inputs, or admit any
+original backup, retained secret or PKI. The SDK output/owner handoff and complete
+runtime inventory remain open. Generated boundary replies and actual native
+process tests are reported separately from a complete SDK/Server recovery run.

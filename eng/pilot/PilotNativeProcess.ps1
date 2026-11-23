@@ -5,7 +5,7 @@ function Invoke-NativeBytes([string] $Executable, [string[]] $Arguments, [byte[]
     if ($ClassicDockerEnvironment -and $DockerClientEnvironment) { throw 'Native Docker environment modes are mutually exclusive.' }
     $start = [Diagnostics.ProcessStartInfo]::new()
     if ($null -ne $ExecutableLease) {
-        if (-not $DockerClientEnvironment -or $ExecutableLease -isnot [Fleetory.Pilot.NativeExecutableLease]) { throw 'Native executable lease profile refused.' }
+        if ((-not $DockerClientEnvironment -and -not $ClassicDockerEnvironment) -or $ExecutableLease -isnot [Fleetory.Pilot.NativeExecutableLease]) { throw 'Native executable lease profile refused.' }
         $ExecutableLease.ValidateRequest($Executable)
         $start.FileName = $ExecutableLease.GetLaunchPath()
     } else { $start.FileName = $Executable }

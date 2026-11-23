@@ -52,6 +52,20 @@ try{
     Refuse {$null=Invoke-NativeBytes 'relative-must-not-launch' $arguments -DockerClientEnvironment -ExecutableLease $lease}
     $reply=Invoke-NativeBytes $executable $arguments ([Text.Encoding]::ASCII.GetBytes('generated-pipeline')) 5 -DockerClientEnvironment -ExecutableLease $lease
     if($reply.ExitCode -ne 0 -or $reply.Stdout -cne 'generated-pipeline' -or $reply.Stderr -cne ''){throw 'Actual native pipeline did not use the lease before stdin.'}
+    $refused=$false
+    try{$null=Invoke-NativeBytes $executable $arguments -ExecutableLease $lease}catch{
+        if($_.Exception.GetBaseException().Message -cne 'Native executable lease profile refused.'){throw}
+        $refused=$true
+    }
+    if(-not $refused){throw 'Leased process inherited a default environment.'}
+    $classicArguments=if($IsWindows){@('-NoLogo','-NoProfile','-NonInteractive','-Command','if([Environment]::GetEnvironmentVariable("DOCKER_BUILDKIT") -cne "0"){exit 7};[Console]::Out.Write([Console]::In.ReadToEnd())')}else{@('-c','test "$DOCKER_BUILDKIT" = 0 && /usr/bin/cat')}
+    $classicExecutable=if($IsWindows){$executable}else{'/usr/bin/dash'}
+    $classicHash=(Get-FileHash -LiteralPath $classicExecutable -Algorithm SHA256).Hash.ToLowerInvariant()
+    $classicLease=[Fleetory.Pilot.NativeExecutableLease]::new($classicExecutable,$classicHash)
+    try{
+        $reply=Invoke-NativeBytes $classicExecutable $classicArguments ([Text.Encoding]::ASCII.GetBytes('generated-classic-pipeline')) 5 -ClassicDockerEnvironment -ExecutableLease $classicLease
+        if($reply.ExitCode -ne 0 -or $reply.Stdout -cne 'generated-classic-pipeline' -or $reply.Stderr -cne ''){throw 'Actual classic build pipeline did not use its lease.'}
+    }finally{$classicLease.Dispose()}
 }finally{$lease.Dispose()}
 $temporary=Join-Path ([IO.Path]::GetTempPath()) ('fleetory-native-lease-'+[Guid]::NewGuid().ToString('N'))
 $null=[IO.Directory]::CreateDirectory($temporary)

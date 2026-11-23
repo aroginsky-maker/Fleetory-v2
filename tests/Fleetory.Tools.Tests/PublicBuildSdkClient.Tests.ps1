@@ -13,9 +13,12 @@ try{$bytes=[Text.Encoding]::ASCII.GetBytes('generated non-executable model clien
 try{
 $hash=(Get-FileHash -LiteralPath $docker -Algorithm SHA256).Hash.ToLowerInvariant()
 $script:nativeCalls=0;$script:containerId='c'*64
-function Invoke-NativeBytes($Executable,[string[]]$Arguments,[byte[]]$InputBytes,[int]$TimeoutSeconds,[switch]$ClassicDockerEnvironment){
+function Invoke-NativeBytes($Executable,[string[]]$Arguments,[byte[]]$InputBytes,[int]$TimeoutSeconds,[switch]$ClassicDockerEnvironment,$ExecutableLease){
     $script:nativeCalls++
     Check ($ClassicDockerEnvironment -and $TimeoutSeconds -eq 120) 'fixed-native-environment-and-deadline'
+    Check ($ExecutableLease -is [Fleetory.Pilot.NativeExecutableLease]) 'actual-held-executable-required'
+    $ExecutableLease.ValidateRequest($Executable)
+    $script:lastLease=$ExecutableLease
     Check ($Arguments[0] -ceq '--config' -and $Arguments[2] -ceq '--host' -and $Arguments[3] -ceq $(if($IsWindows){'npipe:////./pipe/dockerDesktopLinuxEngine'}else{'unix:///var/run/docker.sock'})) 'fixed-endpoint-prefix'
     $text=$script:containerId+"`n"
     return @{ExitCode=0;Stdout=$text;StdoutBytes=[Text.Encoding]::ASCII.GetBytes($text);StderrBytes=[byte[]]@()}
@@ -77,6 +80,7 @@ foreach($case in @('valid','invalid-create','unknown-create')){
         & $client.Dispose
     }
     Check (-not (Test-Path -LiteralPath $config)) 'own-empty-config-removed'
+    if($case -cne 'invalid-create'){Refused {$script:lastLease.Check()} 'client-disposal-closes-executable-lease'}
 }
 Write-Output "PASS $checks SDK native-client boundary checks; native process calls mocked; no Docker mutation."
 
