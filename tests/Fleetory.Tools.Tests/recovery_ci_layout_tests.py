@@ -229,6 +229,7 @@ def validate(text):
                 ('closed public SDK output archive', 'public_build_output_tests.py'),
                 ('held SDK publication', 'sdk_publication_tests.py'),
                 ('private SDK publication peer', 'sdk_publication_peer_tests.py'),
+                ('original SDK readback peer', 'sdk_readback_peer_tests.py'),
                 ('immutable SDK publication code', 'sdk_publication_code_tests.py'),
                 ('separate public build create policy', 'build_runtime_create_profile_tests.py'),
                 ('retained source-only entry points', 'retained_source_bootstrap_tests.py'),

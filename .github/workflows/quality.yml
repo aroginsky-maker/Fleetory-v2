@@ -349,6 +349,10 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/sdk_publication_peer_tests.py
 
+      - name: Verify original SDK readback peer on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/sdk_readback_peer_tests.py
+
       - name: Verify immutable SDK publication code on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/sdk_publication_code_tests.py
@@ -987,6 +991,10 @@ jobs:
       - name: Verify private SDK publication peer
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/sdk_publication_peer_tests.py
+
+      - name: Verify original SDK readback peer
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/sdk_readback_peer_tests.py
 
       - name: Verify immutable SDK publication code
         shell: pwsh

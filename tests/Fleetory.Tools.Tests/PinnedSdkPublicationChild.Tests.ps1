@@ -4,7 +4,7 @@ Set-StrictMode -Version Latest
 $root=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 . (Join-Path $root 'eng/pilot/AuditDataResourceOwnership.ps1')
 . (Join-Path $root 'eng/pilot/PilotNativeExecutableLease.ps1')
-$script:checks=0
+$script:checks=0;$script:readbackCases=0
 function Check($value,$label){if(-not $value){throw $label};$script:checks++}
 function Refuse([scriptblock]$operation,$label){$failed=$false;try{&$operation}catch{$failed=$true};Check $failed $label}
 function New-ModelSdk {
@@ -23,7 +23,7 @@ function New-ModelSdk {
  [Fleetory.Pilot.AuditContainerCustody]::Remove($stack,$store,$nativeClient,$reply)
  $absent=[Func[Tuple[int,byte[],byte[]]]]{[Tuple]::Create(1,[byte[]]@(),[Text.Encoding]::ASCII.GetBytes('Error: no such container: '+$script:cid+"`n"))}
  [Fleetory.Pilot.AuditContainerCustody]::ConfirmRemoval($stack,$store,$nativeClient,$absent)
- $sdk.Complete();return $sdk
+ $sdk.Complete();$script:modelSourceContext=$imageContext;$script:modelSourceClient=$imageClient;return $sdk
 }
 $Python=(Get-Command $Python -CommandType Application).Source
 $target=([IO.FileInfo]::new($Python)).ResolveLinkTarget($true)
@@ -42,7 +42,7 @@ try{
  if($fixtureChild.ExitCode -ne 0 -or $fixtureError.GetAwaiter().GetResult() -cne ''){throw 'Generated fixture setup failed'}
  $fixture=$fixtureText.GetAwaiter().GetResult()|ConvertFrom-Json
 }finally{$fixtureChild.Dispose()}
-foreach($mode in @('normal','copied-sdk','copied-process','context-replay','peer-death','controller-loss','argv-drift','environment-drift')){
+foreach($mode in @('normal','copied-sdk','copied-process','context-replay','peer-death','controller-loss','argv-drift','environment-drift','readback-normal','readback-replay','readback-before-context','readback-corrupt','source-copy')){
  $nonce=[guid]::NewGuid().ToString('N');$temp=Join-Path ([IO.Path]::GetTempPath()) ('fleetory-sdk-publication-'+$nonce)
  $null=[IO.Directory]::CreateDirectory((Join-Path $temp 'controls'))
  $null=[IO.Directory]::CreateDirectory((Join-Path $temp 'repository/artifacts'))
@@ -85,11 +85,33 @@ foreach($mode in @('normal','copied-sdk','copied-process','context-replay','peer
   $pipe=$factory.Open($sdk,$plan)
   Check ($pipe.Manifest().Length -gt 0) 'actual peer manifest'
   Refuse {$null=$sdk.Take()} 'SDK consumed once'
+  $pipe.RequireSource($script:modelSourceContext,$script:modelSourceClient)
+  if($mode -ceq 'source-copy'){
+   Refuse {$pipe.RequireSource($script:modelSourceContext.Clone(),$script:modelSourceClient)} 'copied source context refused'
+   Refuse {$pipe.RequireSource($script:modelSourceContext,[object]::new())} 'substituted original source client refused'
+   continue
+  }
   if($mode -ceq 'peer-death'){$child.Kill();$null=$child.WaitForExit(5000);Refuse {$null=$pipe.Manifest()} 'dead peer refused';continue}
   if($mode -ceq 'controller-loss'){$script:alive=$false;Refuse {$null=$pipe.Manifest()} 'lost controller refused';continue}
+  if($mode -ceq 'readback-before-context'){
+   Refuse {$null=$pipe.VerifyReadback([Convert]::FromBase64String($fixture.readback))} 'readback before verified context refused'
+  }
   $recipe=[Text.Encoding]::ASCII.GetBytes("FROM separately-approved-generated-fixture`n")
   Check ($pipe.Context($recipe).Length -gt 0) 'actual held-files context'
   if($mode -ceq 'context-replay'){Refuse {$null=$pipe.Context($recipe)} 'context replay refused'}
+  if($mode.StartsWith('readback-')){
+   $script:readbackCases++
+   $copied=[Convert]::FromBase64String($fixture.readback)
+   if($mode -ceq 'readback-corrupt'){$copied[512]=$copied[512] -bxor 1}
+   if($mode -cin @('readback-before-context','readback-corrupt')){
+    Refuse {$null=$pipe.VerifyReadback($copied)} 'invalid readback refused'
+   }else{
+    $verified=[Text.Encoding]::UTF8.GetString($pipe.VerifyReadback($copied))|ConvertFrom-Json
+    Check ($verified.verified -and $verified.files -eq 4) 'same original held files verified native-style copy'
+   }
+   Refuse {$null=$pipe.VerifyReadback($copied)} 'readback attempt cannot replay or repair'
+   if($mode -ceq 'readback-corrupt'){continue}
+  }
   # Dispose validates the final ack/exit and then disposes the original Process handle.
   $pipe.Dispose();$pipe=$null
  }finally{
@@ -101,4 +123,5 @@ foreach($mode in @('normal','copied-sdk','copied-process','context-replay','peer
   [IO.Directory]::Delete($temp,$true)
  }
 }
-Write-Output "PINNED SDK PUBLICATION CHILD PASS: $script:checks assertions;8 actual child cases; SDK replies modeled, no Docker/original inputs/native authority."
+Check ($script:readbackCases -eq 4) 'all four readback cases reached original pipe verification'
+Write-Output "MANAGED SDK READBACK PASS: $script:checks assertions;13 actual child cases; SDK replies modeled, no Docker/original inputs/native authority."

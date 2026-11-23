@@ -11,7 +11,8 @@ import public_build_output_tests as output
 import audit_probe_image_tests as legacy
 import audit_publication_namespace as ns
 
+from sdk_readback_peer_tests import copied_tar
 frame, _ = code_frame()
 plan = ns.bundle.prep.canonical(legacy.control_plan('00000000-0000-0000-0000-000000000001'))
-value = dict(archive=base64.b64encode(output.make()).decode(), codeFrame=base64.b64encode(frame).decode(), planTemplate=plan.decode())
+value = dict(readback=base64.b64encode(copied_tar()).decode(), archive=base64.b64encode(output.make()).decode(), codeFrame=base64.b64encode(frame).decode(), planTemplate=plan.decode())
 sys.stdout.write(json.dumps(value, separators=(',', ':')))

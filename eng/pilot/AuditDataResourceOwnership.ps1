@@ -172,6 +172,10 @@ namespace Fleetory.Pilot {
         }
         public int GetByteCount() {Check();Require(complete && !consumed && bytes!=null);return bytes.Length;}
         public bool IsClosed() {Check();Require(complete && !consumed);return AuditContainerCustody.Closed(stack,store,sdkClient);}
+        internal Tuple<System.Collections.IDictionary,object,string> PublicationSource() {
+            Check();Require(complete && !consumed && bytes!=null && AuditContainerCustody.Closed(stack,store,sdkClient));
+            return Tuple.Create(imageContext,imageClient,image);
+        }
         public byte[] Take() {
             Require(!consumed);consumed=true; // Failed or premature acceptance also consumes this result.
             byte[] result=null;
@@ -199,7 +203,10 @@ namespace Fleetory.Pilot {
         private readonly int owner=Environment.ProcessId, thread=Environment.CurrentManagedThreadId;
         private readonly byte[] nonce;
         private byte[] sourcePin, manifest;
-        private bool admitted, used, disposed;
+        private System.Collections.IDictionary sourceContext;
+        private object sourceClient;
+        private string sourceImage;
+        private bool admitted, used, contextReady, readbackAttempted, disposed;
         private static void Require(bool value) {
             if(!value) throw new InvalidOperationException("SDK publication private pipe refused.");
         }
@@ -216,6 +223,7 @@ namespace Fleetory.Pilot {
             long remaining=Math.Min(420000-scopeAge.ElapsedMilliseconds,60000-childAge.ElapsedMilliseconds);
             if(ready) remaining=Math.Min(remaining,5000-childAge.ElapsedMilliseconds);
             Require(remaining>0);
+            Require(sourceContext!=null && PublicBuildImageCustody.Id(sourceContext,sourceClient)==sourceImage);
             if(!closing) {
                 Require(controller() && !child.HasExited);
                 validateChild(child);
@@ -265,6 +273,8 @@ namespace Fleetory.Pilot {
             var pipe=new PublicSdkPublicationPipe(process,originalScope,originalChildAge,alive,validateOriginalChild,nonce);
             byte[] raw=null;
             try {
+                var source=sdk.PublicationSource();
+                pipe.sourceContext=source.Item1;pipe.sourceClient=source.Item2;pipe.sourceImage=source.Item3;
                 pipe.Remaining(true);
                 Require(process.StartInfo.RedirectStandardInput && process.StartInfo.RedirectStandardOutput && process.StartInfo.RedirectStandardError);
                 pipe.admitted=true; // Only after the trusted original-process validator succeeded.
@@ -285,6 +295,9 @@ namespace Fleetory.Pilot {
             finally {if(raw!=null)Array.Clear(raw,0,raw.Length);}
         }
         public byte[] Manifest() {Remaining();Require(manifest!=null);return (byte[])manifest.Clone();}
+        public void RequireSource(System.Collections.IDictionary context,object client) {
+            Remaining();Require(Object.ReferenceEquals(context,sourceContext) && Object.ReferenceEquals(client,sourceClient));
+        }
         public byte[] Context(byte[] definition) {
             Require(!used);used=true;
             Remaining();Require(definition!=null && definition.Length>0 && definition.Length<=4096);
@@ -295,6 +308,18 @@ namespace Fleetory.Pilot {
             byte[] payload=Frame("FLTSCTX1",16777216+64);
             Require(payload.Length>64 && payload.Length-64<=16777216 &&
                 Equal(pin,payload.AsSpan(0,32).ToArray()) && Equal(Digest(manifest),payload.AsSpan(32,32).ToArray()));
+            Remaining();contextReady=true;return payload.AsSpan(64).ToArray();
+        }
+        public byte[] VerifyReadback(byte[] archive) {
+            Require(!readbackAttempted);readbackAttempted=true;
+            Remaining();Require(contextReady && archive!=null && archive.Length>0 && archive.Length<=16777216);
+            byte[] frozen=(byte[])archive.Clone(),pin=Digest(frozen),request=new byte[37];
+            request[0]=66;
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(request.AsSpan(1,4),(uint)frozen.Length);
+            pin.CopyTo(request,5);Write(request);Write(frozen);
+            byte[] payload=Frame("FLTSCHK1",4096);
+            Require(payload.Length>64 && Equal(pin,payload.AsSpan(0,32).ToArray()) &&
+                Equal(Digest(manifest),payload.AsSpan(32,32).ToArray()));
             Remaining();return payload.AsSpan(64).ToArray();
         }
         private void Abort() {

@@ -315,8 +315,8 @@ consumption and context replay are refused. No PID/name/label receipt imports a
 native resource claim.
 
 The code frame is bounded to 448 modules/8 MiB source/1 MiB per module and 12 MiB framed
-JSON. Those are separate from the unchanged 448-file/8 MiB complete runtime code
-inventory. The publication bootstrap has a real independent 60-second exit bound,
+JSON. Those are separate from the unchanged 448-file/8 MiB selected-code
+inventory; it is not a full transitive runtime inventory. The publication bootstrap has a real independent 60-second exit bound,
 including stalled input. Parent readiness remains 5 seconds and its original source
 scope 420 seconds; no existing job or operation budget is enlarged. The peer checks
 the closed SDK tar, exclusively creates bounded flat files, holds their actual
@@ -338,3 +338,26 @@ host Publish-NativeProbe replacement remain open. Runtime/native dependencies,
 original four-input admission, historical release/config/key continuity, independent
 custody/WORM and full recovery/RPO/RTO are not established by these checks. Original
 backups, retained secrets/PKI and the VPS are untouched by this step.
+
+
+## One-use SDK readback against the original publication
+
+The private publication pipe now retains the original source-image context and
+client objects. `RequireSource` accepts only those same references, and each pipe
+operation rechecks their live custody claim. IDs, cloned dictionaries and new
+client objects cannot substitute for that claim.
+
+After the one-use context response, `VerifyReadback` accepts one bounded copy
+archive and asks the same publication child to verify it against the files it
+still holds open. The reply binds the copy digest and original manifest digest.
+Premature attempts, replay, changed bytes, missing files, changed modes and
+symlinks are refused. Neither a successful readback nor its JSON result grants
+native resource ownership or proves historical release provenance.
+
+The portable peer tests exercise real child processes with generated archives;
+the managed tests use modeled SDK native replies and check that all four
+readback branches actually execute. Both are mandatory in the existing Windows
+and Linux jobs. Native source/SDK/target/schema integration remains a separately
+recorded, outside-repository prototype; this component does not start services,
+read original recovery inputs, establish a full runtime inventory or close
+Phase 7.

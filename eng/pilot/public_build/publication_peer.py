@@ -114,12 +114,23 @@ def serve(root, nonce, incoming=0, outgoing=1):
         with ns.OwnedPublication(root/'repository', intent, ns.packet.digest(intent)) as publication:
             publication.publish_sdk(raw, source_pin.hex())
             pipe.frame(b'FLTSOUT1', nonce_bytes, source_pin, manifest)
-            used = False
+            used, readback_used = False, False
             while True:
                 command = pipe.read(1)
                 if command == b'R':
                     pipe.finish()
                     break
+                if command == b'B':
+                    require(used and not readback_used)
+                    readback_used = True
+                    size = struct.unpack('!I', pipe.read(4))[0]
+                    require(0 < size <= MAX_CONTEXT)
+                    request_pin, copied = pipe.read(32), pipe.read(size)
+                    require(hashlib.sha256(copied).digest() == request_pin)
+                    checked = ns.bundle.verify_readback(copied, publication.published)
+                    pipe.frame(b'FLTSCHK1', nonce_bytes, source_pin,
+                        request_pin + hashlib.sha256(manifest).digest() + ns.bundle.prep.canonical(checked))
+                    continue
                 require(command == b'C' and not used)
                 used = True
                 size = struct.unpack('!I', pipe.read(4))[0]
