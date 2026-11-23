@@ -189,9 +189,12 @@ def rehearse(runtime, case, record, deadline):
             if arm['controllerImageSha256'] != hashlib.sha256(Path(sys.executable).resolve().read_bytes()).hexdigest():
                 raise ValueError('Actual controller image mismatch')
             observer = ExitObservation(arm['ownerPid'], arm['ownerBirth'])
+            if proc.poll() is not None:
+                raise ValueError('Actual controller exited before fault injection')
             if case == 'death':
                 proc.kill()
-                proc.wait(timeout=10)
+                if proc.wait(timeout=remaining(deadline,10)) == 0:
+                    raise ValueError('Killed controller did not report a failure exit')
             else:
                 proc.stdin.write(b'e')
                 proc.stdin.flush()
@@ -202,12 +205,15 @@ def rehearse(runtime, case, record, deadline):
         cleanup = frames(output_path)['fleetory.native-pair-cleanup.v1']
         native = proof['case']
         observation = native['externalControllerObservation']
-        if not (proof['cleanupVerified'] and proof['externalControllerLossVerified'] and native['cleanupVerified']
-                and native['ownRemovalCalls'] == native['ownedAuditRemovalCalls'] == 1
-                and native['nativeWorkDispatches'] == native['nativePgRestores'] == 0
-                and native['externalControllerLateWorkRefusals'] == 1 and observation['lossObserved']
-                and (case != 'death' or observation['parentExited'])):
-            raise ValueError('Native fault/cleanup result mismatch')
+        checks=dict(hostCleanup=proof['cleanupVerified'], externalLoss=proof['externalControllerLossVerified'],
+            targetCleanup=native['cleanupVerified'], postgresRemoval=native['ownRemovalCalls']==1,
+            auditRemoval=native['ownedAuditRemovalCalls']==1, noWork=native['nativeWorkDispatches']==0,
+            noRestore=native['nativePgRestores']==0, lateRefusal=native['externalControllerLateWorkRefusals']==1,
+            lossObserved=observation['lossObserved'], finalParentExit=(case!='death' or observation['parentExited']))
+        failed=[name for name,passed in checks.items() if not passed]
+        if failed:
+            # Fixed boolean names only; never dump packets, SQL or configuration values.
+            raise ValueError('Native fault/cleanup result mismatch: '+','.join(failed))
         if (native['nativeAuditRestored'] or native['serverStarted'] or native['independentCreatorDeathCleanupVerified']
                 or native['unknownCreateOutcomeRecoveryVerified'] or proof['sourceOriginalFilesRead']
                 or proof['fullRuntimeCommandResourceInventoryVerified']):
@@ -219,10 +225,14 @@ def rehearse(runtime, case, record, deadline):
         result = dict(schema='fleetory.generated-native-controller-rehearsal.v1', case=case, verified=True,
             sourceSha256=pins, arm=arm, ownerProof=proof, cleanup=cleanup, ownerExitObserved=True,
             independentAbsenceChecks=checks, sharedBasePreserved=True, originalInputsOpened=False,
+            actualControllerExitCode=proc.returncode, actualControllerExitObserved=(proc.poll() is not None),
             creatorDeathCleanupVerified=False, fullExecutionInventoryVerified=False, phase7Complete=False)
+
+        encoded=json.dumps(result)
+        if len(encoded.encode('utf-8'))>32768:
+            raise ValueError('Generated controller evidence exceeded its output bound')
         (record/'verified.json').write_text(json.dumps(result, indent=2)+'\n', encoding='utf-8')
-        print(json.dumps(dict(schema=result['schema'], case=case, verified=True, ownerExitObserved=True,
-                             independentAbsenceChecks=checks, originalInputsOpened=False, phase7Complete=False)))
+        print(encoded)
     finally:
         if observer is not None:
             observer.close()

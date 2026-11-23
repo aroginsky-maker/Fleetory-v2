@@ -35,6 +35,10 @@ try{
   }
  }
  $snapshot=Get-RetainedControllerPipeSnapshot $context
+ if($Case -cne 'alive'){
+  $final=Get-RetainedControllerPipeFinalSnapshot $context
+  if(-not $final.lossObserved -or $final.parentExited -or $final.lossKind -cne $snapshot.lossKind){throw 'Live-parent EOF final snapshot drift'}
+ }
 }finally{Close-RetainedControllerPipe $context}
 try{$null=Get-RetainedControllerPipeSnapshot $context;throw 'Closed context accepted'}catch{
  if($_.Exception.GetBaseException().Message -cne 'Audit data fixture refused: controller-pipe-original-context'){throw};$refused++

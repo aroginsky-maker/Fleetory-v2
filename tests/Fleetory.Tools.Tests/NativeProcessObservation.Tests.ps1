@@ -122,3 +122,6 @@ if($LASTEXITCODE -ne 0){throw 'Retained controller pipe contract failed.'}
 
 & $Python -B (Join-Path $PSScriptRoot 'native_controller_failure_tests.py')
 if($LASTEXITCODE -ne 0){throw 'Native controller failure cleanup contract failed.'}
+
+& $Python -B (Join-Path $PSScriptRoot 'retained_controller_parent_death.py') --repository (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) --powershell ([Environment]::ProcessPath)
+if($LASTEXITCODE -ne 0){throw 'Held controller parent final observation failed.'}

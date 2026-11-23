@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import unittest
+from unittest.mock import patch
 
 WORKFLOW = Path(__file__).resolve().parents[2] / '.github/workflows/quality.yml'
 DATA = (
@@ -30,6 +31,10 @@ RETAINED = (
     ('NativeServerPair.Tests.ps1', '-Profile v2-retained-service-use-loss'),
     ('NativeServerPair.Tests.ps1', '-Profile v2-retained-service-use-expiry'))
 ORIGINAL = tuple(('NativeServerPair.Tests.ps1','-Profile '+profile+' -OriginalPurpose') for profile in ('v2-retained-service-use','v2-retained-service-use-loss','v2-retained-service-use-expiry'))
+
+PUBLICATION_IMAGE_PROGRAM = "import subprocess,sys;sys.path.insert(0,'eng/pilot');import recovery_isolation;subprocess.run(['docker','pull',recovery_isolation.IMAGE],check=True,timeout=120)"
+PUBLICATION_IMAGE_PREP = '      - name: Prepare pinned public publication base\n        shell: pwsh\n        run: |\n          python3 -B -c "import subprocess,sys;sys.path.insert(0,\'eng/pilot\');import recovery_isolation;subprocess.run([\'docker\',\'pull\',recovery_isolation.IMAGE],check=True,timeout=120)"\n          if ($LASTEXITCODE -ne 0) { throw \'Pinned public publication base preparation failed.\' }\n\n'
+
 
 def controller_fault_step(case):
     label = 'EOF' if case == 'eof' else 'death'
@@ -143,7 +148,9 @@ def validate(text):
                    'dotnet restore Fleetory.sln --force -warnaserror -p:FleetoryRequireDependencyAudit=true -p:NuGetAudit=true -p:NuGetAuditMode=all -p:NuGetAuditLevel=low -p:RestoreUseStaticGraphEvaluation=false\n',
                    'dotnet build Fleetory.sln -c Release --no-restore --disable-build-servers --warnaserror\n'):
         assert publication.count(marker)==1
-    assert publication.count('if ($LASTEXITCODE -ne 0)')==3
+    assert publication.count('if ($LASTEXITCODE -ne 0)')==4
+    assert publication.count(PUBLICATION_IMAGE_PREP)==1
+    assert publication.index(PUBLICATION_IMAGE_PREP)<publication.index('      - name: Verify actual native publication faults\n')
     retained = blocks['native-retained-recovery']
     probe_step = ('      - name: Prepare retained Server backend probe\n'
         '        shell: pwsh\n'
@@ -865,6 +872,48 @@ class RecoveryCiLayoutTests(unittest.TestCase):
             self.refused(self.text.replace(block,block.replace(before,after,1)))
         for option in ('if: false','continue-on-error: true','needs: quality'):
             self.refused(self.text.replace('  native-publication-faults:\n','  native-publication-faults:\n    '+option+'\n'))
+
+
+    def test_publication_pinned_image_preparation_cannot_be_omitted_duplicated_or_softened(self):
+        self.refused(self.text.replace(PUBLICATION_IMAGE_PREP,''))
+        self.refused(self.text.replace(PUBLICATION_IMAGE_PREP,PUBLICATION_IMAGE_PREP+PUBLICATION_IMAGE_PREP))
+        for old,new in (('timeout=120','timeout=121'),('recovery_isolation.IMAGE',"'python:latest'"),
+                        ('if ($LASTEXITCODE -ne 0)','if ($false)')):
+            self.refused(self.text.replace(PUBLICATION_IMAGE_PREP,PUBLICATION_IMAGE_PREP.replace(old,new)))
+        moved=self.text.replace(PUBLICATION_IMAGE_PREP,'')
+        self.refused(moved.replace('  quality-gate:\n',PUBLICATION_IMAGE_PREP+'  quality-gate:\n'))
+
+    def test_actual_preparation_releases_cold_cache_preflight_using_only_the_pinned_public_image(self):
+        from recovery_isolation_tests import DockerRehearsal,isolation
+        rehearsal=DockerRehearsal()
+        cached=False
+        def metadata(args,*_args,**_kwargs):
+            if args==['context','show']:return b'default\n'
+            if args[:2]==['context','inspect']:return b'unix:///var/run/docker.sock\n'
+            if args[0]=='version':return b'28.0.4\n'
+            if args[0]=='info':return b'linux\n'
+            if args[:2] in (['container','ls'],['network','ls']):return b''
+            if args==['image','inspect',isolation.IMAGE]:
+                if not cached:raise RuntimeError('Missing cached pinned image')
+                return b'[]'
+            raise AssertionError('Unexpected metadata request')
+        def pull(args,**kwargs):
+            nonlocal cached
+            self.assertEqual(args,['docker','pull',isolation.IMAGE])
+            self.assertEqual(kwargs,dict(check=True,timeout=120))
+            cached=True
+        publication=jobs(self.text)['native-publication-faults']
+        code=re.search(r'python3 -B -c "([^"\n]+)"',publication).group(1)
+        import sys
+        before=list(sys.path)
+        try:
+            with patch.dict(os.environ,{'DOCKER_HOST':''}),patch.object(rehearsal,'call',side_effect=metadata):
+                with self.assertRaisesRegex(RuntimeError,'Missing cached pinned image'):rehearsal.preflight()
+                with patch.object(subprocess,'run',side_effect=pull) as invoked:
+                    exec(compile(code,'<actual-workflow-public-image-preparation>','exec'),{})
+                    self.assertEqual(invoked.call_count,1)
+                self.assertEqual(rehearsal.preflight(),'28.0.4')
+        finally:sys.path[:]=before
 
 
 if __name__ == '__main__':

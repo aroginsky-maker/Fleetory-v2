@@ -359,6 +359,10 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
         $meter.removeReplayRefused=$true
     }
     Assert-ImmuData ($meter.removeReplayRefused-and$replay.calls-eq0-and$meter.remove-eq1) 'retained-pg-removal-replay'
+    if($meter.externalLoss){
+        $meter.externalSnapshot=Get-RetainedControllerPipeFinalSnapshot $externalController
+        $proof=$meter.externalSnapshot
+    }
     return @{schema='fleetory.retained-postgres-target.v1';flow=$Flow;verified=$true;coordinator=$proof;containerId=$store.Id;
         inputCaptureSha256=$capturePin;frozenFourInputsBound=$true;nativePgRestores=$meter.restores;inventories=$inventories;
         admissionLossAfterPgRestoreVerified=($meter.ContainsKey('admissionLossVerified') -and $meter.admissionLossVerified);

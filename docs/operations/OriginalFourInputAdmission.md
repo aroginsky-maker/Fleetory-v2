@@ -130,3 +130,27 @@ The repository remains public. Standard GitHub-hosted runners are free for
 public repositories under the [GitHub Actions billing rules](https://docs.github.com/en/actions/concepts/billing-and-usage).
 No artifact uploads, paid runners, visibility changes or billing-setting
 changes are introduced; the Actions budget remains $0.
+
+
+The first independent publication job in CI #444 exposed one implicit cold-runner
+dependency: three initial fault cases passed, then the unchanged Docker preflight
+refused the absent pinned Python base. The standalone job now explicitly pulls
+`recovery_isolation.IMAGE` from its existing reviewed constant, with a 120-second
+bound, before fault execution. It does not duplicate or replace the digest and
+does not weaken local-endpoint, namespace, Engine-version or image checks. A
+regression executes the actual workflow preparation against an empty image-cache
+model, confirms preflight refusal before preparation and admission afterwards,
+and rejects omitted, duplicated, floating-image or unbounded preparation.
+
+
+CI #444's Linux pre-work EOF case passed (owner exit and ten absences), while
+the death result was rejected by the verifier. A separate real-process Linux
+reproduction showed EOF arriving after SIGKILL while the first parent exit
+snapshot was still false; the same held parent subsequently reported exit.
+The owner now refreshes its final snapshot from that original handle only after
+owned target removal. This is a nonblocking observation, not a new admission or
+deadline; sticky loss remains sticky and the required final parent-exit check
+is retained. A portable actual-parent-death regression checks both snapshots and
+refuses a final observation before loss. Generated native evidence is emitted in
+bounded full form after validation so CI retains identities/source hashes and
+actual cleanup results; mismatch diagnostics contain only fixed boolean names.

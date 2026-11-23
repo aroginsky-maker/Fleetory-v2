@@ -93,6 +93,15 @@ function Get-RetainedControllerPipeSnapshot($Context){
         lossObserved=$held.lost;lossKind=$held.lossKind;parentExited=$held.parent.HasExited;checks=$held.checks;
         controllerOriginAuthenticated=$false;cleanupAuthorized=$false;controllerDeathCleanupVerified=$false;phase7Complete=$false}
 }
+function Get-RetainedControllerPipeFinalSnapshot($Context){
+    $held=Read-RetainedControllerPipeState $Context
+    Assert-ImmuData $held.lost 'controller-final-snapshot-requires-loss'
+    # EOF can precede final process exit on Linux. Observe the original handle again
+    # after owned cleanup, without a new work window or any wait-budget extension.
+    $null=$held.parent.WaitForExit(0)
+    $held.parent.Refresh()
+    return Get-RetainedControllerPipeSnapshot $Context
+}
 function Close-RetainedControllerPipe($Context){
     if($null -eq $Context){return}
     $held=Read-RetainedControllerPipeState $Context

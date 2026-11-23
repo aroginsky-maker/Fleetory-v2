@@ -1396,6 +1396,12 @@ jobs:
           dotnet build Fleetory.sln -c Release --no-restore --disable-build-servers --warnaserror
           if ($LASTEXITCODE -ne 0) { throw 'Native fixture prerequisite build failed.' }
 
+      - name: Prepare pinned public publication base
+        shell: pwsh
+        run: |
+          python3 -B -c "import subprocess,sys;sys.path.insert(0,'eng/pilot');import recovery_isolation;subprocess.run(['docker','pull',recovery_isolation.IMAGE],check=True,timeout=120)"
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned public publication base preparation failed.' }
+
       - name: Verify actual native publication faults
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/native_publication_faults.py --continuation-image --owned-cleanup
