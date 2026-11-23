@@ -119,3 +119,6 @@ Write-Output 'NATIVE PROCESS OBSERVATION PASS:7 native cases and 8 exec-purpose 
 
 & $Python -B (Join-Path $PSScriptRoot 'retained_controller_pipe_contract.py') --repository (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) --powershell ([Environment]::ProcessPath)
 if($LASTEXITCODE -ne 0){throw 'Retained controller pipe contract failed.'}
+
+& $Python -B (Join-Path $PSScriptRoot 'native_controller_failure_tests.py')
+if($LASTEXITCODE -ne 0){throw 'Native controller failure cleanup contract failed.'}

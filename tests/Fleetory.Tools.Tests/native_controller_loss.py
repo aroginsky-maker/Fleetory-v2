@@ -8,6 +8,7 @@ from pathlib import Path
 import queue
 import re
 import select
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -146,9 +147,10 @@ def controller(runtime):
     finally:
         if child.stdin is not None:
             child.stdin.close()
+        # Revocation gives the original owner time to run its own finally.
+        # Never turn a harness failure into death of the Docker resource creator.
         if child.poll() is None:
-            child.kill()
-            child.wait(timeout=10)
+            child.wait(timeout=180)
 
 
 def absence_checks(cleanup, native, image_id, deadline):
@@ -241,14 +243,25 @@ def main():
     if args.controller:
         return controller(args.powershell)
     deadline=time.monotonic()+660
-    with tempfile.TemporaryDirectory(prefix='fleetory-controller-owner-') as temporary:
-        root = Path(temporary)
+    root = Path(tempfile.mkdtemp(prefix='fleetory-controller-owner-')).resolve(strict=True)
+    parent = Path(tempfile.gettempdir()).resolve(strict=True)
+    identity = root.stat()
+    try:
         runtime = private_powershell(args.powershell, root)
         record = root
         if args.record is not None:
             args.record.mkdir(exist_ok=False)
             record = args.record
         rehearse(runtime, args.case, record, deadline)
+    except BaseException:
+        # The owner may still be unwinding. Do not delete its selected runtime.
+        print('PUBLIC CONTROLLER FAILURE LEDGER RETAINED: '+str(root), file=sys.stderr)
+        raise
+    current = root.stat()
+    if (root.parent != parent or root.is_symlink() or not root.name.startswith('fleetory-controller-owner-')
+            or (current.st_dev, current.st_ino) != (identity.st_dev, identity.st_ino)):
+        raise ValueError('Own public runtime cleanup identity changed')
+    shutil.rmtree(root)
     return 0
 
 

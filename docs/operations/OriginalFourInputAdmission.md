@@ -103,3 +103,9 @@ owner/creator death, unknown create outcomes, full original execution inventory,
 original restoration and full-system RPO/RTO remain unverified. In particular,
 `independentCreatorDeathCleanupVerified` and full recovery/Phase 7 flags remain
 false. The existing normal, admission-loss and original-expiry jobs are retained.
+
+A malformed test-controller request also revokes its pipe and waits for the
+actual native owner; it must never kill that resource creator as a shortcut.
+A failed root harness retains its public runtime and diagnostic directory when
+owner exit/cleanup is unverified. Their retention is an explicit failure ledger,
+not successful cleanup. A real child-process regression covers this path.
