@@ -341,6 +341,22 @@ jobs:
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/public_build_output_tests.py
 
+      - name: Verify held SDK publication on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/sdk_publication_tests.py
+
+      - name: Verify private SDK publication peer on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/sdk_publication_peer_tests.py
+
+      - name: Verify immutable SDK publication code on Windows
+        shell: pwsh
+        run: python -B ./tests/Fleetory.Tools.Tests/sdk_publication_code_tests.py
+
+      - name: Verify pinned SDK publication child on Windows
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/PinnedSdkPublicationChild.Tests.ps1 -Python (Get-Command python).Source
+
       - name: Verify separate public build create policy on Windows
         shell: pwsh
         run: python -B ./tests/Fleetory.Tools.Tests/build_runtime_create_profile_tests.py
@@ -963,6 +979,22 @@ jobs:
       - name: Verify closed public SDK output archive
         shell: pwsh
         run: python3 -B ./tests/Fleetory.Tools.Tests/public_build_output_tests.py
+
+      - name: Verify held SDK publication
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/sdk_publication_tests.py
+
+      - name: Verify private SDK publication peer
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/sdk_publication_peer_tests.py
+
+      - name: Verify immutable SDK publication code
+        shell: pwsh
+        run: python3 -B ./tests/Fleetory.Tools.Tests/sdk_publication_code_tests.py
+
+      - name: Verify pinned SDK publication child
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/PinnedSdkPublicationChild.Tests.ps1 -Python (Get-Command python3).Source
 
       - name: Verify separate public build create policy
         shell: pwsh

@@ -90,14 +90,36 @@ class OwnedPublication(_HeldNamespace):
             intentSha256=packet.digest(bundle.prep.canonical(self.value)),ownerSha256=self.owner_pin,
             namespaceDirectorySha256=self.root_pin,outputDirectorySha256=self.output_pin,privateInputsAccepted=False)
 
-    def seal(self,data):
-        packet.require(not self._attempted);self._attempted=True;self.check()
+    def _seal_manifest(self,data):
+        self.check()
         self.published=self._held.enter_context(bundle.HeldProbeBundle(self.output.path,data,self.value['manifestSha256']))
         self.check()
         return dict(schema='fleetory.publication-namespace-sealed.v1',nonce=self.value['nonce'],ownerSha256=self.owner_pin,
             namespaceDirectorySha256=self.root_pin,outputDirectorySha256=self.output_pin,manifestSha256=self.value['manifestSha256'],
             bundleSha256=self.published.value['sha256'],files=self.published.value['files'],bytes=self.published.value['bytes'],
             privateInputsAccepted=False,actualNativePublicationVerified=False)
+
+    def seal(self,data):
+        packet.require(not self._attempted);self._attempted=True
+        return self._seal_manifest(data)
+
+    def publish_sdk(self,data,expected_sha256):
+        """Trusted parent's original SDK bytes only; this method confers no native authority."""
+        packet.require(not self._attempted);self._attempted=True;self.check()
+        from public_build import output
+        content=output.inspect(data,expected_sha256)
+        manifest=bundle.manifest_from_files(content)
+        packet.require(packet.digest(manifest)==self.value['manifestSha256'] and not any(self.output.path.iterdir()))
+        for name,raw in sorted(content.items()):
+            packet.require(len(files.relative_parts(name))==1)
+            self.output.check()
+            descriptor=files.windows_create_new(self.output.path/name) if os.name=='nt' else os.open(
+                name,os.O_RDWR|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600,dir_fd=self.output.fd)
+            try:empty._write_all(descriptor,raw)
+            finally:os.close(descriptor)
+            if os.name=='posix':os.fsync(self.output.fd)
+            self.output.check()
+        return self._seal_manifest(manifest)
 
 
 class BoundPublication(_HeldNamespace):

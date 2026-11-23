@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import re
 import tarfile
+from types import MappingProxyType
 
 import audit_native_preparation as prep
 
@@ -43,6 +44,30 @@ def _manifest_tree(entries):
     packet.require(all(n in entries and entries[n]['kind'] == 'f' for n in REQUIRED))
 
 
+def _entries_digest(entries):
+    lines = bytearray(b'fleetory.historical.probe-bundle.v1\n')
+    for item in entries:
+        lines.extend((item['kind'] + ':' + item['path'] + '\n' + str(item['bytes']) + '\n' + item['sha256'] + '\n').encode('ascii'))
+    return packet.digest(lines)
+
+
+def manifest_from_files(content):
+    """Pure immutable byte snapshot -> existing manifest; no origin or execution grant."""
+    packet.require(type(content) in (dict, MappingProxyType) and 0 < len(content) <= 128)
+    packet.require(all(type(name) is str for name in content))
+    entries, total = [], 0
+    for name, data in sorted(content.items()):
+        relative_name(name)
+        packet.require('/' not in name and type(data) is bytes and 0 < len(data) <= MAX_CONTENT)
+        total += len(data)
+        packet.require(total <= MAX_CONTENT)
+        entries.append(dict(kind='f', path=name, bytes=len(data), sha256=packet.digest(data)))
+    raw = prep.canonical(dict(schema='fleetory.historical-probe-bundle.v1', sha256=_entries_digest(entries),
+        entries=entries, files=len(entries), bytes=total, runtimeDependenciesAuthenticated=False, softwareOriginAuthenticated=False))
+    manifest(raw, packet.digest(raw))  # Reuse the complete existing schema/alias/tree validator.
+    return raw
+
+
 def manifest(data, expected):
     packet.hex_value(expected)
     packet.require(type(data) in (bytes, bytearray) and 0 < len(data) <= MAX_MANIFEST and packet.digest(data) == expected)
@@ -52,14 +77,12 @@ def manifest(data, expected):
         value['runtimeDependenciesAuthenticated'] is False and value['softwareOriginAuthenticated'] is False)
     packet.require(type(value['entries']) is list and 0 < len(value['entries']) <= 256)
     entries, aliases = {}, set()
-    lines = bytearray(b'fleetory.historical.probe-bundle.v1\n')
     for item in value['entries']:
         entries[_manifest_entry(item, aliases)] = item
-        lines.extend((item['kind'] + ':' + item['path'] + '\n' + str(item['bytes']) + '\n' + item['sha256'] + '\n').encode('ascii'))
     total = sum(v['bytes'] for v in entries.values())
     count = sum(v['kind'] == 'f' for v in entries.values())
     _manifest_tree(entries)
-    packet.require(0 < count <= 128 and total <= MAX_CONTENT and value['sha256'] == packet.digest(lines))
+    packet.require(0 < count <= 128 and total <= MAX_CONTENT and value['sha256'] == _entries_digest(entries.values()))
     packet.require(type(value['files']) is int and type(value['bytes']) is int and value['files'] == count and value['bytes'] == total)
     return value, entries
 

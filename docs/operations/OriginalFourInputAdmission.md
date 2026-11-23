@@ -294,8 +294,47 @@ no argv, stdin or child output is added to that diagnostic.
 CI451 Windows refused an earlier MainModule-based identity check; its old log
 cannot identify the exact failed predicate. Ten local diagnostic repetitions did
 not reproduce it. The replacement uses the Windows kernel process-image API;
-the next exact-commit CI must establish the regression outcome. CI451 remains
+CI452 at 064b50f passed both mandatory native-observation steps and all seven specialized jobs; its code/native logs and local Sonar were accepted separately from the failed Cloud computation. CI451 remains
 rejected as a complete code gate and does not cover this working change.
 
 API references: https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.process.mainmodule
 and https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-queryfullprocessimagenamew
+
+## Pinned SDK publication process
+
+The trusted surviving worker can pass the original closed PublicSdkOutputLease
+to PublicSdkPublicationChild.Open. Start requires independently committed SHA256
+pins for the fixed bootstrap and an immutable public Python source frame. The
+caller supplies the original executable lease callbacks; generated test pins do
+not authorize production input. The child receives a fixed -I -S -B entry, clean
+environment, reviewed source bytes over its original stdin, and no filesystem
+project-import path. Filesystem pyc and cwd/PYTHONPATH cannot select project code.
+The parent retains the original Process, argument/environment snapshot and clocks;
+copied wrappers, serialized SDK metadata, changed launch requests, duplicate SDK
+consumption and context replay are refused. No PID/name/label receipt imports a
+native resource claim.
+
+The code frame is bounded to 448 modules/8 MiB source/1 MiB per module and 12 MiB framed
+JSON. Those are separate from the unchanged 448-file/8 MiB complete runtime code
+inventory. The publication bootstrap has a real independent 60-second exit bound,
+including stalled input. Parent readiness remains 5 seconds and its original source
+scope 420 seconds; no existing job or operation budget is enlarged. The peer checks
+the closed SDK tar, exclusively creates bounded flat files, holds their actual
+descriptors through one canonical context and acknowledges release only after EOF
+and descriptor closure. Refusals preserve unknown/partial namespaces for the
+original owner; they grant no cleanup or retry by path.
+
+Windows/Linux component tests use modeled SDK native replies and generated code
+pins. A separate retained public-only native rehearsal passed the actual closed
+SDK object into the pinned child, held 58 files and produced a bounded context in
+36.51seconds; its original SDK container and source image were independently absent.
+It used frozen 92e036a inputs, with relevant probe build inputs unchanged at 064b50f;
+it does not authenticate a historical or current deployed release. Its raw top-level
+outputSha256 field is a manifest digest, not the SDK tar digest; the original report
+is preserved with this correction in the protected receipt.
+
+The source-parent transport, target native-image/readback/owner integration and
+host Publish-NativeProbe replacement remain open. Runtime/native dependencies,
+original four-input admission, historical release/config/key continuity, independent
+custody/WORM and full recovery/RPO/RTO are not established by these checks. Original
+backups, retained secrets/PKI and the VPS are untouched by this step.

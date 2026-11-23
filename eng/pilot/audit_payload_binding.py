@@ -48,17 +48,21 @@ def marker(value, pid, directory):
         ownerPid=pid, payloadDirectorySha256=directory)
 
 
+def _write_all(fd, data):
+    view = memoryview(data)
+    while view:
+        count = os.write(fd, view)
+        packet.require(0 < count <= len(view))
+        view = view[count:]
+    os.fsync(fd)
+
+
 def _create_named_record(directory, name, data):
     packet.require(name in (MARKER, 'publication-owner.json'))
     fd = files.windows_create_new(directory.path / name) if os.name == 'nt' else os.open(
         name, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=directory.fd)
     try:
-        view = memoryview(data)
-        while view:
-            count = os.write(fd, view)
-            packet.require(0 < count <= len(view))
-            view = view[count:]
-        os.fsync(fd)
+        _write_all(fd, data)
     finally:
         os.close(fd)
     if os.name == 'posix':

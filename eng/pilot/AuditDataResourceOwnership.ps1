@@ -189,6 +189,219 @@ namespace Fleetory.Pilot {
         }
     }
 
+    // Trusted surviving worker API. No receipt/path/JSON import and no native-resource cleanup rights.
+    public sealed class PublicSdkPublicationPipe : IDisposable {
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<object,object> Attempts=new();
+        private readonly System.Diagnostics.Process child;
+        private readonly System.Diagnostics.Stopwatch scopeAge, childAge;
+        private readonly Func<bool> controller;
+        private readonly Action<System.Diagnostics.Process> validateChild;
+        private readonly int owner=Environment.ProcessId, thread=Environment.CurrentManagedThreadId;
+        private readonly byte[] nonce;
+        private byte[] sourcePin, manifest;
+        private bool admitted, used, disposed;
+        private static void Require(bool value) {
+            if(!value) throw new InvalidOperationException("SDK publication private pipe refused.");
+        }
+        private PublicSdkPublicationPipe(System.Diagnostics.Process process,System.Diagnostics.Stopwatch originalScope,
+            System.Diagnostics.Stopwatch originalChildAge,Func<bool> alive,Action<System.Diagnostics.Process> originalChild,string token) {
+            Require(process!=null && originalScope!=null && originalChildAge!=null && alive!=null && originalChild!=null &&
+                token!=null && System.Text.RegularExpressions.Regex.IsMatch(token,@"\A[a-f0-9]{32}\z"));
+            child=process;scopeAge=originalScope;childAge=originalChildAge;controller=alive;validateChild=originalChild;
+            nonce=System.Text.Encoding.ASCII.GetBytes(token);
+        }
+        private int Remaining(bool ready=false,bool closing=false) {
+            Require(!disposed && owner==Environment.ProcessId && thread==Environment.CurrentManagedThreadId &&
+                scopeAge.IsRunning && childAge.IsRunning);
+            long remaining=Math.Min(420000-scopeAge.ElapsedMilliseconds,60000-childAge.ElapsedMilliseconds);
+            if(ready) remaining=Math.Min(remaining,5000-childAge.ElapsedMilliseconds);
+            Require(remaining>0);
+            if(!closing) {
+                Require(controller() && !child.HasExited);
+                validateChild(child);
+            }
+            return (int)remaining;
+        }
+        private void Await(System.Threading.Tasks.Task task,bool ready=false,bool closing=false) {
+            while(!task.Wait(Math.Min(100,Remaining(ready,closing)))) {}
+            task.GetAwaiter().GetResult();
+            Remaining(ready,closing);
+        }
+        private byte[] Read(int count,bool ready=false,bool closing=false) {
+            Require(count>0 && count<=16777216+4096);
+            var value=new byte[count];int offset=0;
+            while(offset<count) {
+                var task=child.StandardOutput.BaseStream.ReadAsync(value,offset,count-offset);
+                Await(task,ready,closing);
+                int got=task.GetAwaiter().GetResult();Require(got>0);offset+=got;
+            }
+            return value;
+        }
+        private void Write(byte[] bytes,bool closing=false) {
+            Require(bytes!=null && bytes.Length>0 && bytes.Length<=67108864);
+            Remaining(false,closing);
+            Await(child.StandardInput.BaseStream.WriteAsync(bytes,0,bytes.Length),false,closing);
+            Await(child.StandardInput.BaseStream.FlushAsync(),false,closing);
+        }
+        private static bool Equal(byte[] left,byte[] right) =>
+            System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(left,right);
+        private static byte[] Digest(byte[] bytes) => System.Security.Cryptography.SHA256.HashData(bytes);
+        private byte[] Frame(string magic,int maximum,bool closing=false) {
+            byte[] header=Read(108,false,closing);
+            Require(System.Text.Encoding.ASCII.GetString(header,0,8)==magic &&
+                Equal(header.AsSpan(8,32).ToArray(),nonce) && Equal(header.AsSpan(40,32).ToArray(),sourcePin));
+            uint length=System.Buffers.Binary.BinaryPrimitives.ReadUInt32BigEndian(header.AsSpan(72,4));
+            Require(length<=maximum);
+            byte[] data=length==0?Array.Empty<byte>():Read((int)length,false,closing);
+            Require(Equal(Digest(data),header.AsSpan(76,32).ToArray()));
+            return data;
+        }
+        public static PublicSdkPublicationPipe Open(PublicSdkOutputLease sdk,System.Diagnostics.Process process,
+            System.Diagnostics.Stopwatch originalScope,System.Diagnostics.Stopwatch originalChildAge,
+            Func<bool> alive,Action<System.Diagnostics.Process> validateOriginalChild,string nonce,byte[] plan) {
+            Require(sdk!=null && plan!=null && plan.Length>0 && plan.Length<=8192);
+            // Failed admission consumes this SDK publication attempt before the first blocking read.
+            Require(!Attempts.TryGetValue(sdk,out _));Attempts.Add(sdk,new object());
+            var pipe=new PublicSdkPublicationPipe(process,originalScope,originalChildAge,alive,validateOriginalChild,nonce);
+            byte[] raw=null;
+            try {
+                pipe.Remaining(true);
+                Require(process.StartInfo.RedirectStandardInput && process.StartInfo.RedirectStandardOutput && process.StartInfo.RedirectStandardError);
+                pipe.admitted=true; // Only after the trusted original-process validator succeeded.
+                byte[] ready=pipe.Read(40,true);
+                Require(System.Text.Encoding.ASCII.GetString(ready,0,8)=="FLTSRD01" && Equal(ready.AsSpan(8,32).ToArray(),pipe.nonce));
+                raw=sdk.Take();
+                pipe.sourcePin=Digest(raw);
+                byte[] frozenPlan=(byte[])plan.Clone(),header=new byte[112];
+                System.Text.Encoding.ASCII.GetBytes("FLTSIN01").CopyTo(header,0);pipe.nonce.CopyTo(header,8);
+                System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(header.AsSpan(40,4),(uint)raw.Length);
+                System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(header.AsSpan(44,4),(uint)frozenPlan.Length);
+                pipe.sourcePin.CopyTo(header,48);Digest(frozenPlan).CopyTo(header,80);
+                pipe.Write(header);pipe.Write(raw);pipe.Write(frozenPlan);
+                pipe.manifest=pipe.Frame("FLTSOUT1",98304);
+                Require(pipe.manifest.Length>0);pipe.Remaining();
+                return pipe;
+            } catch {pipe.Abort();throw;}
+            finally {if(raw!=null)Array.Clear(raw,0,raw.Length);}
+        }
+        public byte[] Manifest() {Remaining();Require(manifest!=null);return (byte[])manifest.Clone();}
+        public byte[] Context(byte[] definition) {
+            Require(!used);used=true;
+            Remaining();Require(definition!=null && definition.Length>0 && definition.Length<=4096);
+            byte[] frozen=(byte[])definition.Clone(),pin=Digest(frozen),request=new byte[37];
+            request[0]=67;
+            System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(request.AsSpan(1,4),(uint)frozen.Length);
+            pin.CopyTo(request,5);Write(request);Write(frozen);
+            byte[] payload=Frame("FLTSCTX1",16777216+64);
+            Require(payload.Length>64 && payload.Length-64<=16777216 &&
+                Equal(pin,payload.AsSpan(0,32).ToArray()) && Equal(Digest(manifest),payload.AsSpan(32,32).ToArray()));
+            Remaining();return payload.AsSpan(64).ToArray();
+        }
+        private void Abort() {
+            if(disposed)return;
+            if(admitted) {
+                try {child.StandardInput.Close();} catch {}
+                try {if(!child.HasExited){child.Kill();child.WaitForExit(5000);}} catch {}
+                child.Dispose();
+            }
+            disposed=true;
+        }
+        public void Dispose() {
+            if(disposed)return;
+            try {
+                Require(admitted);
+                Write(new byte[]{82},true);child.StandardInput.Close();
+                Require(Frame("FLTSEND1",0,true).Length==0);
+                Require(child.WaitForExit(Math.Min(5000,Remaining(false,true))) && child.ExitCode==0);
+            } finally {Abort();}
+        }
+    }
+
+    // Trusted worker supplies independently committed source/frame pins and original executable callbacks.
+    // No PID lookup, metadata import, caller-selected entry point or native-resource cleanup authority.
+    public sealed class PublicSdkPublicationChild : IDisposable {
+        private readonly System.Diagnostics.Process child=new();
+        private readonly System.Diagnostics.Stopwatch scope, age=System.Diagnostics.Stopwatch.StartNew();
+        private readonly Func<bool> controller;
+        private readonly Action<System.Diagnostics.Process> nativeValidate;
+        private readonly string[] arguments;
+        private readonly string executable, root, nonce, systemRoot;
+        private readonly int owner=Environment.ProcessId,thread=Environment.CurrentManagedThreadId;
+        private bool started, disposed, opened;
+        private static void Require(bool value) {if(!value)throw new InvalidOperationException("Pinned publication child refused.");}
+        private static void Pin(byte[] value,string expected,int maximum) {
+            Require(value!=null && value.Length>0 && value.Length<=maximum && expected!=null &&
+                System.Text.RegularExpressions.Regex.IsMatch(expected,@"\A[a-f0-9]{64}\z"));
+            Require(Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(value)).ToLowerInvariant()==expected);
+        }
+        private PublicSdkPublicationChild(string program,byte[] bootstrap,string codePin,string directory,string token,
+            System.Diagnostics.Stopwatch originalScope,Func<bool> alive,Action<System.Diagnostics.Process> validate) {
+            Require(System.IO.Path.IsPathFullyQualified(program) && System.IO.Path.IsPathFullyQualified(directory) &&
+                token!=null && System.Text.RegularExpressions.Regex.IsMatch(token,@"\A[a-f0-9]{32}\z") &&
+                originalScope!=null && originalScope.IsRunning && alive!=null && validate!=null);
+            executable=program;root=directory;nonce=token;scope=originalScope;controller=alive;nativeValidate=validate;
+            systemRoot=OperatingSystem.IsWindows()?Environment.GetEnvironmentVariable("SystemRoot"):null;
+            Require(!OperatingSystem.IsWindows() || !String.IsNullOrEmpty(systemRoot));
+            string code=new System.Text.UTF8Encoding(false,true).GetString(bootstrap);
+            arguments=new[]{"-I","-S","-B","-c",code,codePin,root,nonce};
+            var info=new System.Diagnostics.ProcessStartInfo(executable) {
+                UseShellExecute=false,CreateNoWindow=true,RedirectStandardInput=true,RedirectStandardOutput=true,RedirectStandardError=true};
+            info.Environment.Clear();if(OperatingSystem.IsWindows())info.Environment["SystemRoot"]=systemRoot;
+            foreach(string argument in arguments)info.ArgumentList.Add(argument);
+            child.StartInfo=info;
+        }
+        private int Remaining(bool ready=false) {
+            Require(!disposed && owner==Environment.ProcessId && thread==Environment.CurrentManagedThreadId &&
+                scope.IsRunning && age.IsRunning && controller());
+            long value=Math.Min(420000-scope.ElapsedMilliseconds,(ready?5000:60000)-age.ElapsedMilliseconds);
+            Require(value>0);return (int)value;
+        }
+        public void Assert(System.Diagnostics.Process actual) {
+            Remaining();Require(started && Object.ReferenceEquals(actual,child));
+            nativeValidate(child);
+            var info=child.StartInfo;
+            Require(info.FileName==executable && !info.UseShellExecute && info.CreateNoWindow &&
+                info.RedirectStandardInput && info.RedirectStandardOutput && info.RedirectStandardError &&
+                info.Arguments=="" && info.ArgumentList.Count==arguments.Length);
+            for(int i=0;i<arguments.Length;i++)Require(info.ArgumentList[i]==arguments[i]);
+            Require(info.Environment.Count==(OperatingSystem.IsWindows()?1:0));
+            if(OperatingSystem.IsWindows())Require(info.Environment["SystemRoot"]==systemRoot);
+        }
+        private void Write(byte[] value) {
+            var task=child.StandardInput.BaseStream.WriteAsync(value,0,value.Length);
+            while(!task.Wait(Math.Min(100,Remaining(true))))Assert(child);
+            task.GetAwaiter().GetResult();Assert(child);Remaining(true);
+        }
+        public static PublicSdkPublicationChild Start(string executable,byte[] bootstrap,string bootstrapPin,
+            byte[] codeFrame,string framePin,string root,string nonce,System.Diagnostics.Stopwatch originalScope,
+            Func<bool> controller,Action<System.Diagnostics.Process> nativeStart,Action<System.Diagnostics.Process> nativeValidate) {
+            Require(nativeStart!=null);Pin(bootstrap,bootstrapPin,65536);Pin(codeFrame,framePin,12582912);
+            byte[] frozenBootstrap=(byte[])bootstrap.Clone(),frozenFrame=(byte[])codeFrame.Clone();
+            Pin(frozenBootstrap,bootstrapPin,65536);Pin(frozenFrame,framePin,12582912);
+            var value=new PublicSdkPublicationChild(executable,frozenBootstrap,framePin,root,nonce,originalScope,controller,nativeValidate);
+            try {
+                value.Remaining(true);nativeStart(value.child);value.started=true;value.Assert(value.child);
+                byte[] header=new byte[4];
+                System.Buffers.Binary.BinaryPrimitives.WriteUInt32BigEndian(header,(uint)frozenFrame.Length);
+                value.Write(header);value.Write(frozenFrame);
+                return value;
+            } catch {value.Dispose();throw;}
+        }
+        public System.Diagnostics.Process OriginalProcess() {Assert(child);return child;}
+        public PublicSdkPublicationPipe Open(PublicSdkOutputLease sdk,byte[] plan) {
+            Require(!opened);opened=true;Assert(child);
+            return PublicSdkPublicationPipe.Open(sdk,child,scope,age,controller,Assert,nonce,plan);
+        }
+        public void Dispose() {
+            if(disposed)return;disposed=true;
+            if(started) {
+                try {child.StandardInput.Close();}catch{}
+                try {if(!child.HasExited){child.Kill();child.WaitForExit(5000);}}catch{}
+            }
+            child.Dispose();
+        }
+    }
+
     public static class PublicBuildImageCustody {
         private static readonly AuditImageCustodyCore Core=new(67108864,new string[] {"Fixture","Root","ImageName","SourceContextSha256","SdkImage"});
         public static bool Attempted(System.Collections.IDictionary context) => Core.Attempted(context);

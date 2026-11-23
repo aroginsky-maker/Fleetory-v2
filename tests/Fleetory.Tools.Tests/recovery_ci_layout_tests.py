@@ -186,6 +186,12 @@ def validate(text):
                 '        run: ./tests/Fleetory.Tools.Tests/RetainedDataHostBoundary.Tests.ps1\n')
         assert blocks[key].count(step) == 1
         assert text.count('./tests/Fleetory.Tools.Tests/RetainedDataHostBoundary.Tests.ps1') == 2
+    for key, platform, executable in (('windows-tls-chain', ' on Windows','python'),('quality','','python3')):
+        command='./tests/Fleetory.Tools.Tests/PinnedSdkPublicationChild.Tests.ps1 -Python (Get-Command '+executable+').Source'
+        step='      - name: Verify pinned SDK publication child'+platform+'\n        shell: pwsh\n        run: '+command+'\n'
+        assert blocks[key].count(step)==1 and text.count(command)==1
+        start=blocks[key].index(step);end=blocks[key].find('      - name:',start+len(step))
+        assert blocks[key][start:end if end>=0 else len(blocks[key])].strip()==step.strip()
     for key, platform in (('windows-tls-chain', ' on Windows'), ('quality', '')):
         step=('      - name: Verify original data host binding refusals'+platform+'\n'
               '        shell: pwsh\n        run: ./tests/Fleetory.Tools.Tests/OriginalFourDataHostBinding.Tests.ps1\n')
@@ -221,6 +227,9 @@ def validate(text):
                 ('private public build source peer', 'public_build_source_peer_tests.py'),
                 ('closed public SDK context', 'public_build_context_tests.py'),
                 ('closed public SDK output archive', 'public_build_output_tests.py'),
+                ('held SDK publication', 'sdk_publication_tests.py'),
+                ('private SDK publication peer', 'sdk_publication_peer_tests.py'),
+                ('immutable SDK publication code', 'sdk_publication_code_tests.py'),
                 ('separate public build create policy', 'build_runtime_create_profile_tests.py'),
                 ('retained source-only entry points', 'retained_source_bootstrap_tests.py'),
                 ('isolated retained Python bootstrap', 'retained_python_isolation_tests.py'),
@@ -817,7 +826,7 @@ class RecoveryCiLayoutTests(unittest.TestCase):
 
     def test_public_build_policy_gates_cannot_be_omitted_duplicated_or_softened(self):
         for executable in ('python', 'python3'):
-            for filename in ('public_build_context_tests.py','public_build_intake_tests.py','public_build_source_peer_tests.py','public_build_output_tests.py'):
+            for filename in ('public_build_context_tests.py','public_build_intake_tests.py','public_build_source_peer_tests.py','public_build_output_tests.py','sdk_publication_tests.py','sdk_publication_peer_tests.py','sdk_publication_code_tests.py'):
                 command = executable + ' -B ./tests/Fleetory.Tools.Tests/' + filename
                 self.refused(self.text.replace(command, 'omitted', 1))
                 self.refused(self.text.replace(command, command + '\n          ' + command, 1))
@@ -830,6 +839,14 @@ class RecoveryCiLayoutTests(unittest.TestCase):
             self.refused(self.text.replace(command, command + '\n          ' + command, 1))
             for option in ('if: false', 'continue-on-error: true'):
                 self.refused(self.text.replace('run: ' + command, option + '\n        run: ' + command, 1))
+
+    def test_pinned_publication_launch_cannot_be_omitted_duplicated_or_softened(self):
+        for executable in ('python', 'python3'):
+            command='./tests/Fleetory.Tools.Tests/PinnedSdkPublicationChild.Tests.ps1 -Python (Get-Command '+executable+').Source'
+            self.refused(self.text.replace(command,'omitted',1))
+            self.refused(self.text.replace(command,command+'\n          '+command,1))
+            for option in ('if: false','continue-on-error: true'):
+                self.refused(self.text.replace('        run: '+command,'        '+option+'\n        run: '+command,1))
 
     def test_original_four_input_purpose_gates_cannot_be_omitted_duplicated_or_softened(self):
         for executable in ('python','python3'):
