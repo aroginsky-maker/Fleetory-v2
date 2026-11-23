@@ -1,5 +1,6 @@
 #requires -Version 7.3
-param([string]$Python='',[ValidateSet('none','after-stores')][string]$FailurePoint='none',[ValidateSet('legacy','v2','v2-retained','v2-retained-coupled','v2-retained-server','v2-retained-historical-server','v2-retained-inflight','v2-retained-restore-inflight','v2-retained-service-use','v2-retained-service-use-loss','v2-retained-service-use-expiry')][string]$Profile='legacy',[switch]$PrivateRuntimeChild,[switch]$OriginalPurpose)
+param([string]$Python='',[ValidateSet('none','after-stores')][string]$FailurePoint='none',[ValidateSet('legacy','v2','v2-retained','v2-retained-coupled','v2-retained-server','v2-retained-historical-server','v2-retained-inflight','v2-retained-restore-inflight','v2-retained-service-use','v2-retained-service-use-loss','v2-retained-service-use-expiry')][string]$Profile='legacy',[switch]$PrivateRuntimeChild,[switch]$OriginalPurpose,[switch]$ControllerLossRehearsal)
+if($ControllerLossRehearsal -and (-not $OriginalPurpose -or $Profile -cne 'v2-retained-service-use' -or ($IsLinux -and -not $PrivateRuntimeChild))){throw 'Controller loss is restricted to the direct generated original-purpose owner.'}
 if($OriginalPurpose -and $Profile -cnotin @('v2-retained-service-use','v2-retained-service-use-loss','v2-retained-service-use-expiry')){throw 'Original purpose is restricted to generated private-use profiles.'}
 $ErrorActionPreference='Stop'
 Set-StrictMode -Version Latest
@@ -20,6 +21,11 @@ $fixture=[Guid]::NewGuid().ToString('D');$root=Join-Path $repo ('artifacts/nativ
 $state=@{Fixture=$fixture;Root=$root;Image=('fleetory-native-pair-'+$fixture.Replace('-','')+':fixture');ImageId=$null;PgImageId=$null;ProbeHash=$null;
     Sides=[Collections.Generic.List[object]]::new();Audits=[Collections.Generic.List[object]]::new();Canaries=[Collections.Generic.List[string]]::new();Tls=$null;GatewayTls=@{};SigningPem=$null}
 $watch=[Diagnostics.Stopwatch]::StartNew();$cleaning=$false;$imageClaimed=$false;$stage='publish';$proof=$null;$lastClass='none';$lastExit=0
+$retainedExternalController=$null
+if($ControllerLossRehearsal){
+    . (Join-Path $repo 'eng/pilot/HistoricalRecoveryInFlight.ps1')
+    . (Join-Path $repo 'eng/pilot/historical/RetainedControllerPipe.ps1')
+}
 $oldBuildKit=$env:DOCKER_BUILDKIT;$env:DOCKER_BUILDKIT='0'
 . (Join-Path $repo 'eng/pilot/historical/RetainedNativeClient.ps1')
 function Pg-Inventory($Side){return Read-PgDataInventory (Pair-Sql $state $Side 'fleetory' $script:inventorySql).StdoutBytes}
@@ -50,6 +56,7 @@ function Restore-Audit{
     $script:auditRestores++
 }
 try{
+    if($ControllerLossRehearsal){$retainedExternalController=New-RetainedControllerPipe $Python $watch}
     $null=New-Item -ItemType Directory -Path $root
     $published=Publish-NativeProbe $repo 'ServerBackendProbe' $root
     $state.ProbeHash=(Get-FileHash -LiteralPath (Join-Path $published 'ServerBackendProbe.dll') -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -190,11 +197,12 @@ try{
         Assert-Pair ($r.ExitCode -ne 0 -and ($r.Stderr+$r.Stdout) -match '(?i)no such (object|image)') 'build-cleanup'
     }catch{$failures+='image'}}
     if(-not $failures.Count){try{Remove-NativePublicPayload $repo $root}catch{$failures+='payload'}}
+    if($null -ne $retainedExternalController){Close-RetainedControllerPipe $retainedExternalController}
     $env:DOCKER_BUILDKIT=$oldBuildKit;if($state.ContainsKey('SigningPems')){$state.SigningPems.Clear()};$state.SigningPem=$state.Tls=$null;$state.GatewayTls.Clear();$state.Canaries.Clear();foreach($s in $state.Sides){$s.Secrets.Clear()};$pg=$audit=$pgCaptured=$auditCaptured=$capture=$captured=$packet=$null;$watch.Stop()
     if($failures.Count){throw 'Native pair owned cleanup unverified; resource ledger retained.'}
     @{schema='fleetory.native-pair-cleanup.v1';fixture=$fixture;cleanupVerified=$true;ids=@($state.Sides|ForEach-Object {$_.Id})+@($state.Audits|ForEach-Object {$_.Id});image=$state.Image;aliases=@($state.Audits|ForEach-Object {$_.Image});originalInputsRead=$false}|ConvertTo-Json -Compress
 }
-if($FailurePoint -ceq 'none'){
+if($FailurePoint -ceq 'none' -and -not $ControllerLossRehearsal){
     $fault=Invoke-NativeBytes ([Environment]::ProcessPath) @('-NoLogo','-NoProfile','-NonInteractive','-File',$PSCommandPath,'-Python',$Python,'-FailurePoint','after-stores','-Profile',$Profile) -TimeoutSeconds 120
     Assert-Pair ($fault.ExitCode -ne 0 -and $fault.Stdout.Contains('PAIR INJECTED FAILURE AFTER STORES') -and $fault.Stderr.Contains('Native Server pair recovery failed.')) 'injected-failure-exit'
     $records=@($fault.Stdout -split '\r?\n'|Where-Object {$_.StartsWith('{')}|ForEach-Object {$_|ConvertFrom-Json -AsHashtable}|Where-Object {$_.schema -ceq 'fleetory.native-pair-cleanup.v1'})

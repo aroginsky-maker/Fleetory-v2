@@ -30,6 +30,16 @@ RETAINED = (
     ('NativeServerPair.Tests.ps1', '-Profile v2-retained-service-use-loss'),
     ('NativeServerPair.Tests.ps1', '-Profile v2-retained-service-use-expiry'))
 ORIGINAL = tuple(('NativeServerPair.Tests.ps1','-Profile '+profile+' -OriginalPurpose') for profile in ('v2-retained-service-use','v2-retained-service-use-loss','v2-retained-service-use-expiry'))
+
+def controller_fault_step(case):
+    label = 'EOF' if case == 'eof' else 'death'
+    return (f'      - name: Verify generated external controller {label} cleanup\n'
+            '        shell: pwsh\n        run: |\n'
+            '          python3 -B ./tests/Fleetory.Tools.Tests/native_controller_loss.py '
+            f'--powershell (Get-Command pwsh).Source --case {case}\n'
+            f"          if ($LASTEXITCODE -ne 0) {{ throw 'Generated external controller {label} cleanup failed.' }}\n")
+
+
 PAIR_ADMISSION = (
     '      - name: Verify coherent native Server pair restore and lifecycle\n'
     '        shell: pwsh\n'
@@ -113,6 +123,14 @@ def validate(text):
             matches = [line for line in commands if line == prefix or line.startswith(prefix + ' -Python ')]
             assert len(matches) == 1, (key, name, profile)
         assert len(commands) == len(cases)
+    for case in ('eof','death'):
+        step=controller_fault_step(case)
+        block=blocks['native-original-recovery']
+        assert block.count(step)==1
+        start=block.index(step)
+        end=block.find('      - name:',start+len(step))
+        assert block[start:end if end>=0 else len(block)].strip()==step.strip()
+        assert text.count('native_controller_loss.py --powershell (Get-Command pwsh).Source --case '+case)==1
     retained = blocks['native-retained-recovery']
     probe_step = ('      - name: Prepare retained Server backend probe\n'
         '        shell: pwsh\n'
@@ -814,6 +832,15 @@ class RecoveryCiLayoutTests(unittest.TestCase):
             command='./tests/Fleetory.Tools.Tests/'+name+' '+profile+' -Python (Get-Command python3).Source'
             self.refused(self.text.replace(command,'omitted',1))
             self.refused(self.text.replace(command,command+'\n          '+command,1))
+
+
+    def test_external_controller_fault_gates_cannot_be_omitted_duplicated_or_softened(self):
+        for case in ('eof','death'):
+            step=controller_fault_step(case)
+            self.refused(self.text.replace(step,''))
+            self.refused(self.text.replace(step,step+step))
+            for option in ('if: false','continue-on-error: true'):
+                self.refused(self.text.replace(step,step.replace('        shell:', '        '+option+'\n        shell:',1)))
 
 
 if __name__ == '__main__':

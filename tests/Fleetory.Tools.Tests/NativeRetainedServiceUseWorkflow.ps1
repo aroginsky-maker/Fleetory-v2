@@ -33,6 +33,7 @@ function Invoke-NativeRetainedServiceUseWorkflow([string]$InputRoot,[hashtable]$
             }
         }
         $hostOptions=@{}
+        if($ControllerLossRehearsal){$hostOptions.ControllerPipe=$retainedExternalController}
         if($OriginalPurpose){
             Assert-Pair ($Metadata.generatedFixtureOnly -and $gates.generatedFixtureOnly) 'original-native-generated-scope'
             . (Join-Path $repo 'eng/pilot/HistoricalAuditInputPins.ps1')

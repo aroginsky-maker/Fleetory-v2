@@ -2,6 +2,10 @@
 # Trusted live owner supplies root/state/watch/cleaning. No CLI or authority is created here.
 function Invoke-Docker([string[]]$Arguments,[byte[]]$InputBytes=$null,[int]$TimeoutSeconds=60,[switch]$AllowFailure,[scriptblock]$ObserveProcess=$null){
     Assert-Pair ($cleaning -or $watch.Elapsed.TotalSeconds -lt 600) 'fixture-deadline'
+    $external=Get-Variable -Name retainedExternalController -ValueOnly -ErrorAction SilentlyContinue
+    $cleanupCommand=$Arguments.Count -gt 0 -and ($Arguments[0] -cin @('inspect','rm') -or
+        ($Arguments[0] -ceq 'image' -and $Arguments.Count -gt 1 -and $Arguments[1] -cin @('inspect','rm')))
+    if($null -ne $external -and -not $cleaning -and -not $cleanupCommand){Assert-RetainedControllerPipe $external}
     $privateConfig=$null
     try{
         if($null -ne $ObserveProcess){

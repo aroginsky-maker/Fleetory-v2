@@ -66,3 +66,40 @@ The PostgreSQL and audit dispatchers supply a literal role and compare the parse
 | psql | 5 profiles: 3 retained databases as postgres, late-refusal postgres probe, exact generated lock statement | 45 changed, missing or extra arguments |
 
 These tests establish command-shape and dispatch regression boundaries. Restore archives are rechecked immediately before native dispatch against a read-only snapshot of the independently validated capture pins, including archive format and size. Synthetic-header tests establish byte/pin binding, not archive restore or source-origin acceptance. Configuration-file and immuadmin-login bytes are also compared at dispatch with the immutable owner configuration. These byte bindings do not authenticate SQL stdin or the original source of passwords/configuration, pin/nonce origin, daemon identity, original PKI, executable/transitive runtime provenance, live custody or independent cleanup. Those requirements retain separate acceptance evidence. Complete executable/command/resource inventory remains open before original backup execution; Phase 7 remains open.
+
+
+### Generated external controller loss
+
+`native_controller_loss.py` runs the existing generated original-purpose native
+fixture in a surviving PowerShell owner. The Python controller owns only its
+stdin write end; stdout/stderr remain connected to the root test harness. The
+owner creates and removes its own PostgreSQL/immudb targets using the same live
+CWT custody and original native client/create replies. No serialized IDs or
+labels become removal authority.
+
+The owner derives its actual OS parent, holds its original process handle and
+birth/image observations, and admits only an opaque one-use pipe context. EOF,
+unexpected input, parent exit or the original owner deadline revoke work;
+neither rearming nor a new clock renews that context. These observations do not
+authenticate the complete controller source/runtime origin.
+
+The native fault is armed only after both recovery targets were created and
+inspected, before native SQL/configuration work. The required Linux native job
+tests EOF and termination of the root harness's actual held controller process.
+The root harness holds a read-only OS observation handle for the owner, verifies
+its terminal exit and independently checks ten exact resource absences, own
+payload removal and preservation of the shared PostgreSQL base image. The owner
+must refuse a late SQL request before dispatch and remove both targets once.
+Portable process contracts also exercise live/EOF/unexpected-byte handling and
+18 context/replay/sticky-loss refusals on Windows and Linux.
+
+The existing 15-minute native job and fixture/native deadlines remain in force.
+Run the focused native checks with `python3 -B
+tests/Fleetory.Tools.Tests/native_controller_loss.py --powershell /path/to/pwsh
+--case eof` and `--case death`, in the existing generated native fixture
+environment. No original backups, retained credentials, PKI, provider or VPS are
+used. This is a pre-work controller-loss rehearsal: active SQL interruption,
+owner/creator death, unknown create outcomes, full original execution inventory,
+original restoration and full-system RPO/RTO remain unverified. In particular,
+`independentCreatorDeathCleanupVerified` and full recovery/Phase 7 flags remain
+false. The existing normal, admission-loss and original-expiry jobs are retained.

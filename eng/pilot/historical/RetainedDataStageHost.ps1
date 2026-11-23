@@ -3,7 +3,7 @@
 function Invoke-RetainedDataStageHost([string]$Repository,[string]$Python,[string]$InputRoot,
     [hashtable]$RawMetadata,[hashtable]$Commitments,[hashtable]$Expected,$AuditPoint,$ImageContext,$Material,
     [ValidateSet('normal','exit-on-request','expire-after-restore')][string]$Mode='normal',
-    [scriptblock]$GeneratedAfterCapture=$null,[hashtable]$OriginalExpected=$null){
+    [scriptblock]$GeneratedAfterCapture=$null,[hashtable]$OriginalExpected=$null,$ControllerPipe=$null){
     if($null -ne $GeneratedAfterCapture){
         $namespace=Split-Path ([IO.Path]::GetFullPath($InputRoot)) -Parent
         $parent=[IO.Path]::GetFullPath((Split-Path $namespace -Parent))
@@ -13,7 +13,12 @@ function Invoke-RetainedDataStageHost([string]$Repository,[string]$Python,[strin
             (Split-Path $namespace -Leaf) -cmatch '^native-pair-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}\z' -and
             (Split-Path $InputRoot -Leaf) -ceq 'retained-inputs') 'retained-host-generated-callback-root'
     }
-    $loss=$Mode -cne 'normal';$expiry=$Mode -ceq 'expire-after-restore'
+    $externalLoss=$null -ne $ControllerPipe
+    if($externalLoss){
+        Assert-ImmuData ($Mode -ceq 'normal' -and $null -ne $GeneratedAfterCapture -and $null -ne $OriginalExpected) 'controller-host-generated-only'
+        Assert-RetainedControllerPipe $ControllerPipe
+    }
+    $loss=$Mode -cne 'normal' -or $externalLoss;$expiry=$Mode -ceq 'expire-after-restore'
     $admission=$null
     try{
         if($null -ne $OriginalExpected){
@@ -34,13 +39,18 @@ function Invoke-RetainedDataStageHost([string]$Repository,[string]$Python,[strin
         Confirm-RetainedServiceUseLive $admission $admission.cancel.Token
         $auditStage=@{ImageContext=$ImageContext;Material=$Material;Point=$AuditPoint;ServerEnabled=$true;Historical=$true;
             AdmissionPeer=$admission;ExpectedConfigurationSha256=$Commitments.configurationSha256;
-            GeneratedAdmissionFault=$loss;GeneratedAdmissionExpiry=$expiry}
+            GeneratedAdmissionFault=($loss -and -not $externalLoss);GeneratedAdmissionExpiry=$expiry}
+        if($externalLoss){$auditStage.ControllerPipe=$ControllerPipe}
         $result=Invoke-RetainedPostgresTarget $Repository $Python $payload $Expected 'complete' $auditStage
-        Assert-ImmuData ($result.verified -and $result.cleanupVerified -and $result.nativePgRestores -eq 2 -and
+        Assert-ImmuData ($result.verified -and $result.cleanupVerified -and $result.nativePgRestores -eq $(if($externalLoss){0}else{2}) -and
             $result.nativeAuditRestored -eq (-not $loss) -and $result.serverStarted -eq (-not $loss) -and
-            $result.runtimeLoginVerified -eq (-not $loss) -and $result.admissionLossAfterPgRestoreVerified -eq $loss -and
+            $result.runtimeLoginVerified -eq (-not $loss) -and $result.admissionLossAfterPgRestoreVerified -eq ($loss -and -not $externalLoss) -and
             $result.ownRemovalCalls -eq 1 -and $result.ownedAuditRemovalCalls -eq 1 -and
             $result.configurationSha256 -ceq $Commitments.configurationSha256) 'retained-host-native-result'
+        if($externalLoss){
+            Assert-ImmuData ($result.externalControllerLossVerified -and $result.nativeWorkDispatches -eq 0 -and
+                $result.externalControllerLateWorkRefusals -eq 1) 'controller-host-no-native-work'
+        }
         if(-not $loss){
             Assert-ImmuData ($result.server.boundedRestartVerified -and $result.server.sameTargetBackendRestartVerified -and
                 $result.server.postgresOutageRefusedBeforeHost -and $result.server.auditOutageRefusedBeforeHost -and
@@ -56,7 +66,8 @@ function Invoke-RetainedDataStageHost([string]$Repository,[string]$Python,[strin
             heldCodeFiles=$admission.codeFiles;heldCodePlanSha256=$admission.codePlanSha256;
             codeLeaseHandoffBound=$true;fullTransitiveExecutionVerified=$false;
             actualChildExitVerified=($admission.closed -or ($loss -and $admission.holder.HasExited -and $admission.holder.ExitCode -ne 0));
-            admissionLossAfterPgRestoreVerified=$loss;
+            admissionLossAfterPgRestoreVerified=($loss -and -not $externalLoss);
+            externalControllerLossVerified=$externalLoss;
             admissionOriginalExpiryVerified=($expiry -and $result.admissionOriginalExpiryMilliseconds -ge 108000);
             ownAuditImageRemovalVerified=$true;gateOriginAuthenticated=$false;nativeResultAuthenticated=$false;
             originalExecutorReady=$false;fullSystemRecoveryVerified=$false;phase7Complete=$false}

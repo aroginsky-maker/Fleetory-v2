@@ -116,3 +116,6 @@ Write-Output 'NATIVE PROCESS OBSERVATION PASS:7 native cases and 8 exec-purpose 
 & (Join-Path $PSScriptRoot 'NativeProfileForwarding.Tests.ps1') -Python $Python
 
 & (Join-Path $PSScriptRoot 'RetainedDispatchTarget.Tests.ps1')
+
+& $Python -B (Join-Path $PSScriptRoot 'retained_controller_pipe_contract.py') --repository (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) --powershell ([Environment]::ProcessPath)
+if($LASTEXITCODE -ne 0){throw 'Retained controller pipe contract failed.'}

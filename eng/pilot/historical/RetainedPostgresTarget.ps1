@@ -51,6 +51,8 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
     $meter=@{restores=0;sql=0;remove=0;auditRemove=0;copiedClaimsRefused=0;removeReplayRefused=$false;bootstrapped=$false;
         nativeDispatches=0;workInspections=0;controllerLossObserved=$false;workLossProof=$null;configurationWrites=0;configurationDriftRefusals=0;configurationReadonlyRefusals=0}
     foreach($entry in @{schemaRestores=0;dataRestoreAttempts=0;restoreLockVerified=$false;processObservationChecks=0;inflightPending=$false;inflightObserved=$false;inflightObservationCalls=0;inflightObserver=$null;inflightBirth=$null;inflightNativePid=0;inflightClientExited=$false;lateWorkRefusals=0}.GetEnumerator()){$meter[$entry.Key]=$entry.Value}
+    $externalController=if($null -ne $AuditStage -and $AuditStage.ContainsKey('ControllerPipe')){$AuditStage.ControllerPipe}else{$null}
+    $meter.externalLoss=$false;$meter.externalLateWorkRefusals=0;$meter.externalSnapshot=$null
     $clock=[Diagnostics.Stopwatch]::StartNew();$inventories=@{}
     function New-IndependentControllerStart([string]$ModeFlow,[string]$Mode){
         $start=New-HistoricalChildStart $comparisonPython
@@ -69,6 +71,7 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
         return $identifier
     }
     function Confirm-RetainedLiveWork([Threading.CancellationToken]$Token=$peer.cancel.Token){
+        if($null -ne $externalController){Assert-RetainedControllerPipe $externalController}
         if($null -ne $AuditStage -and $AuditStage.ContainsKey('AdmissionPeer')){Confirm-RetainedServiceUseLive $AuditStage.AdmissionPeer $Token}
         Assert-ImmuData ($clock.Elapsed.TotalSeconds -lt 75 -and $null -ne $peer -and -not $peer.holder.HasExited -and
             $peer.workAdmitted -and $peer.workRequests -eq 1 -and -not $peer.expiredLiveCleanup -and $peer.workStatusRequests -lt 256) 'retained-work-window'
@@ -204,6 +207,13 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
             catch [InvalidOperationException]{$meter.copiedClaimsRefused++;continue}
             throw 'Copied PostgreSQL resource claim accepted.'
         }
+        if($null -ne $externalController){
+            Assert-ImmuData ($Flow -ceq 'complete' -and $serverEnabled -and $null -ne $auditStore) 'controller-target-generated-scope'
+            Arm-RetainedControllerPipe $externalController $plan.nonce
+            $lossWatch=[Diagnostics.Stopwatch]::StartNew()
+            while($lossWatch.ElapsedMilliseconds -lt 5000){Assert-RetainedControllerPipe $externalController;Start-Sleep -Milliseconds 25}
+            throw 'External controller fault was not observed within readiness budget.'
+        }
         $commitment=[Text.Encoding]::UTF8.GetBytes(($plan.nonce,$context.ImageId,$identifier,$capturePin,
             $Payload.packetSha256['application-postgres'],$Payload.packetSha256['signer-postgres'],
             ($Expected|ConvertTo-Json -Depth 20 -Compress),
@@ -307,7 +317,20 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
             }
         }
     }catch{
-        if($meter.ContainsKey('admissionLossVerified') -and $meter.admissionLossVerified){
+        if($null -ne $externalController){
+            if($_.Exception.GetBaseException() -isnot [OperationCanceledException]){throw}
+            $meter.externalSnapshot=Get-RetainedControllerPipeSnapshot $externalController
+            Assert-ImmuData ($meter.externalSnapshot.lossObserved -and $meter.restores -eq 0 -and
+                $meter.nativeDispatches -eq 0 -and $null -eq $auditProof -and $null -eq $serverProof) 'controller-target-loss-before-work'
+            try{
+                $null=Invoke-RetainedPgNative @('exec','-i',$identifier,'psql','-XqAt','-U','postgres','-d','postgres') ([Text.Encoding]::UTF8.GetBytes('SELECT 1;'))
+            }catch{
+                if($_.Exception.GetBaseException() -isnot [OperationCanceledException]){throw}
+                $meter.externalLateWorkRefusals++
+            }
+            Assert-ImmuData ($meter.externalLateWorkRefusals -eq 1 -and $meter.nativeDispatches -eq 0) 'controller-target-late-work-refused'
+            $meter.externalLoss=$true
+        }elseif($meter.ContainsKey('admissionLossVerified') -and $meter.admissionLossVerified){
             Assert-ImmuData ($_.Exception.Message -ceq 'retained-service-admission-lost-native-refused' -and
                 $meter.restores -eq 2 -and $null -eq $auditProof -and $null -eq $serverProof -and
                 $meter.nativeDispatches -eq $meter.admissionLossDispatches -and
@@ -317,7 +340,7 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
             Confirm-RetainedInterruptedNative
         }elseif($Flow -cne 'inspection-exit' -or -not $meter.controllerLossObserved -or $meter.nativeDispatches -ne 0 -or
             $meter.workInspections -ne 1 -or $_.Exception.GetBaseException() -isnot [InvalidOperationException]){throw}
-        $proof=$meter.workLossProof
+        $proof=if($meter.externalLoss){$meter.externalSnapshot}else{$meter.workLossProof}
     }finally{
         try{Close-HistoricalRecoveryCoordinator $peer}finally{
             if($null-ne$store.Id){Remove-OwnedHistoricalResources}
@@ -342,6 +365,8 @@ function Invoke-RetainedPostgresTarget([string]$Repository,[string]$Python,[hash
         admissionOriginalExpiryMilliseconds=$(if($meter.ContainsKey('admissionExpiryMilliseconds')){$meter.admissionExpiryMilliseconds}else{0});
         copiedClaimsRefused=$meter.copiedClaimsRefused;cleanupVerified=$true;ownRemovalCalls=$meter.remove;baseImageRemoved=$false;
         removalReplayRefusedBeforeNativeCall=$true;baseImageId=$context.ImageId;unknownCreateOutcomeRecoveryVerified=$false;
+        externalControllerLossVerified=$meter.externalLoss;externalControllerObservation=$meter.externalSnapshot;
+        externalControllerLateWorkRefusals=$meter.externalLateWorkRefusals;
         independentCreatorDeathCleanupVerified=$false;runtimeLoginVerified=($null -ne $serverProof);nativeAuditRestored=($null -ne $auditProof);serverStarted=($null -ne $serverProof);server=$serverProof;
         audit=$auditProof;auditContainerId=$(if($null -ne $auditStore){$auditStore.Id}else{$null});ownedAuditRemovalCalls=$meter.auditRemove;
         nativeWorkDispatches=$meter.nativeDispatches;runtimeWorkInspections=$meter.workInspections;
