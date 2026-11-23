@@ -76,3 +76,16 @@ prerequisites and does not rely on another job's cache. The aggregate requires
 this eighth execution job; the existing verification commands and deadlines
 remain required. Generated publication fault evidence does not establish
 original-service recovery, independent custody or Phase 7 completion.
+
+
+CI #448 completed the six preceding retained Server scenarios, then exhausted
+that job's unchanged15-minute budget during the retained-entry original-clock
+expiry scenario. The cancelled scenario is not accepted as passing. Its exact
+command, including the absence of `-OriginalPurpose`, now runs once in the
+existing original-purpose job. That job also retains its three separate
+`-OriginalPurpose` profiles and all three external controller fault cases.
+Both native jobs keep15 minutes and the same independent pinned prerequisites;
+all eight execution jobs remain mandatory. The move preserves the distinct
+entry/policy coverage and108-second expiry test. Layout tests reject omission,
+duplication, the wrong job or a softened step; no runtime, timeout, coverage,
+budget or visibility gate is relaxed.

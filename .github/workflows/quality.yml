@@ -1302,10 +1302,6 @@ jobs:
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/NativeServerPair.Tests.ps1 -Profile v2-retained-service-use-loss -Python (Get-Command python3).Source
 
-      - name: Verify original admission expiry and owned cleanup
-        shell: pwsh
-        run: ./tests/Fleetory.Tools.Tests/NativeServerPair.Tests.ps1 -Profile v2-retained-service-use-expiry -Python (Get-Command python3).Source
-
   native-original-recovery:
     name: Native original-purpose recovery
     runs-on: ubuntu-24.04
@@ -1353,6 +1349,10 @@ jobs:
       - name: Verify original-purpose native original expiry
         shell: pwsh
         run: ./tests/Fleetory.Tools.Tests/NativeServerPair.Tests.ps1 -Profile v2-retained-service-use-expiry -OriginalPurpose -Python (Get-Command python3).Source
+
+      - name: Verify original admission expiry and owned cleanup
+        shell: pwsh
+        run: ./tests/Fleetory.Tools.Tests/NativeServerPair.Tests.ps1 -Profile v2-retained-service-use-expiry -Python (Get-Command python3).Source
 
       - name: Verify generated external controller EOF cleanup
         shell: pwsh

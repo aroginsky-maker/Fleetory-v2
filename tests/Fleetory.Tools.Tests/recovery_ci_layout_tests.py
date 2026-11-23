@@ -28,9 +28,8 @@ RETAINED = (
     ('NativeServerPair.Tests.ps1', '-Profile v2-retained-inflight'),
     ('NativeServerPair.Tests.ps1', '-Profile v2-retained-restore-inflight'),
     ('NativeServerPair.Tests.ps1', '-Profile v2-retained-service-use'),
-    ('NativeServerPair.Tests.ps1', '-Profile v2-retained-service-use-loss'),
-    ('NativeServerPair.Tests.ps1', '-Profile v2-retained-service-use-expiry'))
-ORIGINAL = tuple(('NativeServerPair.Tests.ps1','-Profile '+profile+' -OriginalPurpose') for profile in ('v2-retained-service-use','v2-retained-service-use-loss','v2-retained-service-use-expiry'))
+    ('NativeServerPair.Tests.ps1', '-Profile v2-retained-service-use-loss'))
+ORIGINAL = tuple(('NativeServerPair.Tests.ps1','-Profile '+profile+' -OriginalPurpose') for profile in ('v2-retained-service-use','v2-retained-service-use-loss','v2-retained-service-use-expiry')) + (('NativeServerPair.Tests.ps1','-Profile v2-retained-service-use-expiry'),)
 
 PUBLICATION_IMAGE_PROGRAM = "import subprocess,sys;sys.path.insert(0,'eng/pilot');import recovery_isolation;subprocess.run(['docker','pull',recovery_isolation.IMAGE],check=True,timeout=120)"
 PUBLICATION_IMAGE_PREP = '      - name: Prepare pinned public publication base\n        shell: pwsh\n        run: |\n          python3 -B -c "import subprocess,sys;sys.path.insert(0,\'eng/pilot\');import recovery_isolation;subprocess.run([\'docker\',\'pull\',recovery_isolation.IMAGE],check=True,timeout=120)"\n          if ($LASTEXITCODE -ne 0) { throw \'Pinned public publication base preparation failed.\' }\n\n'
@@ -852,6 +851,21 @@ class RecoveryCiLayoutTests(unittest.TestCase):
             command='./tests/Fleetory.Tools.Tests/'+name+' '+profile+' -Python (Get-Command python3).Source'
             self.refused(self.text.replace(command,'omitted',1))
             self.refused(self.text.replace(command,command+'\n          '+command,1))
+
+
+    def test_retained_entry_expiry_is_required_once_in_original_job_without_softening(self):
+        step=('      - name: Verify original admission expiry and owned cleanup\n'
+              '        shell: pwsh\n'
+              '        run: ./tests/Fleetory.Tools.Tests/NativeServerPair.Tests.ps1 -Profile v2-retained-service-use-expiry -Python (Get-Command python3).Source\n\n')
+        blocks=jobs(self.text)
+        self.assertEqual(blocks['native-original-recovery'].count(step),1)
+        self.assertNotIn(step,blocks['native-retained-recovery'])
+        self.refused(self.text.replace(step,''))
+        self.refused(self.text.replace(step,step+step))
+        marker='      - name: Verify frozen retained PostgreSQL audit and strict Server lifecycle\n'
+        self.refused(self.text.replace(step,'').replace(marker,step+marker))
+        for option in ('if: false','continue-on-error: true'):
+            self.refused(self.text.replace(step,step.replace('        shell:', '        '+option+'\n        shell:',1)))
 
 
     def test_external_controller_fault_gates_cannot_be_omitted_duplicated_or_softened(self):
