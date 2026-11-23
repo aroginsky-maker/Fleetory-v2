@@ -70,9 +70,14 @@ function Invoke-PublicBuildSdkTransaction($NativeClient,$ImageContext,$ImageClie
             Start-Sleep -Milliseconds 500
         }
         Assert-SdkController
-        $archive=& $client @('exec',$id,'/usr/bin/tar','-C','/work/output','-cf','-','.') $null
-        if($archive.Item1 -ne 0 -or $archive.Item2.Length -eq 0 -or $archive.Item2.Length -gt 67108864){throw 'Public SDK output refused.'}
-        $output=[byte[]]$archive.Item2.Clone()
+        $capture=[Func[Tuple[int,byte[],byte[]]]]{& $client @('exec',$id,'/usr/bin/tar','-C','/work/output','-cf','-','.') $null}
+        $capturedController=$ControllerAlive
+        $stillAlive={
+            $values=@(& $capturedController)
+            return ($values.Count -eq 1 -and $values[0] -is [bool] -and $values[0])
+        }.GetNewClosure()
+        $output=[Fleetory.Pilot.PublicSdkOutputLease]::Capture($ImageContext,$ImageClient,$stack,$store,$client,
+            [Func[bool]]$stillAlive,$clock,$capture)
         Assert-SdkController
         $released=& $client @('exec',$id,'/bin/sh','-c','printf x > /work/release') $null
         if($released.Item1 -ne 0 -or $released.Item2.Length -ne 0 -or $released.Item3.Length -ne 0){throw 'Public SDK release refused.'}
@@ -112,6 +117,6 @@ function Invoke-PublicBuildSdkTransaction($NativeClient,$ImageContext,$ImageClie
         }
         $clock.Stop()
     }
-    return @{schema='fleetory.public-sdk-build.v1';containerClosed=$true;outputArchive=$output;
-        outputBytes=$output.Length;originalInputsRead=$false;phase7Complete=$false}
+    $output.Complete()
+    return $output
 }

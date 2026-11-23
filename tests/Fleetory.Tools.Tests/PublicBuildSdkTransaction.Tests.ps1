@@ -4,8 +4,13 @@ Set-StrictMode -Version Latest
 . (Join-Path $PSScriptRoot '../../eng/pilot/PublicBuildSdkTransaction.ps1')
 $script:checks=0
 function Check($Value,$Name){if(-not $Value){throw $Name};$script:checks++}
+function Handoff-Refused([scriptblock]$Operation,$Name){
+    $failed=$false
+    try{& $Operation}catch{$failed=$true}
+    Check $failed $Name
+}
 $image='sha256:'+('b'*64);$script:testContainerId='c'*64;$session=[guid]::NewGuid().ToString('D')
-foreach($fault in @('none','controller-loss','exit-code','root','memory','network','mount','environment','capability','label','workdir','command','create-unknown','remove-unknown','core-limit','pid-mode','device-request','unexpected-mount')){
+foreach($fault in @('none','late-controller-loss','late-image-drift','copied-result','output-empty','output-stderr','output-error','controller-loss','exit-code','root','memory','network','mount','environment','capability','label','workdir','command','create-unknown','remove-unknown','core-limit','pid-mode','device-request','unexpected-mount')){
     $script:model=@{Fault=$fault;Created=0;Started=0;Removed=0;Inspected=0;Copied=0;Gone=$false;Released=$false}
     $c=@{Fixture=[guid]::NewGuid().ToString('D');Root='public';ImageName='public';SourceContextSha256=('a'*64);SdkImage='sdk';ImageId=$null;ImageClaimed=$false}
     $imageClient={}
@@ -20,7 +25,13 @@ foreach($fault in @('none','controller-loss','exit-code','root','memory','networ
             'cp' {$m.Copied++;$text='generated output archive placeholder'}
             'logs' {$text='generated SDK log fixture'}
             'exec' {
-                if($Arguments[2] -ceq '/usr/bin/tar'){$m.Copied++;$text='generated output archive placeholder';break}
+                if($Arguments[2] -ceq '/usr/bin/tar'){
+                    $m.Copied++;$text='generated output archive placeholder'
+                    if($m.Fault -ceq 'output-empty'){$text=''}
+                    if($m.Fault -ceq 'output-stderr'){$errorText='unexpected tar diagnostic'}
+                    if($m.Fault -ceq 'output-error'){$exit=1}
+                    break
+                }
                 if($Arguments[4] -ceq 'printf x > /work/release'){$m.Released=$true}
             }
             'inspect' {
@@ -54,17 +65,43 @@ foreach($fault in @('none','controller-loss','exit-code','root','memory','networ
             }
             default {throw 'Unmodeled command'}
         }
-        return [Tuple]::Create($exit,[Text.Encoding]::UTF8.GetBytes($text),[Text.Encoding]::UTF8.GetBytes($errorText))
+        $buffer=[Text.Encoding]::UTF8.GetBytes($text)
+        if($Arguments[0] -ceq 'exec' -and $Arguments[2] -ceq '/usr/bin/tar'){$script:outputReplyBuffer=$buffer}
+        return [Tuple]::Create($exit,$buffer,[Text.Encoding]::UTF8.GetBytes($errorText))
     }
     $bind={param($Context,$Client) Check ([Fleetory.Pilot.PublicBuildImageCustody]::Id($Context,$Client) -ceq $image) 'original-live-image-required';return $session}
     $alive={return -not ($script:model.Fault -ceq 'controller-loss' -and $script:model.Started -eq 1)}
     $failed=$false;$failureData=$null
-    try{$result=Invoke-PublicBuildSdkTransaction @{Invoke=$native;BindSdk=$bind} $c $imageClient $alive {param($ContainerId) Check ($ContainerId -ceq $script:testContainerId) 'original-ready-id'}}catch{$failed=$true;$failureData=$_.Exception.Data['PublicSdkDiagnostic'];if($fault -ceq 'none'){throw}}
-    Check ($failed -eq ($fault -cne 'none')) ('result-'+$fault)
+    $positive=$fault -cin @('none','late-controller-loss','late-image-drift','copied-result')
+    try{$result=Invoke-PublicBuildSdkTransaction @{Invoke=$native;BindSdk=$bind} $c $imageClient $alive {param($ContainerId) Check ($ContainerId -ceq $script:testContainerId) 'original-ready-id'}}catch{$failed=$true;$failureData=$_.Exception.Data['PublicSdkDiagnostic'];if($positive){throw}}
+    Check ($failed -eq (-not $positive)) ('result-'+$fault)
     Check ($model.Created -eq 1) 'single-container-create'
     Check ($model.Removed -eq $(if($fault -ceq 'create-unknown'){0}else{1})) 'sole-owned-removal'
-    if($fault -ceq 'none'){Check ($result.containerClosed -and $result.outputBytes -gt 0) 'output-held-after-own-cleanup'}
-    else{Check ($model.Copied -eq $(if($fault -ceq 'remove-unknown'){1}else{0})) 'no-output-after-refusal'}
+    if($positive){
+        Check ($result -is [Fleetory.Pilot.PublicSdkOutputLease] -and $result.IsClosed() -and $result.GetByteCount() -gt 0) 'opaque-output-after-own-cleanup'
+        Check ($result.GetType().GetConstructors().Count -eq 0) 'no-public-result-constructor'
+        Handoff-Refused {$result.Complete()} 'sdk-output-completion-no-replay'
+        if($fault -ceq 'late-controller-loss'){
+            $model.Fault='controller-loss'
+            Handoff-Refused {$null=$result.Take()} 'controller-loss-before-intake-refused'
+            $model.Fault='none'
+        }elseif($fault -ceq 'late-image-drift'){
+            $saved=$c.SourceContextSha256;$c.SourceContextSha256='f'*64
+            Handoff-Refused {$null=$result.Take()} 'image-context-drift-before-intake-refused'
+            $c.SourceContextSha256=$saved
+        }else{
+            if($fault -ceq 'copied-result'){
+                $copy=$result|ConvertTo-Json|ConvertFrom-Json
+                Check ($copy -isnot [Fleetory.Pilot.PublicSdkOutputLease]) 'serialized-result-has-no-type-or-grant'
+                Handoff-Refused {$null=$copy.Take()} 'copied-metadata-no-intake-api'
+            }
+            $script:outputReplyBuffer[0]=88
+            $raw=$result.Take()
+            Check ([Text.Encoding]::UTF8.GetString($raw) -ceq 'generated output archive placeholder') 'exact-original-sdk-reply-snapshot'
+        }
+        Handoff-Refused {$null=$result.Take()} 'sdk-output-take-single-use-even-after-refusal'
+    }
+    else{Check ($model.Copied -eq $(if($fault -cin @('remove-unknown','output-empty','output-stderr','output-error')){1}else{0})) 'no-output-after-refusal'}
     if($fault -ceq 'exit-code'){
         Check ($failureData.state -ceq 'exited' -and $failureData.exitCode -eq 1 -and -not $failureData.logReadFailed -and
             [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($failureData.stdoutTailBase64)) -ceq 'generated SDK log fixture') 'failure-diagnostic-retained-before-cleanup'

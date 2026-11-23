@@ -251,3 +251,31 @@ authenticate the initial Docker hash or historical release inputs, or admit any
 original backup, retained secret or PKI. The SDK output/owner handoff and complete
 runtime inventory remain open. Generated boundary replies and actual native
 process tests are reported separately from a complete SDK/Server recovery run.
+
+## One-use SDK reply handoff and closed archive bytes
+
+The SDK transaction returns a PublicSdkOutputLease rather than an outputArchive
+hashtable. Capture invokes the original fixed tar operation under the original
+live image/container/client custody, snapshots the complete reply and consumes
+that capture attempt before I/O. Complete requires confirmed SDK removal. Take
+requires the same live image/controller and the original remaining SDK deadline;
+it consumes the result even after refusal, copies its bytes once and clears the
+held buffer. Image cleanup ends intake authority. Neither JSON nor a reconstructed
+ID can import this lease. The owner must consume it inside the original image
+callback before that image transaction closes.
+
+The separate output byte policy accepts only bounded flat ordinary DLL/JSON/PDB
+files, rejects links/extensions/aliases/checksum or padding damage/concatenated
+streams, and validates the pinned net10 runtime configuration and closed JSON.
+It preserves the SDK 64-MiB archive and target 15-MiB content ceilings. Permission
+metadata is discarded: the existing target context writes ordinary files as0644.
+These pure bytes confer no runtime or cleanup authority. Both OS workflow entries
+require the archive policy tests without new jobs, weaker gates or larger limits.
+
+Portable SDK reply tests use modeled native responses; the retained prototype
+also exercised a real SDK build of frozen public92e036a sources and independent
+owned-resource absences. That is not current-source release provenance. The
+actual source-child to SDK to held publication/native-owner integration and host
+Publish-NativeProbe replacement remain open, as do historical release/config/key
+continuity and full recovery. Original backups/secrets/PKI remain outside this
+change; no Phase7 closure or production readiness is inferred.

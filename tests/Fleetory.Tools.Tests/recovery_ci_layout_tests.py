@@ -220,6 +220,7 @@ def validate(text):
                 ('live public build input capture', 'public_build_intake_tests.py'),
                 ('private public build source peer', 'public_build_source_peer_tests.py'),
                 ('closed public SDK context', 'public_build_context_tests.py'),
+                ('closed public SDK output archive', 'public_build_output_tests.py'),
                 ('separate public build create policy', 'build_runtime_create_profile_tests.py'),
                 ('retained source-only entry points', 'retained_source_bootstrap_tests.py'),
                 ('isolated retained Python bootstrap', 'retained_python_isolation_tests.py'),
@@ -816,7 +817,7 @@ class RecoveryCiLayoutTests(unittest.TestCase):
 
     def test_public_build_policy_gates_cannot_be_omitted_duplicated_or_softened(self):
         for executable in ('python', 'python3'):
-            for filename in ('public_build_context_tests.py','public_build_intake_tests.py','public_build_source_peer_tests.py'):
+            for filename in ('public_build_context_tests.py','public_build_intake_tests.py','public_build_source_peer_tests.py','public_build_output_tests.py'):
                 command = executable + ' -B ./tests/Fleetory.Tools.Tests/' + filename
                 self.refused(self.text.replace(command, 'omitted', 1))
                 self.refused(self.text.replace(command, command + '\n          ' + command, 1))

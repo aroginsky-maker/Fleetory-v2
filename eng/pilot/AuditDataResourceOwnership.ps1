@@ -118,6 +118,77 @@ namespace Fleetory.Pilot {
         public static void Absent(System.Collections.IDictionary context, object client) => Core.Absent(context,client);
         public static void ConfirmRemoval(System.Collections.IDictionary context, object client, Func<Tuple<int,byte[],byte[]>> operation) => Core.ConfirmRemoval(context,client,operation);
     }
+    // Trusted native worker only. A serialized result is never an import grant.
+    public sealed class PublicSdkOutputLease : IDisposable {
+        private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<object,object> Attempts=new();
+        private readonly System.Collections.IDictionary imageContext, stack, store;
+        private readonly object imageClient, sdkClient;
+        private readonly Func<bool> alive;
+        private readonly int process=Environment.ProcessId, thread=Environment.CurrentManagedThreadId;
+        private readonly long capturedAt=System.Diagnostics.Stopwatch.GetTimestamp();
+        private readonly double priorSeconds;
+        private readonly string image, container;
+        private byte[] bytes;
+        private bool complete, consumed, disposed;
+        private static void Require(bool value) {
+            if(!value) throw new InvalidOperationException("Public SDK output handoff refused.");
+        }
+        private PublicSdkOutputLease(System.Collections.IDictionary sourceImage,object sourceClient,
+            System.Collections.IDictionary sdkStack,System.Collections.IDictionary sdkStore,object nativeClient,
+            Func<bool> controller,System.Diagnostics.Stopwatch originalAge) {
+            Require(sourceImage!=null && sourceClient!=null && sdkStack!=null && sdkStore!=null && nativeClient!=null &&
+                controller!=null && originalAge!=null && originalAge.IsRunning);
+            imageContext=sourceImage;imageClient=sourceClient;stack=sdkStack;store=sdkStore;sdkClient=nativeClient;alive=controller;
+            priorSeconds=originalAge.Elapsed.TotalSeconds;
+            image=PublicBuildImageCustody.Id(imageContext,imageClient);
+            Require(Equals(stack["ImageId"],image) && Equals(stack["LifetimeSeconds"],300) && Equals(store["Role"],"public-sdk"));
+            container=AuditContainerCustody.Id(stack,store,sdkClient);
+            Check();
+        }
+        private void Check() {
+            Require(!disposed && process==Environment.ProcessId && thread==Environment.CurrentManagedThreadId &&
+                alive!=null && priorSeconds>=0 &&
+                priorSeconds+System.Diagnostics.Stopwatch.GetElapsedTime(capturedAt).TotalSeconds<310);
+            Require(alive() && PublicBuildImageCustody.Id(imageContext,imageClient)==image);
+        }
+        public static PublicSdkOutputLease Capture(System.Collections.IDictionary image,object imageClient,
+            System.Collections.IDictionary stack,System.Collections.IDictionary store,object sdkClient,
+            Func<bool> controller,System.Diagnostics.Stopwatch originalAge,Func<Tuple<int,byte[],byte[]>> operation) {
+            Require(operation!=null);
+            var value=new PublicSdkOutputLease(image,imageClient,stack,store,sdkClient,controller,originalAge);
+            // Consume before the operation, including truncated/error replies. Never retry by ID.
+            Require(!Attempts.TryGetValue(store,out _));Attempts.Add(store,new object());
+            var reply=AuditNativeReply.Hold(operation());
+            value.Check();
+            Require(AuditContainerCustody.Id(stack,store,sdkClient)==value.container &&
+                reply.Item1==0 && reply.Item2.Length>0 && reply.Item2.Length<=67108864 && reply.Item3.Length==0);
+            value.bytes=reply.Item2; // Already a private complete-reply snapshot.
+            return value;
+        }
+        public void Complete() {
+            Check();
+            Require(!complete && !consumed && bytes!=null && AuditContainerCustody.Closed(stack,store,sdkClient));
+            complete=true;
+        }
+        public int GetByteCount() {Check();Require(complete && !consumed && bytes!=null);return bytes.Length;}
+        public bool IsClosed() {Check();Require(complete && !consumed);return AuditContainerCustody.Closed(stack,store,sdkClient);}
+        public byte[] Take() {
+            Require(!consumed);consumed=true; // Failed or premature acceptance also consumes this result.
+            byte[] result=null;
+            try {
+                Check();
+                Require(complete && bytes!=null && AuditContainerCustody.Closed(stack,store,sdkClient));
+                result=(byte[])bytes.Clone();Check();return result;
+            }
+            catch {if(result!=null)Array.Clear(result,0,result.Length);throw;}
+            finally {Dispose();}
+        }
+        public void Dispose() {
+            if(disposed)return;disposed=true;
+            if(bytes!=null){Array.Clear(bytes,0,bytes.Length);bytes=null;}
+        }
+    }
+
     public static class PublicBuildImageCustody {
         private static readonly AuditImageCustodyCore Core=new(67108864,new string[] {"Fixture","Root","ImageName","SourceContextSha256","SdkImage"});
         public static bool Attempted(System.Collections.IDictionary context) => Core.Attempted(context);
